@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<ruleset xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="Stripe Terminal for WooCommerce" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/squizlabs/PHP_CodeSniffer/master/phpcs.xsd">
+	<!-- See https://github.com/squizlabs/PHP_CodeSniffer/wiki/Annotated-ruleset.xml -->
+	<!-- See https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards -->
+	<!-- See https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards/blob/develop/WordPress-Core/ruleset.xml -->
+
+	<description>Stripe Terminal for WooCommerce Rule Set.</description>
+
+	<!-- What to scan -->
+	<file>vendor/autoload.php</file>
+	<file>stripe-terminal-for-woocommerce.php</file>
+	<file>includes/</file>
+
+	<!-- sniff PHP -->
+	<arg name="extensions" value="php/PHP"/>
+
+	<!-- Show sniff codes in all reports, and progress when running -->
+	<arg value="snp"/>
+	<arg name="colors"/>
+	<arg name="basepath" value="."/>
+	<arg name="parallel" value="20"/>
+
+	<!-- Exclude paths -->
+	<exclude-pattern>*/dev/*</exclude-pattern>
+	<exclude-pattern>*/node_modules/*</exclude-pattern>
+	<exclude-pattern>*/local-config\.php</exclude-pattern>
+	<exclude-pattern>*/vendor/*</exclude-pattern>
+
+	<config name="minimum_supported_wp_version" value="5.2.2"/>
+
+	<!-- @see https://github.com/PHPCompatibility/PHPCompatibility#using-a-custom-ruleset -->
+	<config name="testVersion" value="7.3-"/>
+	<!-- @see https://github.com/PHPCompatibility/PHPCompatibilityWP#how-to-use -->
+	<rule ref="PHPCompatibilityWP"/>
+
+	<!-- Include WordPress Standards -->
+	<rule ref="WordPress-Extra" />
+	<rule ref="WordPress-Docs" />
+
+	<!-- Exclude Specific Rules -->
+	<exclude name="Squiz.Commenting.InlineComment.InvalidEndChar" />
+
+	<!-- Let's also check that everything is properly documented. -->
+	<rule ref="WordPress-Docs"/>
+
+	<!-- Add in some extra rules from other standards. -->
+	<rule ref="Generic.Commenting.Todo"/>
+
+	<!-- wp_verify_nonce() handles casting on its own and does not need extra overhead -->
+	<rule ref="WordPress.Security.ValidatedSanitizedInput">
+		<properties>
+			<property name="customUnslashingSanitizingFunctions" type="array">
+				<element value="wp_verify_nonce"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.Files.FileName">
+		<properties>
+			<property name="strict_class_file_names" value="false"/>
+		</properties>
+		<exclude name="WordPress.Files.FileName.NotHyphenatedLowercase"/>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="stripe_terminal_woocommerce_"/>
+				<element value="STWC"/>
+				<element value="WCPOS\WooCommercePOS"/>
+			</property>
+		</properties>
+	</rule>
+
+	<!-- Translations -->
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="stripe-terminal-for-woocommerce"/>
+				<!-- Sometimes piggy-backing on WooCommerce & WordPress translations -->
+				<element value="woocommerce"/>
+				<element value="wordpress"/>
+			</property>
+		</properties>
+	</rule>
+
+</ruleset>
