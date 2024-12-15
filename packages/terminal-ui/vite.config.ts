@@ -1,26 +1,26 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   build: {
-    outDir: '../../assets', // Output directly to the `/assets` folder
-    sourcemap: true, // Include sourcemaps for debugging
-    emptyOutDir: true, // Clean the `/assets` folder before each build
+    outDir: mode === 'production' ? '../../assets' : 'dist', // Output to `/assets` for production, `dist` for dev builds
+    sourcemap: mode !== 'production', // Enable sourcemaps in non-production mode
+    emptyOutDir: true, // Clean output directory before builds
     rollupOptions: {
       input: './src/main.tsx',
       output: {
-        format: 'iife', // Immediately Invoked Function Expression for browser compatibility
-        entryFileNames: 'js/main.js', // Place JavaScript in `/assets/js/`
-        chunkFileNames: 'js/[name]-[hash].js', // Additional chunks in `/assets/js/`
-        assetFileNames: 'css/[name][extname]', // Place CSS in `/assets/css/`
+        format: 'iife', // Browser-compatible format for production
+        entryFileNames: 'js/main.js', // JavaScript file location
+        chunkFileNames: 'js/[name]-[hash].js', // Additional chunks
+        assetFileNames: 'css/[name][extname]', // CSS file location
       },
     },
   },
   server: {
-    port: 5173,
+    port: 5173, // Use this port for the dev server
     fs: {
-      allow: ['..'], // Allow serving files from parent directories
+      allow: ['..'], // Allow accessing files outside the project root
     },
   },
-});
+}));

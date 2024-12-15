@@ -1,13 +1,17 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+	<head>
+		<meta charset="UTF-8" />
+		<link rel="icon" type="image/svg+xml" href="/vite.svg" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Stripe Terminal for WooCommerce</title>
+		<script src="https://js.stripe.com/terminal/v1/"></script>
+	</head>
+	<body>
+		<div id="stripe-terminal-app"></div>
+		<script id="stripe-terminal-js-extra">
+			var stwcConfig = { restUrl: 'https:\/\/wc-82.local\/wp-json\/stripe-terminal\/v1' };
+		</script>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
 </html>

@@ -39,10 +39,36 @@ class API {
 	 *
 	 * @return \WP_REST_Response|\WP_Error
 	 */
+	/**
+	 * Get a connection token
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
 	public static function get_connection_token() {
 		try {
+			// Load the gateway instance correctly via WooCommerce.
+			$gateways = WC()->payment_gateways()->payment_gateways();
+			$stripe_gateway = isset( $gateways['stripe_terminal_for_woocommerce'] ) ? $gateways['stripe_terminal_for_woocommerce'] : null;
+
+			if ( ! $stripe_gateway ) {
+				throw new \Exception( 'Stripe Terminal gateway is not enabled.' );
+			}
+
+			// Retrieve the API key from the gateway settings.
+			$api_key = $stripe_gateway->get_option( 'api_key' );
+
+			if ( empty( $api_key ) ) {
+				throw new \Exception( 'Stripe API key is not set. Please configure the gateway settings.' );
+			}
+
+			// Set the API key in the Stripe library.
+			\Stripe\Stripe::setApiKey( $api_key );
+
+			// Create a connection token.
 			$token = \Stripe\Terminal\ConnectionToken::create();
+
 			return rest_ensure_response( array( 'secret' => $token->secret ) );
+
 		} catch ( \Exception $e ) {
 			return new \WP_Error( 'connection_token_error', $e->getMessage(), array( 'status' => 500 ) );
 		}

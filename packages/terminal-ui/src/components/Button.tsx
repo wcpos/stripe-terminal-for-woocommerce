@@ -7,6 +7,7 @@ export const Button: React.FC<ButtonProps> = ({ label, onClick }) => (
   <button
     className="stwc-px-4 stwc-py-2 stwc-bg-blue-500 stwc-text-white stwc-rounded stwc-hover:stwc-bg-blue-600 stwc-focus:stwc-ring"
     onClick={onClick}
+    type="button"
   >
     {label}
   </button>
