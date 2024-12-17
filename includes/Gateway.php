@@ -189,14 +189,9 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
-	 * Fetch Stripe Terminal locations for the account.
+	 * Fetch Stripe Terminal locations for the account and check for associated readers.
 	 *
-	 * @return array List of formatted Terminal locations or a fallback message.
-	 */
-	/**
-	 * Fetch Stripe Terminal locations for the account.
-	 *
-	 * @return array List of formatted Terminal locations or a fallback message.
+	 * @return array List of formatted Terminal locations and reader information or a fallback message.
 	 */
 	private function fetch_terminal_locations() {
 		try {
@@ -216,18 +211,21 @@ class Gateway extends WC_Payment_Gateway {
 			$locations = \Stripe\Terminal\Location::all();
 
 			if ( empty( $locations->data ) ) {
-					// Return a message if no locations are found.
 					return array(
 						sprintf(
 							__( 'No Stripe Terminal locations found. Please <a href="%s" target="_blank">set up locations</a> in your Stripe Dashboard.', 'stripe-terminal-for-woocommerce' ),
-							'https://docs.stripe.com/terminal/fleet/locations-and-zones'
+							'https://stripe.com/docs/terminal/locations'
 						),
 					);
 			}
 
-			// Format location data.
+			// Format location and reader data.
 			$location_list = array();
 			foreach ( $locations->data as $location ) {
+					// Fetch readers for this location.
+					$readers = \Stripe\Terminal\Reader::all( array( 'location' => $location->id ) );
+
+					// Format the address.
 					$address = $location->address;
 					$formatted_address = sprintf(
 						'%s, %s, %s %s, %s',
@@ -238,11 +236,18 @@ class Gateway extends WC_Payment_Gateway {
 						$address['country']
 					);
 
+					// Format readers information.
+					$readers_info = empty( $readers->data )
+							? __( 'No readers associated with this location.', 'stripe-terminal-for-woocommerce' )
+							: sprintf( __( '%d reader(s) available.', 'stripe-terminal-for-woocommerce' ), count( $readers->data ) );
+
+					// Add location with readers information.
 					$location_list[] = sprintf(
-						__( '<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s', 'stripe-terminal-for-woocommerce' ),
+						__( '<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s', 'stripe-terminal-for-woocommerce' ),
 						esc_html( $location->display_name ),
 						esc_html( $location->id ),
-						esc_html( $formatted_address )
+						esc_html( $formatted_address ),
+						esc_html( $readers_info )
 					);
 			}
 

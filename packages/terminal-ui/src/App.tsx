@@ -1,120 +1,145 @@
 import React from 'react';
-import { Button } from './components/Button';
-import { ConnectionStatus } from './components/ConnectionStatus';
-import { LogDisplay } from './components/LogDisplay';
-import { fetchConnectionToken, discoverReaders } from './utils/api';
+import { Readers } from './readers/Readers';
+import { Client } from './client';
+import { Logs } from './logs/Logs';
+import { Logger } from './logger';
 
-import type { Reader } from '@stripe/terminal-js';
-
-export const App = () => {
-	const [status, setStatus] = React.useState<'connected' | 'connecting' | 'disconnected'>(
-		'disconnected'
-	);
-	const [logs, setLogs] = React.useState<string[]>([]);
-	const [readers] = React.useState<Reader[]>([]);
-	const [selectedReader, setSelectedReader] = React.useState<Reader | null>(null);
+export const App: React.FC = () => {
 	const [terminal, setTerminal] = React.useState<any | null>(null);
-	const [isSimulator, setIsSimulator] = React.useState(false);
+	const [client, setClient] = React.useState<any | null>(null);
+	const [connectionStatus, setConnectionStatus] = React.useState<string>('not_connected');
+	const [reader, setReader] = React.useState<any | null>(null);
 
-	const log = (message: string) => setLogs((prev) => [...prev, message]);
+	/** Function to initialize the Client */
+	const initializeClient = (url: string) => {
+		const newClient = new Client(url);
+		setClient(newClient);
+		return newClient;
+	};
 
+	/** Function to initialize StripeTerminal */
+	const initializeTerminal = (newClient: any) => {
+		if (!window.StripeTerminal) {
+			Logger.logMessage('Stripe Terminal is not available on the window object.', 'error');
+			return;
+		}
+
+		return window.StripeTerminal.create({
+			onFetchConnectionToken: async () => {
+				const connectionTokenResult = await newClient.createConnectionToken();
+				return connectionTokenResult.secret;
+			},
+			onUnexpectedReaderDisconnect: Logger.tracedFn(
+				'onUnexpectedReaderDisconnect',
+				'https://stripe.com/docs/terminal/js-api-reference#stripeterminal-create',
+				async () => {
+					Logger.logMessage('Unexpected disconnect from the reader', 'error');
+					setConnectionStatus('not_connected');
+					setReader(null);
+				}
+			),
+			onConnectionStatusChange: Logger.tracedFn(
+				'onConnectionStatusChange',
+				'https://stripe.com/docs/terminal/js-api-reference#stripeterminal-create',
+				async (event) => {
+					Logger.logMessage(`Connection status changed: ${event.status}`, 'info');
+					setConnectionStatus(event.status);
+					setReader(null);
+				}
+			),
+		});
+	};
+
+	/** useEffect: Initialize Client and Terminal */
 	React.useEffect(() => {
-		const initializeTerminal = async () => {
-			if (!window.StripeTerminal) {
-				log('Stripe Terminal is not available on the window object.');
-				return;
-			}
+		if (!window.stwcConfig?.restUrl) {
+			Logger.logMessage('REST URL is not defined in stwcConfig.', 'error');
+			return;
+		}
 
-			const stripeTerminal = window.StripeTerminal.create({
-				onFetchConnectionToken: fetchConnectionToken,
-				onUnexpectedReaderDisconnect: () => {
-					log('Reader disconnected unexpectedly.');
-					setStatus('disconnected');
-				},
-			});
+		const clientInstance = initializeClient(window.stwcConfig.restUrl);
+		if (!window.StripeTerminal) {
+			Logger.logMessage('Stripe Terminal is not available on the window object.', 'error');
+			return;
+		}
 
-			setTerminal(stripeTerminal);
-			log('Stripe Terminal initialized.');
-		};
+		const terminalInstance = initializeTerminal(clientInstance);
 
-		initializeTerminal();
+		setTerminal(terminalInstance);
+		Logger.logMessage('Stripe Terminal initialized.', 'success');
 	}, []);
 
-	const connectToReader = async (reader: Reader) => {
-		if (!terminal) {
-			log('Stripe Terminal is not initialized.');
-			return;
-		}
-
-		log(`Connecting to reader: ${reader.label}...`);
-		setStatus('connecting');
-
-		const result = await terminal.connectReader(reader);
-
-		if (result.error) {
-			log(`Error connecting to reader: ${result.error.message}`);
-			setStatus('disconnected');
-		} else {
-			log(`Connected to reader: ${result.reader.label}`);
-			setSelectedReader(result.reader);
-			setStatus('connected');
-		}
-	};
-
-	const disconnectReader = async () => {
-		if (!terminal) {
-			log('Stripe Terminal is not initialized.');
-			return;
-		}
-
-		log('Disconnecting reader...');
-		await terminal.disconnectReader();
-		setStatus('disconnected');
-		setSelectedReader(null);
-		log('Reader disconnected.');
-	};
-
+	/** Watch Client */
 	React.useEffect(() => {
-		if (status === 'disconnected') {
-			discoverReaders(terminal, isSimulator);
+		if (client) {
+			Logger.watchObject(client, 'backend', {
+				createConnectionToken: {
+					docsUrl: 'https://stripe.com/docs/terminal/sdk/js#connection-token',
+				},
+				registerDevice: {
+					docsUrl:
+						'https://stripe.com/docs/terminal/readers/connecting/verifone-p400#register-reader',
+				},
+				createPaymentIntent: { docsUrl: 'https://stripe.com/docs/terminal/payments#create' },
+				capturePaymentIntent: { docsUrl: 'https://stripe.com/docs/terminal/payments#capture' },
+				savePaymentMethodToCustomer: {
+					docsUrl: 'https://stripe.com/docs/terminal/payments/saving-cards',
+				},
+			});
 		}
-	}, [status, terminal, isSimulator]);
+	}, [client]);
+
+	/** Watch Terminal */
+	React.useEffect(() => {
+		if (terminal) {
+			Logger.watchObject(terminal, 'terminal', {
+				discoverReaders: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#discover-readers',
+				},
+				connectReader: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#connect-reader',
+				},
+				disconnectReader: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#disconnect',
+				},
+				setReaderDisplay: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#set-reader-display',
+				},
+				collectPaymentMethod: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#collect-payment-method',
+				},
+				cancelCollectPaymentMethod: {
+					docsUrl:
+						'https://stripe.com/docs/terminal/js-api-reference#cancel-collect-payment-method',
+				},
+				processPayment: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#process-payment',
+				},
+				readReusableCard: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#read-reusable-card',
+				},
+				cancelReadReusableCard: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#cancel-read-reusable-card',
+				},
+				collectRefundPaymentMethod: {
+					docsUrl:
+						'https://stripe.com/docs/terminal/js-api-reference#stripeterminal-collectrefundpaymentmethod',
+				},
+				processRefund: {
+					docsUrl: 'https://stripe.com/docs/terminal/js-api-reference#stripeterminal-processrefund',
+				},
+				cancelCollectRefundPaymentMethod: {
+					docsUrl:
+						'https://stripe.com/docs/terminal/js-api-reference#stripeterminal-cancelcollectrefundpaymentmethod',
+				},
+			});
+		}
+	}, [terminal]);
 
 	return (
-		<div className="p-4">
-			<ConnectionStatus status={status} />
-			<div className="mt-4">
-				{readers.length > 0 && (
-					<div className="mb-4">
-						<label className="block mb-2 text-sm font-medium text-gray-700">Select a Reader:</label>
-						<select
-							className="block w-full p-2 border border-gray-300 rounded"
-							onChange={(e) =>
-								setSelectedReader(readers.find((r) => r.id === e.target.value) || null)
-							}
-							value={selectedReader?.id || ''}
-						>
-							<option value="" disabled>
-								-- Select a Reader --
-							</option>
-							{readers.map((reader) => (
-								<option key={reader.id} value={reader.id}>
-									{reader.label}
-								</option>
-							))}
-						</select>
-					</div>
-				)}
-				{selectedReader && status === 'disconnected' && (
-					<Button label="Connect to Reader" onClick={() => connectToReader(selectedReader)} />
-				)}
-				{status === 'connected' && <Button label="Disconnect" onClick={disconnectReader} />}
-				<Button
-					label={`Toggle Simulator (${isSimulator ? 'ON' : 'OFF'})`}
-					onClick={() => setIsSimulator((prev) => !prev)}
-				/>
-			</div>
-			<LogDisplay logs={logs} />
+		<div className="stwc-p-4">
+			<Readers terminal={terminal} client={client} setReader={setReader} />
+			<Logs />
 		</div>
 	);
 };
