@@ -14,6 +14,8 @@ use WC_Payment_Gateway;
  * Class StripeTerminalGateway
  */
 class Gateway extends WC_Payment_Gateway {
+	use StripeErrorHandler; // Include the Stripe error handler trait.
+
 	/**
 	 * Constructor for the gateway.
 	 */
@@ -89,7 +91,7 @@ class Gateway extends WC_Payment_Gateway {
 	 * Process the payment.
 	 *
 	 * @param int $order_id Order ID.
-	 * @return array|void Payment result or void on failure.
+	 * @return array Payment result or void on failure.
 	 */
 	public function process_payment( $order_id ) {
 		$order = wc_get_order( $order_id );
@@ -107,9 +109,6 @@ class Gateway extends WC_Payment_Gateway {
 		);
 	}
 
-	/**
-	 * Process admin options and validate API key.
-	 */
 	/**
 	 * Process admin options and validate API key.
 	 */
@@ -131,8 +130,8 @@ class Gateway extends WC_Payment_Gateway {
 				}
 			);
 
-				// Optionally, remove the invalid key from the database.
-				$this->update_option( 'api_key', '' );
+			// Optionally, remove the invalid key from the database.
+			$this->update_option( 'api_key', '' );
 		} else {
 			// Add a success message for valid API key.
 			add_action(
@@ -172,19 +171,14 @@ class Gateway extends WC_Payment_Gateway {
 		}
 
 		try {
-			// Load the Stripe PHP library.
 			\Stripe\Stripe::setApiKey( $api_key );
 
 			// Test the API key by fetching account details.
-			$account = \Stripe\Account::retrieve();
+			\Stripe\Account::retrieve();
 
-			// Optionally, log account details or return them for display.
 			return true;
 		} catch ( \Stripe\Exception\ApiErrorException $e ) {
-			return sprintf(
-				__( 'Failed to validate API key: %s', 'stripe-terminal-for-woocommerce' ),
-				$e->getMessage()
-			);
+			return $this->handle_stripe_exception( $e, 'admin' ); // Use the trait for error handling.
 		}
 	}
 
@@ -195,72 +189,60 @@ class Gateway extends WC_Payment_Gateway {
 	 */
 	private function fetch_terminal_locations() {
 		try {
-			// Retrieve the API key dynamically.
 			$api_key = $this->get_option( 'api_key' );
 
 			if ( empty( $api_key ) ) {
-					return array(
-						__( 'No API key provided. Please enter your Stripe API key and save the settings.', 'stripe-terminal-for-woocommerce' ),
-					);
+				return array(
+					__( 'No API key provided. Please enter your Stripe API key and save the settings.', 'stripe-terminal-for-woocommerce' ),
+				);
 			}
 
-			// Set the API key for the Stripe library.
 			\Stripe\Stripe::setApiKey( $api_key );
 
 			// Fetch locations.
 			$locations = \Stripe\Terminal\Location::all();
 
 			if ( empty( $locations->data ) ) {
-					return array(
-						sprintf(
-							__( 'No Stripe Terminal locations found. Please <a href="%s" target="_blank">set up locations</a> in your Stripe Dashboard.', 'stripe-terminal-for-woocommerce' ),
-							'https://stripe.com/docs/terminal/locations'
-						),
-					);
+				return array(
+					sprintf(
+						__( 'No Stripe Terminal locations found. Please <a href="%s" target="_blank">set up locations</a> in your Stripe Dashboard.', 'stripe-terminal-for-woocommerce' ),
+						'https://stripe.com/docs/terminal/locations'
+					),
+				);
 			}
 
 			// Format location and reader data.
 			$location_list = array();
 			foreach ( $locations->data as $location ) {
-					// Fetch readers for this location.
-					$readers = \Stripe\Terminal\Reader::all( array( 'location' => $location->id ) );
+				$readers = \Stripe\Terminal\Reader::all( array( 'location' => $location->id ) );
 
-					// Format the address.
-					$address = $location->address;
-					$formatted_address = sprintf(
-						'%s, %s, %s %s, %s',
-						$address['line1'],
-						$address['city'],
-						$address['state'],
-						$address['postal_code'],
-						$address['country']
-					);
+				$address = $location->address;
+				$formatted_address = sprintf(
+					'%s, %s, %s %s, %s',
+					$address['line1'],
+					$address['city'],
+					$address['state'],
+					$address['postal_code'],
+					$address['country']
+				);
 
-					// Format readers information.
-					$readers_info = empty( $readers->data )
-							? __( 'No readers associated with this location.', 'stripe-terminal-for-woocommerce' )
-							: sprintf( __( '%d reader(s) available.', 'stripe-terminal-for-woocommerce' ), count( $readers->data ) );
+				$readers_info = empty( $readers->data )
+					? __( 'No readers associated with this location.', 'stripe-terminal-for-woocommerce' )
+					: sprintf( __( '%d reader(s) available.', 'stripe-terminal-for-woocommerce' ), count( $readers->data ) );
 
-					// Add location with readers information.
-					$location_list[] = sprintf(
-						__( '<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s', 'stripe-terminal-for-woocommerce' ),
-						esc_html( $location->display_name ),
-						esc_html( $location->id ),
-						esc_html( $formatted_address ),
-						esc_html( $readers_info )
-					);
+				$location_list[] = sprintf(
+					__( '<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s', 'stripe-terminal-for-woocommerce' ),
+					esc_html( $location->display_name ),
+					esc_html( $location->id ),
+					esc_html( $formatted_address ),
+					esc_html( $readers_info )
+				);
 			}
 
 			return $location_list;
 
 		} catch ( \Stripe\Exception\ApiErrorException $e ) {
-			// Handle API errors gracefully.
-			return array(
-				sprintf(
-					__( 'Failed to fetch Terminal locations: %s', 'stripe-terminal-for-woocommerce' ),
-					esc_html( $e->getMessage() )
-				),
-			);
+			return array( $this->handle_stripe_exception( $e, 'admin' ) ); // Use the trait for error handling.
 		}
 	}
 }
