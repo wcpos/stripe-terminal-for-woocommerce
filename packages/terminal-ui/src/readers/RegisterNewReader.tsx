@@ -4,7 +4,7 @@ import { Group } from '../components/Group/Group';
 import { Section } from '../components/Section/Section';
 import { Text } from '../components/Text/Text';
 import { TextInput } from '../components/TextInput/TextInput';
-import Select from '../components/Select/Select';
+import { Select } from '../components/Select/Select';
 import { Link } from '../components/Link/Link';
 import type { Location, Reader } from '@stripe/terminal-js';
 import type { Client } from '../client';

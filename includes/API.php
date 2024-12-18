@@ -1,15 +1,9 @@
 <?php
-/**
- * Stripe Terminal API
- * Handles the API for Stripe Terminal.
- *
- * @package WCPOS\WooCommercePOS\StripeTerminal
- */
-
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
 /**
  * Class API
+ * Handles the API for Stripe Terminal.
  */
 class API {
 
@@ -50,7 +44,7 @@ class API {
 			array(
 				'methods'  => 'POST',
 				'callback' => array( $this, 'get_connection_token' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => '__return_true', // Allow all users to access this endpoint.
 			)
 		);
 
@@ -70,6 +64,39 @@ class API {
 			array(
 				'methods'  => 'POST',
 				'callback' => array( $this, 'register_reader' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		// Add endpoint for creating payment intents.
+		register_rest_route(
+			$this->base_url,
+			'/create-payment-intent',
+			array(
+				'methods'  => 'POST',
+				'callback' => array( $this, 'create_payment_intent' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		// Add endpoint for capturing payment intents.
+		register_rest_route(
+			$this->base_url,
+			'/capture-payment-intent',
+			array(
+				'methods'  => 'POST',
+				'callback' => array( $this, 'capture_payment_intent' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		// Add endpoint for attaching a payment method to a customer.
+		register_rest_route(
+			$this->base_url,
+			'/attach-payment-method-to-customer',
+			array(
+				'methods'  => 'POST',
+				'callback' => array( $this, 'attach_payment_method_to_customer' ),
 				'permission_callback' => '__return_true',
 			)
 		);
@@ -103,70 +130,108 @@ class API {
 	}
 
 	/**
-	 * Get a connection token for the Stripe Terminal.
+	 * Create a payment intent.
 	 *
-	 * @return \WP_REST_Response|\WP_Error The connection token or an error response.
+	 * @param \WP_REST_Request $request The request object containing payment intent details.
+	 *
+	 * @return \WP_REST_Response|\WP_Error The created payment intent or an error response.
 	 */
-	public function get_connection_token() {
+	public function create_payment_intent( \WP_REST_Request $request ) {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
-			$token = \Stripe\Terminal\ConnectionToken::create();
-			return rest_ensure_response( array( 'secret' => $token->secret ) );
-		} catch ( \Exception $e ) {
-			return $this->handle_stripe_exception( $e, 'connection_token_error' );
-		}
-	}
 
-	/**
-	 * List all locations associated with the Stripe account.
-	 *
-	 * @return \WP_REST_Response|\WP_Error A list of locations or an error response.
-	 */
-	public function list_locations() {
-		try {
-			\Stripe\Stripe::setApiKey( $this->api_key );
-			$locations = \Stripe\Terminal\Location::all();
-			return rest_ensure_response( $locations->data );
-		} catch ( \Exception $e ) {
-			return $this->handle_stripe_exception( $e, 'list_locations_error' );
-		}
-	}
-
-	/**
-	 * Register a new reader with the Stripe account.
-	 *
-	 * @param \WP_REST_Request $request The request object containing reader details.
-	 *
-	 * @return \WP_REST_Response|\WP_Error The registered reader object or an error response.
-	 */
-	public function register_reader( \WP_REST_Request $request ) {
-		try {
-			\Stripe\Stripe::setApiKey( $this->api_key );
 			$params = $request->get_json_params();
-			$label = $params['label'] ?? null;
-			$registration_code = $params['registrationCode'] ?? null;
-			$location = $params['location'] ?? null;
+			$amount = $params['amount'] ?? null;
+			$currency = $params['currency'] ?? 'usd';
+			$description = $params['description'] ?? null;
+			$payment_method_types = $params['payment_method_types'] ?? array( 'card' );
 
-			if ( empty( $label ) || empty( $registration_code ) || empty( $location ) ) {
+			if ( empty( $amount ) || empty( $currency ) ) {
 				return new \WP_Error(
 					'missing_params',
-					'Each reader object must include label, registrationCode, and location.',
+					'Both amount and currency are required.',
 					array( 'status' => 400 )
 				);
 			}
 
-			$reader = \Stripe\Terminal\Reader::create(
+			$payment_intent = \Stripe\PaymentIntent::create(
 				array(
-					'label'             => $label,
-					'registration_code' => $registration_code,
-					'location'          => $location,
+					'amount' => $amount,
+					'currency' => $currency,
+					'payment_method_types' => $payment_method_types,
+					'description' => $description,
 				)
 			);
 
-			return rest_ensure_response( $reader );
+			return rest_ensure_response( $payment_intent );
 
 		} catch ( \Exception $e ) {
-			return $this->handle_stripe_exception( $e, 'register_reader_error' );
+			return $this->handle_stripe_exception( $e, 'create_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Capture a payment intent.
+	 *
+	 * @param \WP_REST_Request $request The request object containing payment intent ID.
+	 *
+	 * @return \WP_REST_Response|\WP_Error The captured payment intent or an error response.
+	 */
+	public function capture_payment_intent( \WP_REST_Request $request ) {
+		try {
+			\Stripe\Stripe::setApiKey( $this->api_key );
+
+			$params = $request->get_json_params();
+			$payment_intent_id = $params['payment_intent_id'] ?? null;
+
+			if ( empty( $payment_intent_id ) ) {
+				return new \WP_Error(
+					'missing_params',
+					'The payment_intent_id is required.',
+					array( 'status' => 400 )
+				);
+			}
+
+			$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+			$payment_intent->capture();
+
+			return rest_ensure_response( $payment_intent );
+
+		} catch ( \Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'capture_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Attach a payment method to a customer.
+	 *
+	 * @param \WP_REST_Request $request The request object containing payment method and customer IDs.
+	 *
+	 * @return \WP_REST_Response|\WP_Error The attached payment method or an error response.
+	 */
+	public function attach_payment_method_to_customer( \WP_REST_Request $request ) {
+		try {
+			\Stripe\Stripe::setApiKey( $this->api_key );
+
+			$params = $request->get_json_params();
+			$payment_method_id = $params['payment_method_id'] ?? null;
+			$customer_id = $params['customer_id'] ?? null;
+
+			if ( empty( $payment_method_id ) || empty( $customer_id ) ) {
+				return new \WP_Error(
+					'missing_params',
+					'Both payment_method_id and customer_id are required.',
+					array( 'status' => 400 )
+				);
+			}
+
+			$payment_method = \Stripe\PaymentMethod::retrieve( $payment_method_id );
+			$payment_method->attach( array( 'customer' => $customer_id ) );
+
+			return rest_ensure_response( $payment_method );
+
+		} catch ( \Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'attach_payment_method_to_customer_error' );
 		}
 	}
 }

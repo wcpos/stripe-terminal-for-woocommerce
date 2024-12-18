@@ -53,7 +53,7 @@ const mockDiscoveredReaders: Reader[] = [
 	},
 ];
 
-export const Readers: React.FC<ReadersProps> = ({ terminal, client, setReader }) => {
+export const Readers = ({ terminal, client, setReader }: ReadersProps) => {
 	const [discoveryInProgress, setDiscoveryInProgress] = useState(false);
 	const [requestInProgress, setRequestInProgress] = useState(false);
 	const [discoveredReaders, setDiscoveredReaders] = useState<Reader[]>([]);

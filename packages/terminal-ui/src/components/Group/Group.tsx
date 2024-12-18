@@ -12,7 +12,7 @@ export const Group = forwardRef<HTMLDivElement, GroupProps>(
 			<div
 				ref={ref}
 				className={cn(
-					'stwc-mb-8 stwc-rounded-lg stwc-border stwc-border-gray-200 stwc-bg-white',
+					'stwc-mb-4 stwc-rounded-lg stwc-border stwc-border-gray-200 stwc-bg-white',
 					className
 				)}
 				{...props}

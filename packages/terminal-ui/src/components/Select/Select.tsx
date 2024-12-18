@@ -12,7 +12,7 @@ interface SelectProps {
 	required?: boolean;
 }
 
-const Select = ({ value, items, onChange, required = false }: SelectProps) => {
+export const Select = ({ value, items, onChange, required = false }: SelectProps) => {
 	const [selectedValue, setSelectedValue] = React.useState<string>(value);
 
 	const handleChange = (e: ChangeEvent<HTMLSelectElement>) => {
@@ -24,7 +24,7 @@ const Select = ({ value, items, onChange, required = false }: SelectProps) => {
 	return (
 		<select
 			required={required}
-			className="bg-gray-100 rounded-md cursor-text p-2 text-sm font-normal border-0 outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-50 transition-all"
+			className="stwc-bg-gray-100 stwc-rounded-md stwc-cursor-text stwc-p-2 stwc-text-sm stwc-font-normal stwc-border-0 stwc-outline-none focus:stwc-ring-2 focus:stwc-ring-blue-400 focus:stwc-ring-opacity-50 stwc-transition-all"
 			value={selectedValue}
 			onChange={handleChange}
 		>
@@ -36,5 +36,3 @@ const Select = ({ value, items, onChange, required = false }: SelectProps) => {
 		</select>
 	);
 };
-
-export default Select;

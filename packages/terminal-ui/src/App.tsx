@@ -4,6 +4,9 @@ import { Client } from './client';
 import { Logs } from './logs/Logs';
 import { Logger } from './logger';
 import type { Terminal, Reader } from '@stripe/terminal-js';
+import { ConnectionInfo } from './ConnectionInfo';
+import { SimulatorPayment } from './payment/SimulatorPayment';
+import { Payment } from './payment/Payment';
 
 export const App: React.FC = () => {
 	const [terminal, setTerminal] = React.useState<Terminal | null>(null);
@@ -137,9 +140,25 @@ export const App: React.FC = () => {
 		}
 	}, [terminal]);
 
+	const disconnectReader = async () => {
+		if (terminal) {
+			await terminal.disconnectReader();
+		}
+		setReader(null);
+	};
+
 	return (
 		<div className="stwc-p-4">
-			<Readers terminal={terminal} client={client} setReader={setReader} />
+			<ConnectionInfo reader={reader} onClickDisconnect={disconnectReader} />
+			{reader ? (
+				reader.id === 'SIMULATOR' ? (
+					<SimulatorPayment client={client} terminal={terminal} />
+				) : (
+					<Payment />
+				)
+			) : (
+				<Readers terminal={terminal} client={client} setReader={setReader} />
+			)}
 			<Logs />
 		</div>
 	);
