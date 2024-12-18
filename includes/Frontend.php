@@ -12,17 +12,18 @@ namespace WCPOS\WooCommercePOS\StripeTerminal;
  * Class Frontend
  */
 class Frontend {
+
 	/**
-	 * Initialize hooks for frontend assets.
+	 * Constructor
 	 */
-	public static function init() {
-		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ) );
+	public function __construct() {
+		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
 	/**
 	 * Enqueue frontend JavaScript and CSS.
 	 */
-	public static function enqueue_assets() {
+	public function enqueue_assets() {
 		// Enqueue Stripe Terminal SDK.
 		wp_enqueue_script(
 			'stripe-terminal-js',
@@ -32,6 +33,7 @@ class Frontend {
 			true
 		);
 
+		// Enqueue main JavaScript and CSS files.
 		wp_enqueue_script(
 			'stripe-terminal',
 			STWC_PLUGIN_URL . 'assets/js/main.js',

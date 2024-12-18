@@ -5,11 +5,12 @@ import { Button } from '../components/Button/Button';
 import { Text } from '../components/Text/Text';
 import { RegisterNewReader } from './RegisterNewReader';
 import { Logger } from '../logger';
-import type { Reader } from '@stripe/terminal-js';
+import type { Reader, Terminal } from '@stripe/terminal-js';
+import type { Client } from '../client';
 
 interface ReadersProps {
-	terminal: any;
-	client: any;
+	terminal: Terminal;
+	client: Client;
 	setReader: (reader: Reader | null) => void;
 }
 
@@ -85,8 +86,22 @@ export const Readers: React.FC<ReadersProps> = ({ terminal, client, setReader })
 		}
 	};
 
+	const handleReaderRegistered = (reader: Reader) => {
+		{
+			Logger.logMessage(`Reader registered successfully: ${reader.label}`);
+			handleConnect(reader);
+			setMode('list');
+		}
+	};
+
 	if (mode === 'register') {
-		return <RegisterNewReader onClickCancel={() => setMode('list')} />;
+		return (
+			<RegisterNewReader
+				client={client}
+				onReaderRegistered={handleReaderRegistered}
+				onClickCancel={() => setMode('list')}
+			/>
+		);
 	}
 
 	return (

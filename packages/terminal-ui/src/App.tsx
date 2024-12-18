@@ -3,12 +3,13 @@ import { Readers } from './readers/Readers';
 import { Client } from './client';
 import { Logs } from './logs/Logs';
 import { Logger } from './logger';
+import type { Terminal, Reader } from '@stripe/terminal-js';
 
 export const App: React.FC = () => {
-	const [terminal, setTerminal] = React.useState<any | null>(null);
-	const [client, setClient] = React.useState<any | null>(null);
+	const [terminal, setTerminal] = React.useState<Terminal | null>(null);
+	const [client, setClient] = React.useState<Client | null>(null);
 	const [connectionStatus, setConnectionStatus] = React.useState<string>('not_connected');
-	const [reader, setReader] = React.useState<any | null>(null);
+	const [reader, setReader] = React.useState<Reader | null>(null);
 
 	/** Function to initialize the Client */
 	const initializeClient = (url: string) => {

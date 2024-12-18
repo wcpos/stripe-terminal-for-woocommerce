@@ -54,9 +54,9 @@ function init() {
 	add_filter( 'woocommerce_payment_gateways', array( Gateway::class, 'register_gateway' ) );
 
 	// Initialize API.
-	API::init();
+	new API();
 
 	// Initialize frontend.
-	Frontend::init();
+	new Frontend();
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 11 );

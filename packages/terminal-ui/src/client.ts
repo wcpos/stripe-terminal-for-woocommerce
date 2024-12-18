@@ -7,8 +7,8 @@ export class Client {
 	}
 
 	createConnectionToken(): Promise<any> {
-		const formData = new URLSearchParams();
-		return this.doPost(`${this.url}/connection-token`, formData);
+		const body = JSON.stringify({});
+		return this.doPost(`${this.url}/connection-token`, body);
 	}
 
 	registerDevice({
@@ -20,11 +20,12 @@ export class Client {
 		registrationCode: string;
 		location: string;
 	}): Promise<any> {
-		const formData = new URLSearchParams();
-		formData.append('label', label);
-		formData.append('registration_code', registrationCode);
-		formData.append('location', location);
-		return this.doPost(`${this.url}/register-reader`, formData);
+		const body = JSON.stringify({
+			label,
+			registrationCode,
+			location,
+		});
+		return this.doPost(`${this.url}/register-reader`, body);
 	}
 
 	createPaymentIntent({
@@ -38,29 +39,31 @@ export class Client {
 		description: string;
 		paymentMethodTypes: string[];
 	}): Promise<any> {
-		const formData = new URLSearchParams();
-		formData.append('amount', amount.toString());
-		formData.append('currency', currency);
-		formData.append('description', description);
-		paymentMethodTypes.forEach((type) => formData.append('payment_method_types[]', type));
-		return this.doPost(`${this.url}/create-payment-intent`, formData);
+		const body = JSON.stringify({
+			amount,
+			currency,
+			description,
+			payment_method_types: paymentMethodTypes,
+		});
+		return this.doPost(`${this.url}/create-payment-intent`, body);
 	}
 
 	capturePaymentIntent({ paymentIntentId }: { paymentIntentId: string }): Promise<any> {
-		const formData = new URLSearchParams();
-		formData.append('payment_intent_id', paymentIntentId);
-		return this.doPost(`${this.url}/capture-payment-intent`, formData);
+		const body = JSON.stringify({ payment_intent_id: paymentIntentId });
+		return this.doPost(`${this.url}/capture-payment-intent`, body);
 	}
 
 	savePaymentMethodToCustomer({ paymentMethodId }: { paymentMethodId: string }): Promise<any> {
-		const formData = new URLSearchParams();
-		formData.append('payment_method_id', paymentMethodId);
-		return this.doPost(`${this.url}/attach-payment-method-to-customer`, formData);
+		const body = JSON.stringify({ payment_method_id: paymentMethodId });
+		return this.doPost(`${this.url}/attach-payment-method-to-customer`, body);
 	}
 
 	async listLocations(): Promise<any> {
 		const response = await fetch(`${this.url}/list-locations`, {
-			method: 'get',
+			method: 'GET',
+			headers: {
+				'Content-Type': 'application/json',
+			},
 		});
 
 		if (response.ok) {
@@ -71,9 +74,12 @@ export class Client {
 		}
 	}
 
-	private async doPost(url: string, body: URLSearchParams): Promise<any> {
+	private async doPost(url: string, body: string): Promise<any> {
 		const response = await fetch(url, {
-			method: 'post',
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
 			body: body,
 		});
 
