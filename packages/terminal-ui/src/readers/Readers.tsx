@@ -14,6 +14,45 @@ interface ReadersProps {
 	setReader: (reader: Reader | null) => void;
 }
 
+const mockDiscoveredReaders: Reader[] = [
+	{
+		id: 'tmr_FDOt2wlRZEdpd7',
+		object: 'terminal.reader',
+		action: null,
+		device_sw_version: null,
+		device_type: 'bbpos_wisepos_e',
+		ip_address: '192.168.1.2',
+		label: 'Blue Rabbit',
+		livemode: false,
+		location: 'tml_FDOtHwxAAdIJOh',
+		metadata: {},
+		serial_number: '259cd19c-b902-4730-96a1-09183be6e7f7',
+		status: 'online',
+	},
+	{
+		id: 'tmr_FDOt3xlRYEdpd8',
+		object: 'terminal.reader',
+		action: {
+			failure_code: null,
+			failure_message: null,
+			status: 'in_progress',
+			type: 'process_payment_intent',
+			process_payment_intent: {
+				payment_intent: 'pi_3J2OqE2eZvKYlo2C1xGkfZ',
+			},
+		},
+		device_sw_version: '1.0.0',
+		device_type: 'stripe_m2',
+		ip_address: '192.168.1.3',
+		label: 'Red Fox',
+		livemode: true,
+		location: null,
+		metadata: { customKey: 'customValue' },
+		serial_number: 'abcd1234',
+		status: 'disconnected',
+	},
+];
+
 export const Readers: React.FC<ReadersProps> = ({ terminal, client, setReader }) => {
 	const [discoveryInProgress, setDiscoveryInProgress] = useState(false);
 	const [requestInProgress, setRequestInProgress] = useState(false);
@@ -111,16 +150,16 @@ export const Readers: React.FC<ReadersProps> = ({ terminal, client, setReader })
 					Connect to a reader
 				</Text>
 				{discoveryInProgress ? (
-					<Button color="text" onClick={handleCancelDiscover}>
+					<Button variant="text" onClick={handleCancelDiscover}>
 						Cancel
 					</Button>
 				) : (
-					<Button color="text" onClick={handleDiscover} disabled={requestInProgress}>
+					<Button variant="text" onClick={handleDiscover} disabled={requestInProgress}>
 						Discover
 					</Button>
 				)}
 			</div>
-			<div className="stwc-p-4">
+			<div>
 				<ReaderList
 					readers={discoveredReaders}
 					discoveryInProgress={discoveryInProgress}

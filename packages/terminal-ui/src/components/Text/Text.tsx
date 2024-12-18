@@ -16,6 +16,7 @@ const textVariants = cva(
 				error: 'stwc-text-[#CD3D64]',
 				lightGrey: 'stwc-text-[#8792a2]',
 				grey: 'stwc-text-[#C1C9D2]',
+				darkGrey: 'stwc-text-[#697386]',
 				link: 'stwc-text-blue-400 hover:stwc-underline',
 			},
 		},

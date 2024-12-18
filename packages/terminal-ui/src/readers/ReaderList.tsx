@@ -1,63 +1,88 @@
 import React from 'react';
-import { Group } from '../components/Group/Group';
-// import ReaderIcon from '../components/Icon/reader/ReaderIcon.jsx';
-import { Section } from '../components/Section/Section';
 import { Text } from '../components/Text/Text';
 import { Button } from '../components/Button/Button';
+import { cn } from '../components/lib/utils';
+import type { Stripe } from 'stripe';
 
-export const ReaderList = ({ readers, discoveryInProgress, requestInProgress, onConnect }) => {
+// Define the props interface
+interface ReaderListProps {
+	readers: Stripe.Terminal.Reader[];
+	discoveryInProgress: boolean;
+	requestInProgress: boolean;
+	onConnect: (reader: Stripe.Terminal.Reader) => void;
+}
+
+export const ReaderList = ({
+	readers,
+	discoveryInProgress,
+	requestInProgress,
+	onConnect,
+}: ReaderListProps) => {
+	// Show a loading message during discovery
 	if (discoveryInProgress) {
 		return (
-			<Text size={14} color="darkGrey">
-				Discovering...
-			</Text>
+			<div className="stwc-p-4">
+				<Text className="stwc-text-sm" color="darkGrey">
+					Discovering...
+				</Text>
+			</div>
 		);
 	}
 
-	if (readers.length >= 1) {
+	// Render discovered readers
+	if (readers.length > 0) {
 		return (
-			<>
-				{readers.map((reader, i) => {
+			<div>
+				{readers.map((reader, index) => {
 					const isOffline = reader.status === 'offline';
 					return (
-						<Section position="middle" key={i}>
-							<Group
-								direction="row"
-								alignment={{ justifyContent: 'space-between', alignItems: 'center' }}
+						<div
+							key={reader.id}
+							className={cn(
+								'stwc-flex stwc-justify-between stwc-items-center stwc-py-4 stwc-px-6 stwc-border-b stwc-border-gray-200',
+								index === readers.length - 1 && 'stwc-border-b-0'
+							)}
+						>
+							<div>
+								<Text className="stwc-text-base" weight="bold">
+									{reader.label || 'Unnamed Reader'}
+								</Text>
+								<Text className="stwc-text-xs" color="darkGrey">
+									Serial: {reader.serial_number}
+								</Text>
+								<Text className="stwc-text-xs" color="darkGrey">
+									Type: {reader.device_type}
+								</Text>
+							</div>
+							<Button
+								disabled={isOffline || requestInProgress}
+								color={isOffline || requestInProgress ? 'white' : 'primary'}
+								onClick={() => onConnect(reader)}
+								className="stwc-py-2 stwc-px-4"
 							>
-								<Group direction="row">
-									<ReaderIcon />
-									<Group direction="column">
-										<Text>{reader.label}</Text>
-										<Text size={11} color="darkGrey">
-											{reader.serial_number}
-										</Text>
-									</Group>
-								</Group>
-								<Button
-									disabled={isOffline || requestInProgress}
-									color={isOffline || requestInProgress ? 'white' : 'primary'}
-									onClick={() => onConnect(reader)}
+								<Text
+									className="stwc-text-sm"
+									color={isOffline || requestInProgress ? 'darkGrey' : 'white'}
 								>
-									<Text size={14} color={isOffline || requestInProgress ? 'darkGrey' : 'white'}>
-										{isOffline ? 'Offline' : 'Connect'}
-									</Text>
-								</Button>
-							</Group>
-						</Section>
+									{isOffline ? 'Offline' : 'Connect'}
+								</Text>
+							</Button>
+						</div>
 					);
 				})}
-			</>
+			</div>
 		);
 	}
 
+	// Show a message when no readers are found
 	return (
-		<>
+		<div className="stwc-text-center stwc-p-4">
+			{/* Placeholder for icon */}
 			{/* <ReaderIcon /> */}
-			<Text color="darkGrey" size={12}>
-				Register a new reader, then discover readers on your account. You can also use the reader
-				simulator provided by the SDK if you don't have hardware.
+			<Text color="darkGrey" className="stwc-text-sm">
+				No readers found. Register a new reader, then discover readers on your account. If you don't
+				have hardware, try using the reader simulator provided by the SDK.
 			</Text>
-		</>
+		</div>
 	);
 };

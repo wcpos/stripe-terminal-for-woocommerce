@@ -124,7 +124,7 @@ export const RegisterNewReader = ({
 
 					{/* Actions */}
 					<div className="stwc-flex stwc-flex-row stwc-gap-4 stwc-justify-center stwc-border-t stwc-border-gray-200 stwc-p-4">
-						<Button color="white" onClick={onClickCancel}>
+						<Button onClick={onClickCancel}>
 							<Text color="darkGrey" className="stwc-text-sm">
 								Cancel
 							</Text>
