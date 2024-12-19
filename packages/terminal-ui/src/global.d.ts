@@ -5,6 +5,9 @@ declare global {
 		StripeTerminal: StripeTerminal;
 		stwcConfig: {
 			restUrl: string;
+			chargeAmount: number;
+			taxAmount: number;
+			currency: string;
 		};
 	}
 }

@@ -1,4 +1,4 @@
-import React, { ChangeEvent } from 'react';
+import React from 'react';
 
 import { cn } from '../lib/utils';
 
@@ -11,6 +11,7 @@ interface TextInputProps {
 	type?: string;
 	min?: string;
 	step?: string;
+	className?: string;
 }
 
 export const TextInput = ({
@@ -24,7 +25,7 @@ export const TextInput = ({
 	step,
 	className,
 }: TextInputProps) => {
-	const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+	const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		onChange(e.target.value);
 	};
 

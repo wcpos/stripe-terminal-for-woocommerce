@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ReaderList } from './ReaderList';
 import { Group } from '../components/Group/Group';
 import { Button } from '../components/Button/Button';
@@ -14,50 +14,50 @@ interface ReadersProps {
 	setReader: (reader: Reader | null) => void;
 }
 
-const mockDiscoveredReaders: Reader[] = [
-	{
-		id: 'tmr_FDOt2wlRZEdpd7',
-		object: 'terminal.reader',
-		action: null,
-		device_sw_version: null,
-		device_type: 'bbpos_wisepos_e',
-		ip_address: '192.168.1.2',
-		label: 'Blue Rabbit',
-		livemode: false,
-		location: 'tml_FDOtHwxAAdIJOh',
-		metadata: {},
-		serial_number: '259cd19c-b902-4730-96a1-09183be6e7f7',
-		status: 'online',
-	},
-	{
-		id: 'tmr_FDOt3xlRYEdpd8',
-		object: 'terminal.reader',
-		action: {
-			failure_code: null,
-			failure_message: null,
-			status: 'in_progress',
-			type: 'process_payment_intent',
-			process_payment_intent: {
-				payment_intent: 'pi_3J2OqE2eZvKYlo2C1xGkfZ',
-			},
-		},
-		device_sw_version: '1.0.0',
-		device_type: 'stripe_m2',
-		ip_address: '192.168.1.3',
-		label: 'Red Fox',
-		livemode: true,
-		location: null,
-		metadata: { customKey: 'customValue' },
-		serial_number: 'abcd1234',
-		status: 'disconnected',
-	},
-];
+// const mockDiscoveredReaders: Reader[] = [
+// 	{
+// 		id: 'tmr_FDOt2wlRZEdpd7',
+// 		object: 'terminal.reader',
+// 		action: null,
+// 		device_sw_version: null,
+// 		device_type: 'bbpos_wisepos_e',
+// 		ip_address: '192.168.1.2',
+// 		label: 'Blue Rabbit',
+// 		livemode: false,
+// 		location: 'tml_FDOtHwxAAdIJOh',
+// 		metadata: {},
+// 		serial_number: '259cd19c-b902-4730-96a1-09183be6e7f7',
+// 		status: 'online',
+// 	},
+// 	{
+// 		id: 'tmr_FDOt3xlRYEdpd8',
+// 		object: 'terminal.reader',
+// 		action: {
+// 			failure_code: null,
+// 			failure_message: null,
+// 			status: 'in_progress',
+// 			type: 'process_payment_intent',
+// 			process_payment_intent: {
+// 				payment_intent: 'pi_3J2OqE2eZvKYlo2C1xGkfZ',
+// 			},
+// 		},
+// 		device_sw_version: '1.0.0',
+// 		device_type: 'stripe_m2',
+// 		ip_address: '192.168.1.3',
+// 		label: 'Red Fox',
+// 		livemode: true,
+// 		location: null,
+// 		metadata: { customKey: 'customValue' },
+// 		serial_number: 'abcd1234',
+// 		status: 'disconnected',
+// 	},
+// ];
 
 export const Readers = ({ terminal, client, setReader }: ReadersProps) => {
-	const [discoveryInProgress, setDiscoveryInProgress] = useState(false);
-	const [requestInProgress, setRequestInProgress] = useState(false);
-	const [discoveredReaders, setDiscoveredReaders] = useState<Reader[]>([]);
-	const [mode, setMode] = useState<'list' | 'register'>('list');
+	const [discoveryInProgress, setDiscoveryInProgress] = React.useState(false);
+	const [requestInProgress, setRequestInProgress] = React.useState(false);
+	const [discoveredReaders, setDiscoveredReaders] = React.useState<Reader[]>([]);
+	const [mode, setMode] = React.useState<'list' | 'register'>('list');
 
 	const handleDiscover = async () => {
 		if (!terminal) {
@@ -69,7 +69,7 @@ export const Readers = ({ terminal, client, setReader }: ReadersProps) => {
 		setRequestInProgress(true);
 		try {
 			const discoverResult = await terminal.discoverReaders();
-			if (discoverResult.error) {
+			if ('error' in discoverResult) {
 				Logger.logMessage(`Failed to discover readers: ${discoverResult.error.message}`);
 			} else {
 				setDiscoveredReaders(discoverResult.discoveredReaders);
@@ -99,7 +99,7 @@ export const Readers = ({ terminal, client, setReader }: ReadersProps) => {
 		setRequestInProgress(true);
 		try {
 			const connectResult = await terminal.connectReader(reader);
-			if (connectResult.error) {
+			if ('error' in connectResult) {
 				Logger.logMessage(`Failed to connect to reader: ${connectResult.error.message}`);
 			} else {
 				Logger.logMessage(`Connected to reader: ${connectResult.reader.label}`);
@@ -117,7 +117,7 @@ export const Readers = ({ terminal, client, setReader }: ReadersProps) => {
 		}
 
 		const simulatedResult = await terminal.discoverReaders({ simulated: true });
-		if (simulatedResult.discoveredReaders.length > 0) {
+		if ('discoveredReaders' in simulatedResult && simulatedResult.discoveredReaders.length > 0) {
 			await handleConnect(simulatedResult.discoveredReaders[0]);
 			Logger.logMessage('Using simulated reader.');
 		} else {
@@ -146,9 +146,7 @@ export const Readers = ({ terminal, client, setReader }: ReadersProps) => {
 	return (
 		<Group>
 			<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-border-b stwc-border-gray-200 stwc-p-4">
-				<Text size={16} color="dark">
-					Connect to a reader
-				</Text>
+				<Text className="stwc-text-base">Connect to a reader</Text>
 				{discoveryInProgress ? (
 					<Button variant="text" onClick={handleCancelDiscover}>
 						Cancel

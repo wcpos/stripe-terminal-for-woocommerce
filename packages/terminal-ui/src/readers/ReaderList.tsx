@@ -1,4 +1,3 @@
-import React from 'react';
 import { Text } from '../components/Text/Text';
 import { Button } from '../components/Button/Button';
 import { cn } from '../components/lib/utils';
@@ -43,8 +42,8 @@ export const ReaderList = ({
 								index === readers.length - 1 && 'stwc-border-b-0'
 							)}
 						>
-							<div>
-								<Text className="stwc-text-base" weight="bold">
+							<div className="stwc-flex stwc-flex-col stwc-gap-1">
+								<Text className="stwc-text-base stwc-font-bold">
 									{reader.label || 'Unnamed Reader'}
 								</Text>
 								<Text className="stwc-text-xs" color="darkGrey">
@@ -56,16 +55,10 @@ export const ReaderList = ({
 							</div>
 							<Button
 								disabled={isOffline || requestInProgress}
-								color={isOffline || requestInProgress ? 'white' : 'primary'}
 								onClick={() => onConnect(reader)}
 								className="stwc-py-2 stwc-px-4"
 							>
-								<Text
-									className="stwc-text-sm"
-									color={isOffline || requestInProgress ? 'darkGrey' : 'white'}
-								>
-									{isOffline ? 'Offline' : 'Connect'}
-								</Text>
+								<Text>{isOffline ? 'Offline' : 'Connect'}</Text>
 							</Button>
 						</div>
 					);

@@ -48,14 +48,5 @@ class Frontend {
 			array(),
 			STWC_VERSION
 		);
-
-		// Pass configuration data to the JavaScript file.
-		wp_localize_script(
-			'stripe-terminal',
-			'stwcConfig',
-			array(
-				'restUrl' => rest_url( 'stripe-terminal/v1' ),
-			)
-		);
 	}
 }

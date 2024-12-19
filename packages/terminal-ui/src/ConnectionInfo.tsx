@@ -1,4 +1,3 @@
-import React from 'react';
 import { Button } from './components/Button/Button';
 import { Icon } from './components/Icon/Icon';
 import { Group } from './components/Group/Group';

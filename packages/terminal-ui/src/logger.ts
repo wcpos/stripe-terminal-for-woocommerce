@@ -22,13 +22,26 @@ type MethodMetadata = {
 export class Logger {
 	static collectors: Collector[] = [];
 	static serializer: Promise<void> = Promise.resolve();
+	static cache: LogEntry[] = []; // Cache to store log messages before collectors are set
 
 	static setCollectors(collectors: Collector[]): void {
 		this.collectors = collectors;
+
+		// Flush the cached logs to the new collectors
+		if (this.cache.length > 0) {
+			this.cache.forEach((log) => this.forwardToCollectors(log));
+			this.cache = []; // Clear the cache after forwarding
+		}
 	}
 
 	static async forwardToCollectors(log: LogEntry): Promise<void> {
-		this.collectors.forEach((collector) => collector.collect(log));
+		if (this.collectors.length === 0) {
+			// Cache the log if no collectors are available yet
+			this.cache.push(log);
+		} else {
+			// Forward to all active collectors
+			this.collectors.forEach((collector) => collector.collect(log));
+		}
 	}
 
 	static logMessage(
@@ -87,6 +100,19 @@ export class Logger {
 	): void {
 		const objPrototype = Object.getPrototypeOf(obj);
 
+		// Check if the object prototype is already wrapped
+		if (objPrototype.__loggerWrapped) {
+			return;
+		}
+
+		// Add the flag to the object prototype to indicate wrapping
+		Object.defineProperty(objPrototype, '__loggerWrapped', {
+			value: true,
+			enumerable: false,
+			writable: false,
+		});
+
+		// Wrap methods defined in methodsMetadata
 		Object.getOwnPropertyNames(objPrototype)
 			.filter((property) => methodsMetadata[property] !== undefined)
 			.forEach((instanceMethodName) => {

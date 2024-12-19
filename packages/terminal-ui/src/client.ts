@@ -48,14 +48,23 @@ export class Client {
 		return this.doPost(`${this.url}/create-payment-intent`, body);
 	}
 
-	capturePaymentIntent({ paymentIntentId }: { paymentIntentId: string }): Promise<any> {
-		const body = JSON.stringify({ payment_intent_id: paymentIntentId });
-		return this.doPost(`${this.url}/capture-payment-intent`, body);
-	}
-
 	savePaymentMethodToCustomer({ paymentMethodId }: { paymentMethodId: string }): Promise<any> {
 		const body = JSON.stringify({ payment_method_id: paymentMethodId });
 		return this.doPost(`${this.url}/attach-payment-method-to-customer`, body);
+	}
+
+	async capturePaymentIntent({
+		orderId,
+		paymentIntent,
+	}: {
+		orderId: number;
+		paymentIntent: Record<string, any>;
+	}): Promise<any> {
+		const body = JSON.stringify({
+			order_id: orderId,
+			payment_intent: paymentIntent,
+		});
+		return this.doPost(`${this.url}/capture-payment-intent`, body);
 	}
 
 	async listLocations(): Promise<any> {
@@ -66,12 +75,7 @@ export class Client {
 			},
 		});
 
-		if (response.ok) {
-			return response.json();
-		} else {
-			const text = await response.text();
-			throw new Error('Request Failed: ' + text);
-		}
+		return this.handleResponse(response);
 	}
 
 	private async doPost(url: string, body: string): Promise<any> {
@@ -83,11 +87,28 @@ export class Client {
 			body: body,
 		});
 
+		return this.handleResponse(response);
+	}
+
+	private async handleResponse(response: Response): Promise<any> {
 		if (response.ok) {
 			return response.json();
 		} else {
-			const text = await response.text();
-			throw new Error('Request Failed: ' + text);
+			// Try to parse JSON error details
+			let errorDetail;
+			try {
+				errorDetail = await response.json();
+			} catch {
+				// Fall back to plain text if JSON parsing fails
+				errorDetail = await response.text();
+			}
+
+			// Throw an error with detailed information
+			throw new Error(
+				typeof errorDetail === 'object'
+					? JSON.stringify(errorDetail)
+					: `Request Failed: ${errorDetail}`
+			);
 		}
 	}
 }

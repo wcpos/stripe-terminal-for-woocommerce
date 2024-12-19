@@ -10,7 +10,12 @@
 	<body>
 		<div id="stripe-terminal-app"></div>
 		<script id="stripe-terminal-js-extra">
-			var stwcConfig = { restUrl: 'https:\/\/wc-82.local\/wp-json\/stripe-terminal\/v1' };
+			var stwcConfig = {
+				restUrl: 'https:\/\/wc-82.local\/wp-json\/stripe-terminal\/v1',
+				chargeAmount: 1000,
+				taxAmount: 100,
+				currency: 'usd',
+			};
 		</script>
 		<script type="module" src="/src/main.tsx"></script>
 	</body>

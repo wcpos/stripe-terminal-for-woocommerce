@@ -35,8 +35,7 @@ export const RegisterNewReader = ({
 		});
 	}, [client]);
 
-	const handleSubmit = async (event: React.FormEvent) => {
-		event.preventDefault();
+	const handleRegisterNewReader = async () => {
 		if (readerCode && readerLabel && readerLocationId) {
 			setIsSubmitting(true);
 			try {
@@ -58,89 +57,78 @@ export const RegisterNewReader = ({
 
 	return (
 		<Section>
-			<form onSubmit={handleSubmit}>
-				<Group direction="column" spacing={16}>
-					<div className="stwc-border-b stwc-border-gray-200 stwc-p-4">
-						<Text className="stwc-text-base stwc-mb-2" color="dark">
-							Register new reader
+			<Group>
+				<div className="stwc-border-b stwc-border-gray-200 stwc-p-4">
+					<Text className="stwc-text-base stwc-mb-2">Register new reader</Text>
+					<Text className="stwc-text-xs" color="lightGrey">
+						Enter the key sequence 0-7-1-3-9 on the reader to display its unique registration code.
+					</Text>
+				</div>
+
+				<div className="stwc-p-4">
+					{/* Registration Code */}
+					<div className="stwc-flex stwc-flex-col stwc-gap-2 stwc-mb-4">
+						<Text className="stwc-text-sm" color="darkGrey">
+							Registration code
 						</Text>
-						<Text className="stwc-text-xs" color="lightGrey">
-							Enter the key sequence 0-7-1-3-9 on the reader to display its unique registration
-							code.
+						<TextInput
+							placeholder="quick-brown-fox"
+							value={readerCode || ''}
+							onChange={(str) => setReaderCode(str)}
+							ariaLabel="Registration code"
+						/>
+					</div>
+
+					{/* Reader Label */}
+					<div className="stwc-flex stwc-flex-col stwc-gap-2 stwc-mb-4">
+						<Text className="stwc-text-sm" color="darkGrey">
+							Reader label
 						</Text>
+						<TextInput
+							placeholder="Front desk"
+							value={readerLabel || ''}
+							onChange={(str) => setReaderLabel(str)}
+							ariaLabel="Reader label"
+						/>
 					</div>
 
-					<div className="stwc-p-4">
-						{/* Registration Code */}
-						<div className="stwc-flex stwc-flex-col stwc-gap-2 stwc-mb-4">
-							<Text className="stwc-text-sm" color="darkGrey">
-								Registration code
+					{/* Reader Location */}
+					<div className="stwc-flex stwc-flex-col stwc-gap-2 stwc-mb-4">
+						<Text className="stwc-text-sm" color="darkGrey">
+							Reader location
+						</Text>
+						{locations.length === 0 ? (
+							<Text className="stwc-text-xs" color="lightGrey">
+								Looks like you don't have any locations yet. Start by creating one in{' '}
+								<Link href="https://dashboard.stripe.com/terminal/locations">the dashboard</Link>.
 							</Text>
-							<TextInput
-								placeholder="quick-brown-fox"
-								value={readerCode || ''}
-								onChange={(str) => setReaderCode(str)}
-								ariaLabel="Registration code"
+						) : (
+							<Select
+								items={locations.map((location) => ({
+									value: location.id,
+									label: `${location.display_name} (${location.id})`,
+								}))}
+								value={readerLocationId || ''}
+								onChange={(str) => setReaderLocationId(str)}
+								required
 							/>
-						</div>
-
-						{/* Reader Label */}
-						<div className="stwc-flex stwc-flex-col stwc-gap-2 stwc-mb-4">
-							<Text className="stwc-text-sm" color="darkGrey">
-								Reader label
-							</Text>
-							<TextInput
-								placeholder="Front desk"
-								value={readerLabel || ''}
-								onChange={(str) => setReaderLabel(str)}
-								ariaLabel="Reader label"
-							/>
-						</div>
-
-						{/* Reader Location */}
-						<div className="stwc-flex stwc-flex-col stwc-gap-2 stwc-mb-4">
-							<Text className="stwc-text-sm" color="darkGrey">
-								Reader location
-							</Text>
-							{locations.length === 0 ? (
-								<Text className="stwc-text-xs" color="lightGrey">
-									Looks like you don't have any locations yet. Start by creating one in{' '}
-									<Link href="https://dashboard.stripe.com/terminal/locations">the dashboard</Link>.
-								</Text>
-							) : (
-								<Select
-									items={locations.map((location) => ({
-										value: location.id,
-										label: `${location.display_name} (${location.id})`,
-									}))}
-									value={readerLocationId || ''}
-									onChange={(str) => setReaderLocationId(str)}
-									ariaLabel="Reader location"
-									required
-								/>
-							)}
-						</div>
+						)}
 					</div>
+				</div>
 
-					{/* Actions */}
-					<div className="stwc-flex stwc-flex-row stwc-gap-4 stwc-justify-center stwc-border-t stwc-border-gray-200 stwc-p-4">
-						<Button onClick={onClickCancel}>
-							<Text color="darkGrey" className="stwc-text-sm">
-								Cancel
-							</Text>
-						</Button>
-						<Button
-							type="submit"
-							disabled={!readerCode || !readerLabel || isSubmitting}
-							color="primary"
-						>
-							<Text color="white" className="stwc-text-sm">
-								{isSubmitting ? 'Registering...' : 'Register'}
-							</Text>
-						</Button>
-					</div>
-				</Group>
-			</form>
+				{/* Actions */}
+				<div className="stwc-flex stwc-flex-row stwc-gap-4 stwc-justify-center stwc-border-t stwc-border-gray-200 stwc-p-4">
+					<Button onClick={onClickCancel}>
+						<Text>Cancel</Text>
+					</Button>
+					<Button
+						onClick={handleRegisterNewReader}
+						disabled={!readerCode || !readerLabel || isSubmitting}
+					>
+						<Text>{isSubmitting ? 'Registering...' : 'Register'}</Text>
+					</Button>
+				</div>
+			</Group>
 		</Section>
 	);
 };

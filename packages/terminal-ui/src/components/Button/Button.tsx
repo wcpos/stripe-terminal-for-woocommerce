@@ -30,6 +30,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 			<button
 				ref={ref}
 				disabled={disabled}
+				type="button" // Prevent the button from submitting the form
 				className={cn(
 					buttonVariants({ variant }),
 					disabled && 'stwc-pointer-events-none stwc-opacity-50',
