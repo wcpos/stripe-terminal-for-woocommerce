@@ -14,7 +14,7 @@ use WC_Payment_Gateway;
  * Class StripeTerminalGateway
  */
 class Gateway extends WC_Payment_Gateway {
-	use StripeErrorHandler; // Include the Stripe error handler trait.
+	use Abstracts\StripeErrorHandler; // Include the Stripe error handler trait.
 
 	/**
 	 * Constructor for the gateway.
@@ -30,9 +30,13 @@ class Gateway extends WC_Payment_Gateway {
 
 		$this->title       = $this->get_option( 'title' );
 		$this->description = $this->get_option( 'description' );
+		$this->test_mode   = $this->get_option( 'test_mode' ) === 'yes';
+		$this->api_key     = $this->test_mode ? $this->get_option( 'test_secret_key' ) : $this->get_option( 'api_key' );
 
 		// Save settings hook.
 		add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
+
+		add_action( 'init', array( $this, 'validate_and_set_webhook' ) );
 	}
 
 	/**
@@ -63,10 +67,22 @@ class Gateway extends WC_Payment_Gateway {
 				'default'     => __( 'Pay in person using Stripe Terminal.', 'stripe-terminal-for-woocommerce' ),
 			),
 			'api_key' => array(
-				'title'       => __( 'Stripe API Key', 'stripe-terminal-for-woocommerce' ),
+				'title'       => __( 'Live Secret Key', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'text',
-				'description' => __( 'Your Stripe secret API key. This is required for the Stripe Terminal integration.', 'stripe-terminal-for-woocommerce' ),
+				'description' => __( 'Your Stripe live secret API key.', 'stripe-terminal-for-woocommerce' ),
 				'default'     => '',
+			),
+			'test_secret_key' => array(
+				'title'       => __( 'Test Secret Key', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'text',
+				'description' => __( 'Your Stripe test secret API key.', 'stripe-terminal-for-woocommerce' ),
+				'default'     => '',
+			),
+			'test_mode' => array(
+				'title'       => __( 'Test Mode', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'label'       => __( 'Enable Test Mode', 'stripe-terminal-for-woocommerce' ),
+				'default'     => 'no',
 			),
 			'locations' => array(
 				'title'       => __( 'Stripe Terminal Locations', 'stripe-terminal-for-woocommerce' ),
@@ -352,6 +368,53 @@ class Gateway extends WC_Payment_Gateway {
 
 		} catch ( \Stripe\Exception\ApiErrorException $e ) {
 			return array( $this->handle_stripe_exception( $e, 'admin' ) ); // Use the trait for error handling.
+		}
+	}
+
+	/**
+	 * Validate and set the Stripe webhook for the plugin.
+	 */
+	public function validate_and_set_webhook() {
+		$webhook_url = rest_url( 'stripe-terminal/v1/webhook' );
+
+		try {
+			\Stripe\Stripe::setApiKey( $this->api_key );
+			$webhooks = \Stripe\WebhookEndpoint::all();
+
+			$exists = false;
+			foreach ( $webhooks->data as $webhook ) {
+				if ( $webhook->url === $webhook_url ) {
+					$exists = true;
+					break;
+				}
+			}
+
+			if ( ! $exists ) {
+				\Stripe\WebhookEndpoint::create(
+					array(
+						'url'            => $webhook_url,
+						'enabled_events' => array( 'payment_intent.succeeded', 'payment_intent.payment_failed' ),
+					)
+				);
+				add_action(
+					'admin_notices',
+					function () use ( $webhook_url ) {
+						echo '<div class="notice notice-success"><p>' .
+							sprintf( __( 'Stripe webhook successfully created: %s', 'stripe-terminal-for-woocommerce' ), esc_html( $webhook_url ) ) .
+							'</p></div>';
+					}
+				);
+			}
+		} catch ( \Exception $e ) {
+			add_action(
+				'admin_notices',
+				function () use ( $e ) {
+					echo '<div class="notice notice-error"><p>' .
+						__( 'Error setting Stripe webhook: ', 'stripe-terminal-for-woocommerce' ) .
+						esc_html( $e->getMessage() ) .
+						'</p></div>';
+				}
+			);
 		}
 	}
 }

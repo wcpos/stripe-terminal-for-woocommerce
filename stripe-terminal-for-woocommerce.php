@@ -2,8 +2,15 @@
 /**
  * Plugin Name: Stripe Terminal for WooCommerce
  * Description: Adds Stripe Terminal support to WooCommerce for in-person payments.
- * Version: 0.0.1
- * Author: Your Name
+ * Version:     0.0.1
+ * Author:      kilbot
+ * Author URI:  https://kilbot.com/
+ * License:     GPL v2 or later
+ * Text Domain: stripe-terminal-for-woocommerce
+ *
+ * Requires at least: 5.2
+ * Requires PHP:      7.4
+ * Requires Plugins:  woocommerce
  *
  * @package WCPOS\WooCommercePOS\StripeTerminal
  */

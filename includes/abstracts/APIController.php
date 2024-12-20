@@ -1,12 +1,45 @@
 <?php
+/**
+ * Abstract Class APIController
+ * A base class for API-related controllers.
+ *
+ * @package WooCommerce\POS\StripeTerminal
+ */
 
-namespace WCPOS\WooCommercePOS\StripeTerminal;
+namespace WCPOS\WooCommercePOS\StripeTerminal\Abstracts;
+
+use WP_REST_Controller;
+use WP_Error;
 
 /**
- * Trait StripeErrorHandler
- * Provides shared Stripe error-handling functionality.
+ * Abstract Class StripeBaseController
+ * A base class for Stripe-related controllers.
  */
-trait StripeErrorHandler {
+abstract class APIController extends WP_REST_Controller {
+	use StripeErrorHandler; // Include the Stripe error handler trait.
+
+	/**
+	 * REST API namespace.
+	 *
+	 * @var string
+	 */
+	protected $namespace = 'stripe-terminal/v1';
+
+	/**
+	 * Register routes for the API.
+	 *
+	 * This method must be implemented by child classes.
+	 *
+	 * @throws \LogicException If not implemented in a child class.
+	 */
+	public function register_routes() {
+			throw new \LogicException(
+				sprintf(
+					'%s must implement the register_routes() method.',
+					get_class( $this )
+				)
+			);
+	}
 
 	/**
 	 * Process a Stripe exception and return a formatted WP_Error or string.

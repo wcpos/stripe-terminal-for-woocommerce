@@ -12,16 +12,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal;
  * Class API
  * Handles the API for Stripe Terminal.
  */
-class API {
-	use StripeErrorHandler; // Include the Stripe error handler trait.
-
-	/**
-	 * Base URL for the API.
-	 *
-	 * @var string
-	 */
-	private $base_url = 'stripe-terminal/v1';
-
+class API extends Abstracts\APIController {
 	/**
 	 * Stripe API Key.
 	 *
@@ -41,10 +32,8 @@ class API {
 			// Gracefully handle initialization errors for the API key.
 			$this->api_key = null;
 		}
-		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
 
-		// Hook for processing balance transactions in the background.
-		add_action( 'stwc_update_balance_transaction', array( $this, 'handle_balance_transaction_update' ), 10, 2 );
+		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
 	}
 
 	/**
@@ -52,7 +41,7 @@ class API {
 	 */
 	public function register_routes() {
 		register_rest_route(
-			$this->base_url,
+			$this->namespace,
 			'/connection-token',
 			array(
 				'methods'  => 'POST',
@@ -62,7 +51,7 @@ class API {
 		);
 
 		register_rest_route(
-			$this->base_url,
+			$this->namespace,
 			'/list-locations',
 			array(
 				'methods'  => 'GET',
@@ -72,7 +61,7 @@ class API {
 		);
 
 		register_rest_route(
-			$this->base_url,
+			$this->namespace,
 			'/register-reader',
 			array(
 				'methods'  => 'POST',
@@ -83,7 +72,7 @@ class API {
 
 		// Add endpoint for creating payment intents.
 		register_rest_route(
-			$this->base_url,
+			$this->namespace,
 			'/create-payment-intent',
 			array(
 				'methods'  => 'POST',
@@ -94,7 +83,7 @@ class API {
 
 		// Add endpoint for capturing payment intents.
 		register_rest_route(
-			$this->base_url,
+			$this->namespace,
 			'/capture-payment-intent',
 			array(
 				'methods'  => 'POST',
@@ -105,11 +94,22 @@ class API {
 
 		// Add endpoint for attaching a payment method to a customer.
 		register_rest_route(
-			$this->base_url,
+			$this->namespace,
 			'/attach-payment-method-to-customer',
 			array(
 				'methods'  => 'POST',
 				'callback' => array( $this, 'attach_payment_method_to_customer' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		// Add the webhook route.
+		register_rest_route(
+			$this->namespace,
+			'/webhook',
+			array(
+				'methods'  => 'POST',
+				'callback' => array( $this, 'handle_webhook' ),
 				'permission_callback' => '__return_true',
 			)
 		);
@@ -330,21 +330,11 @@ class API {
 			// Save order.
 			$order->save();
 
-			// Schedule the background action.
-			if ( $balance_transaction_id ) {
-				as_schedule_single_action(
-					time() + 60, // Delay by 1 minute.
-					'stwc_update_balance_transaction',
-					array(
-						'order_id' => $order_id,
-						'balance_transaction_id' => $balance_transaction_id,
-					),
-					'woocommerce'
-				);
-			}
-
-			// Mark the order as processing.
-			$order->update_status( 'processing', __( 'Payment processed via Stripe Terminal.', 'woocommerce' ) );
+			/**
+			 * Don't change the order status to processing, as this will trigger the order to be marked as paid.
+			 * We will allow the Gateway to handle changing the status and do the order->complete_payment lifecycle.
+			 */
+			// $order->update_status( 'processing', __( 'Payment processed via Stripe Terminal.', 'woocommerce' ) );
 
 			return rest_ensure_response(
 				array(
@@ -359,24 +349,97 @@ class API {
 	}
 
 	/**
-	 * Handle the background task to update balance transaction details.
+	 * Handle Stripe webhook events.
 	 *
-	 * @param int    $order_id Order ID.
-	 * @param string $balance_transaction_id Balance transaction ID.
+	 * @param \WP_REST_Request $request The incoming webhook request.
+	 *
+	 * @return \WP_REST_Response|\WP_Error A success or error response.
 	 */
-	public function handle_balance_transaction_update( $order_id, $balance_transaction_id ) {
-		try {
-			\Stripe\Stripe::setApiKey( $this->api_key );
-			$balance_transaction = \Stripe\BalanceTransaction::retrieve( $balance_transaction_id );
+	public function handle_webhook( \WP_REST_Request $request ) {
+		$payload = $request->get_body();
+		$sig_header = $request->get_header( 'stripe-signature' );
+		$endpoint_secret = 'your_webhook_secret'; // Replace with your actual webhook secret from Stripe
 
-			$order = wc_get_order( $order_id );
-			if ( $order ) {
-				$order->update_meta_data( '_stripe_fee', number_format( $balance_transaction->fee / 100, 2 ) );
-				$order->update_meta_data( '_stripe_net', number_format( $balance_transaction->net / 100, 2 ) );
-				$order->save();
+		try {
+			// Verify the webhook signature.
+			$event = \Stripe\Webhook::constructEvent( $payload, $sig_header, $endpoint_secret );
+
+			// Process the event based on its type.
+			switch ( $event->type ) {
+				case 'payment_intent.succeeded':
+					$payment_intent = $event->data->object;
+					$this->update_order_with_payment_intent( $payment_intent );
+					break;
+
+				case 'charge.succeeded':
+					$charge = $event->data->object;
+					$this->update_order_with_charge( $charge );
+					break;
+				default:
+					// Event type not handled.
+					return rest_ensure_response(
+						array(
+							'success' => true,
+							'message' => 'Event ignored.',
+						)
+					);
 			}
+
+			return rest_ensure_response(
+				array(
+					'success' => true,
+					'message' => 'Webhook handled successfully.',
+				)
+			);
 		} catch ( \Exception $e ) {
-			error_log( 'Error retrieving balance transaction: ' . $e->getMessage() );
+			return new \WP_Error(
+				'webhook_error',
+				'Webhook error: ' . $e->getMessage(),
+				array( 'status' => 400 )
+			);
 		}
+	}
+
+	/**
+	 * Update the order with the payment intent ID.
+	 *
+	 * @param object $payment_intent The payment intent object.
+	 */
+	private function update_order_with_payment_intent( $payment_intent ) {
+		$order_id = $payment_intent->metadata->order_id ?? null;
+		if ( ! $order_id ) {
+			return;
+		}
+
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			return;
+		}
+
+		$order->update_meta_data( '_stripe_payment_intent_id', $payment_intent->id );
+		$order->save();
+	}
+
+
+	/**
+	 * Update the order with the charge details.
+	 *
+	 * @param object $charge The charge object.
+	 */
+	private function update_order_with_charge( $charge ) {
+		$order_id = $charge->metadata->order_id ?? null; // Ensure `order_id` is added to Charge metadata.
+		if ( ! $order_id ) {
+			return;
+		}
+
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			return;
+		}
+
+		$order->update_meta_data( '_stripe_transaction_id', $charge->id );
+		$order->update_meta_data( '_stripe_fee', number_format( $charge->balance_transaction->fee / 100, 2 ) );
+		$order->update_meta_data( '_stripe_net', number_format( $charge->balance_transaction->net / 100, 2 ) );
+		$order->save();
 	}
 }
