@@ -17,6 +17,16 @@ class Gateway extends WC_Payment_Gateway {
 	use Abstracts\StripeErrorHandler; // Include the Stripe error handler trait.
 
 	/**
+	 * @var bool Whether test mode is enabled.
+	 */
+	protected $test_mode;
+
+	/**
+	 * @var string The API key to use.
+	 */
+	protected $api_key;
+
+	/**
 	 * Constructor for the gateway.
 	 */
 	public function __construct() {
@@ -31,12 +41,13 @@ class Gateway extends WC_Payment_Gateway {
 		$this->title       = $this->get_option( 'title' );
 		$this->description = $this->get_option( 'description' );
 		$this->test_mode   = $this->get_option( 'test_mode' ) === 'yes';
-		$this->api_key     = $this->test_mode ? $this->get_option( 'test_secret_key' ) : $this->get_option( 'api_key' );
+		$this->api_key     = $this->test_mode ? $this->get_option( 'test_secret_key' ) : $this->get_option( 'secret_key' );
 
 		// Save settings hook.
 		add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
 
 		add_action( 'init', array( $this, 'validate_and_set_webhook' ) );
+		add_action( 'admin_init', array( $this, 'enforce_https_for_live_mode' ) );
 	}
 
 	/**
@@ -66,16 +77,16 @@ class Gateway extends WC_Payment_Gateway {
 				'description' => __( 'The description displayed to customers during checkout.', 'stripe-terminal-for-woocommerce' ),
 				'default'     => __( 'Pay in person using Stripe Terminal.', 'stripe-terminal-for-woocommerce' ),
 			),
-			'api_key' => array(
+			'secret_key' => array(
 				'title'       => __( 'Live Secret Key', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'text',
-				'description' => __( 'Your Stripe live secret API key.', 'stripe-terminal-for-woocommerce' ),
+				'description' => $this->check_key_status( 'live' ),
 				'default'     => '',
 			),
 			'test_secret_key' => array(
 				'title'       => __( 'Test Secret Key', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'text',
-				'description' => __( 'Your Stripe test secret API key.', 'stripe-terminal-for-woocommerce' ),
+				'description' => $this->check_key_status( 'test' ),
 				'default'     => '',
 			),
 			'test_mode' => array(
@@ -129,42 +140,6 @@ class Gateway extends WC_Payment_Gateway {
 			'result'   => 'success',
 			'redirect' => $this->get_return_url( $order ),
 		);
-	}
-
-	/**
-	 * Process admin options and validate API key.
-	 */
-	public function process_admin_options() {
-		parent::process_admin_options();
-
-		// Validate the API key.
-		$api_key = $this->get_option( 'api_key' );
-		$validation_result = $this->validate_api_key( $api_key );
-
-		if ( $validation_result !== true ) {
-			// Add an admin notice for invalid API key.
-			add_action(
-				'admin_notices',
-				function () use ( $validation_result ) {
-					echo '<div class="notice notice-error is-dismissible">';
-					echo '<p>' . esc_html( $validation_result ) . '</p>';
-					echo '</div>';
-				}
-			);
-
-			// Optionally, remove the invalid key from the database.
-			$this->update_option( 'api_key', '' );
-		} else {
-			// Add a success message for valid API key.
-			add_action(
-				'admin_notices',
-				function () {
-					echo '<div class="notice notice-success is-dismissible">';
-					echo '<p>' . esc_html__( 'Stripe API key validated successfully.', 'stripe-terminal-for-woocommerce' ) . '</p>';
-					echo '</div>';
-				}
-			);
-		}
 	}
 
 	/**
@@ -285,25 +260,133 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Enforce HTTPS for live mode.
+	 */
+	public function enforce_https_for_live_mode() {
+		if ( ! $this->test_mode && ! is_ssl() ) {
+			update_option( 'woocommerce_' . $this->id . '_settings', array_merge( $this->settings, array( 'test_mode' => 'yes' ) ) );
+			add_action(
+				'admin_notices',
+				function () {
+					echo '<div class="notice notice-error">
+					<p>' . esc_html__( 'Stripe Terminal requires HTTPS for live mode. Test mode has been enabled.', 'woocommerce' ) . '</p>
+				</div>';
+				}
+			);
+			$this->test_mode = true;
+		}
+	}
+
+	/**
+	 *
+	 */
+	private function check_key_status( $mode = 'live' ) {
+		$api_key = $this->get_option( $mode === 'live' ? 'secret_key' : 'test_secret_key' );
+
+		if ( empty( $api_key ) ) {
+			if ( $mode === 'test' ) {
+				return __( 'Your Stripe test secret API key.', 'stripe-terminal-for-woocommerce' );
+			}
+			return __( 'Your Stripe live secret API key.', 'stripe-terminal-for-woocommerce' );
+		}
+
+		return $this->validate_api_key( $api_key, $mode ) . '<br>' . $this->validate_and_set_webhook( $api_key, $mode );
+	}
+
+	/**
 	 * Validate the Stripe API key.
 	 *
 	 * @param string $api_key The Stripe API key to validate.
-	 * @return bool|string Returns true if valid, or an error message.
+	 * @param string $mode The mode of the key (live/test).
+	 * @return string Returns success message, or an error message.
 	 */
-	private function validate_api_key( $api_key ) {
-		if ( empty( $api_key ) ) {
-			return __( 'API key cannot be empty.', 'stripe-terminal-for-woocommerce' );
+	private function validate_api_key( $api_key, $mode = 'live' ) {
+		// Check the API key prefix based on the mode.
+		$is_test_key = str_starts_with( $api_key, 'sk_test_' );
+		$is_live_key = str_starts_with( $api_key, 'sk_live_' );
+
+		if ( $mode === 'test' && ! $is_test_key ) {
+			return '<span style="color: red;">&#10060; ' .
+			__( 'Invalid test API key. Test keys must start with sk_test_.', 'stripe-terminal-for-woocommerce' ) .
+			'</span>';
+		}
+
+		if ( $mode === 'live' && ! $is_live_key ) {
+			return '<span style="color: red;">&#10060; ' .
+			__( 'Invalid live API key. Live keys must start with sk_live_.', 'stripe-terminal-for-woocommerce' ) .
+			'</span>';
 		}
 
 		try {
 			\Stripe\Stripe::setApiKey( $api_key );
 
 			// Test the API key by fetching account details.
-			\Stripe\Account::retrieve();
+			$account = \Stripe\Account::retrieve();
 
-			return true;
+			if ( $mode === 'test' && $account->livemode ) {
+				return '<span style="color: red;">&#10060; ' .
+				__( 'Test key provided, but it is being used in live mode.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>';
+			}
+
+			if ( $mode === 'live' && ! $account->livemode ) {
+				return '<span style="color: red;">&#10060; ' .
+				__( 'Live key provided, but it is being used in test mode.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>';
+			}
+
+			return '<span style="color: green;">&#10003; ' .
+			__( 'Stripe API key is valid.', 'stripe-terminal-for-woocommerce' ) .
+			'</span>';
 		} catch ( \Stripe\Exception\ApiErrorException $e ) {
-			return $this->handle_stripe_exception( $e, 'admin' ); // Use the trait for error handling.
+			return '<span style="color: red;">&#10060; ' .
+			$this->handle_stripe_exception( $e, 'admin' ) .
+			'</span>';
+		}
+	}
+
+	/**
+	 * Validate and set the Stripe webhook for the plugin.
+	 *
+	 * @param string $api_key The Stripe API key to use.
+	 * @param string $mode The mode of the key (live/test).
+	 * @return string Returns success message or an error message.
+	 */
+	public function validate_and_set_webhook( $api_key, $mode = 'live' ) {
+		$webhook_url = rest_url( 'stripe-terminal/v1/webhook' );
+
+		try {
+			\Stripe\Stripe::setApiKey( $api_key );
+			$webhooks = \Stripe\WebhookEndpoint::all();
+
+			$exists = false;
+			foreach ( $webhooks->data as $webhook ) {
+				if ( $webhook->url === $webhook_url ) {
+						$exists = true;
+						break;
+				}
+			}
+
+			if ( ! $exists ) {
+					\Stripe\WebhookEndpoint::create(
+						array(
+							'url'            => $webhook_url,
+							'enabled_events' => array( 'payment_intent.succeeded', 'payment_intent.payment_failed' ),
+						)
+					);
+					return '<span style="color: green;">&#10003; ' .
+							sprintf( __( 'Stripe webhook successfully created: %s', 'stripe-terminal-for-woocommerce' ), esc_html( $webhook_url ) ) .
+							'</span>';
+			} else {
+				return '<span style="color: green;">&#10003; ' .
+					__( 'Stripe webhook active.', 'stripe-terminal-for-woocommerce' ) .
+					'</span>';
+			}
+		} catch ( \Exception $e ) {
+			return '<span style="color: red;">&#10060; ' .
+					__( 'Error setting Stripe webhook: ', 'stripe-terminal-for-woocommerce' ) .
+					esc_html( $e->getMessage() ) .
+					'</span>';
 		}
 	}
 
@@ -368,53 +451,6 @@ class Gateway extends WC_Payment_Gateway {
 
 		} catch ( \Stripe\Exception\ApiErrorException $e ) {
 			return array( $this->handle_stripe_exception( $e, 'admin' ) ); // Use the trait for error handling.
-		}
-	}
-
-	/**
-	 * Validate and set the Stripe webhook for the plugin.
-	 */
-	public function validate_and_set_webhook() {
-		$webhook_url = rest_url( 'stripe-terminal/v1/webhook' );
-
-		try {
-			\Stripe\Stripe::setApiKey( $this->api_key );
-			$webhooks = \Stripe\WebhookEndpoint::all();
-
-			$exists = false;
-			foreach ( $webhooks->data as $webhook ) {
-				if ( $webhook->url === $webhook_url ) {
-					$exists = true;
-					break;
-				}
-			}
-
-			if ( ! $exists ) {
-				\Stripe\WebhookEndpoint::create(
-					array(
-						'url'            => $webhook_url,
-						'enabled_events' => array( 'payment_intent.succeeded', 'payment_intent.payment_failed' ),
-					)
-				);
-				add_action(
-					'admin_notices',
-					function () use ( $webhook_url ) {
-						echo '<div class="notice notice-success"><p>' .
-							sprintf( __( 'Stripe webhook successfully created: %s', 'stripe-terminal-for-woocommerce' ), esc_html( $webhook_url ) ) .
-							'</p></div>';
-					}
-				);
-			}
-		} catch ( \Exception $e ) {
-			add_action(
-				'admin_notices',
-				function () use ( $e ) {
-					echo '<div class="notice notice-error"><p>' .
-						__( 'Error setting Stripe webhook: ', 'stripe-terminal-for-woocommerce' ) .
-						esc_html( $e->getMessage() ) .
-						'</p></div>';
-				}
-			);
 		}
 	}
 }

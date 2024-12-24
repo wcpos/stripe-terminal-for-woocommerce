@@ -123,14 +123,7 @@ class API extends Abstracts\APIController {
 	 */
 	private function get_stripe_api_key() {
 		try {
-			$gateways = WC()->payment_gateways()->payment_gateways();
-			$stripe_gateway = $gateways['stripe_terminal_for_woocommerce'] ?? null;
-
-			if ( ! $stripe_gateway ) {
-				throw new \Exception( 'Stripe Terminal gateway is not enabled.' );
-			}
-
-			$api_key = $stripe_gateway->get_option( 'api_key' );
+			$api_key = Settings::get_api_key();
 
 			if ( empty( $api_key ) ) {
 				throw new \Exception( 'Stripe API key is not set. Please configure the gateway settings.' );

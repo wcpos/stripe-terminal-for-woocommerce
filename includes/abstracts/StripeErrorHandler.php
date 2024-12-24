@@ -1,4 +1,9 @@
 <?php
+/**
+ * Provides shared Stripe error-handling functionality.
+ *
+ * @package WooCommerce\POS\StripeTerminal\Abstracts
+ */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Abstracts;
 
