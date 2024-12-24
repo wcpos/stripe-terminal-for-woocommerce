@@ -33,7 +33,7 @@ class API extends Abstracts\APIController {
 			$this->api_key = null;
 		}
 
-		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
+		$this->register_routes();
 	}
 
 	/**
@@ -118,8 +118,7 @@ class API extends Abstracts\APIController {
 	/**
 	 * Retrieve the Stripe API key from WooCommerce settings.
 	 *
-	 * @return string The Stripe API key.
-	 * @throws \Exception If the Stripe gateway is not enabled or the API key is missing.
+	 * @return string The Stripe API key, or an error.
 	 */
 	private function get_stripe_api_key() {
 		try {
@@ -131,7 +130,7 @@ class API extends Abstracts\APIController {
 
 			return $api_key;
 		} catch ( \Exception $e ) {
-			throw $this->handle_stripe_exception( $e, 'get_stripe_api_key_error' );
+			return $this->handle_stripe_exception( $e, 'get_stripe_api_key_error' );
 		}
 	}
 
@@ -351,7 +350,7 @@ class API extends Abstracts\APIController {
 	public function handle_webhook( \WP_REST_Request $request ) {
 		$payload = $request->get_body();
 		$sig_header = $request->get_header( 'stripe-signature' );
-		$endpoint_secret = 'your_webhook_secret'; // Replace with your actual webhook secret from Stripe
+		$endpoint_secret = Settings::get_webhook_secret();
 
 		try {
 			// Verify the webhook signature.

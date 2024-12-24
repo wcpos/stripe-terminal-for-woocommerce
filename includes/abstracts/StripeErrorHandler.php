@@ -2,10 +2,12 @@
 /**
  * Provides shared Stripe error-handling functionality.
  *
- * @package WooCommerce\POS\StripeTerminal\Abstracts
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Abstracts;
+
+use WCPOS\WooCommercePOS\StripeTerminal\Logger;
 
 /**
  * Trait StripeErrorHandler
@@ -22,6 +24,26 @@ trait StripeErrorHandler {
 	 * @return \WP_Error|string A formatted error for WordPress or a string for admin notices.
 	 */
 	public function handle_stripe_exception( \Exception $e, string $context = 'general' ) {
+		// Initialize logging.
+		$log_message = sprintf(
+			'[%s] Stripe API Exception: %s (Code: %s)',
+			$context,
+			$e->getMessage(),
+			$e->getCode()
+		);
+
+		// Add request ID and additional context if available.
+		if ( $e instanceof \Stripe\Exception\ApiErrorException ) {
+			$log_message .= sprintf(
+				' | Request ID: %s | Status Code: %s',
+				$e->getRequestId(),
+				method_exists( $e, 'getHttpStatus' ) ? $e->getHttpStatus() : 'unknown'
+			);
+		}
+
+		// Log the error.
+		Logger::log( $log_message );
+
 		if ( $e instanceof \Stripe\Exception\ApiErrorException ) {
 			$status_code = 500; // Default status.
 			$error_data = array(
@@ -71,6 +93,9 @@ trait StripeErrorHandler {
 
 			$error_data['status'] = $status_code;
 
+			// Log detailed error data for debugging.
+			Logger::log( $error_data );
+
 			// For admin notices, return a string.
 			if ( $context === 'admin' ) {
 				return sprintf(
@@ -87,6 +112,9 @@ trait StripeErrorHandler {
 				$error_data
 			);
 		}
+
+		// For non-Stripe exceptions.
+		Logger::log( 'Non-Stripe exception encountered: ' . $e->getMessage() );
 
 		// For non-Stripe exceptions.
 		return $context === 'admin'

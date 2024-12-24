@@ -3,7 +3,7 @@
  * Abstract Class APIController
  * A base class for API-related controllers.
  *
- * @package WooCommerce\POS\StripeTerminal
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Abstracts;

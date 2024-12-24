@@ -2,7 +2,7 @@
 /**
  * Settings for the Stripe Terminal integration.
  *
- * @package WooCommerce\POS\StripeTerminal
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
@@ -26,9 +26,20 @@ class Settings {
 	 */
 	public static function get_api_key() {
 		$settings = self::get_gateway_settings();
-		if ( $settings['test_mode'] === 'yes' ) {
+		if ( isset( $settings['test_mode'] ) && $settings['test_mode'] === 'yes' ) {
 			return isset( $settings['test_secret_key'] ) ? $settings['test_secret_key'] : '';
 		}
 		return isset( $settings['secret_key'] ) ? $settings['secret_key'] : '';
+	}
+
+	/**
+	 * Get the Stripe webhook secret.
+	 */
+	public static function get_webhook_secret() {
+		$settings = self::get_gateway_settings();
+		if ( isset( $settings['test_mode'] ) && $settings['test_mode'] === 'yes' ) {
+			return isset( $settings['test_webhook_secret'] ) ? $settings['test_webhook_secret'] : '';
+		}
+		return isset( $settings['webhook_secret'] ) ? $settings['webhook_secret'] : '';
 	}
 }

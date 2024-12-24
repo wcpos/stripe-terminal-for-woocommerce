@@ -45,8 +45,6 @@ class Gateway extends WC_Payment_Gateway {
 
 		// Save settings hook.
 		add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
-
-		add_action( 'init', array( $this, 'validate_and_set_webhook' ) );
 		add_action( 'admin_init', array( $this, 'enforce_https_for_live_mode' ) );
 	}
 
@@ -80,25 +78,26 @@ class Gateway extends WC_Payment_Gateway {
 			'secret_key' => array(
 				'title'       => __( 'Live Secret Key', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'text',
-				'description' => $this->check_key_status( 'live' ),
+				'description' => '',
 				'default'     => '',
+				'custom_attributes' => array(
+					'id' => 'secret_key',
+				),
 			),
 			'test_secret_key' => array(
 				'title'       => __( 'Test Secret Key', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'text',
-				'description' => $this->check_key_status( 'test' ),
+				'description' => '',
 				'default'     => '',
+				'custom_attributes' => array(
+					'id' => 'test_secret_key',
+				),
 			),
 			'test_mode' => array(
 				'title'       => __( 'Test Mode', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'checkbox',
 				'label'       => __( 'Enable Test Mode', 'stripe-terminal-for-woocommerce' ),
 				'default'     => 'no',
-			),
-			'locations' => array(
-				'title'       => __( 'Stripe Terminal Locations', 'stripe-terminal-for-woocommerce' ),
-				'type'        => 'title',
-				'description' => implode( '<br>', $this->fetch_terminal_locations() ),
 			),
 		);
 	}
@@ -112,6 +111,58 @@ class Gateway extends WC_Payment_Gateway {
 	public static function register_gateway( $methods ) {
 		$methods[] = __CLASS__;
 		return $methods;
+	}
+
+	/**
+	 * Output the settings in the admin area.
+	 */
+	public function admin_options() {
+		parent::admin_options();
+
+		// Add the Stripe Terminal Locations section.
+		$locations = $this->fetch_terminal_locations();
+		?>
+		<table class="form-table">
+			<tr valign="top">
+					<th scope="row" class="titledesc">
+							<label><?php esc_html_e( 'Stripe Terminal Locations', 'stripe-terminal-for-woocommerce' ); ?></label>
+					</th>
+					<td class="forminp">
+							<?php if ( ! empty( $locations ) ) : ?>
+									<ul style="list-style-type: disc; margin-left: 20px; margin-top: 0;">
+											<?php foreach ( $locations as $location ) : ?>
+													<li><?php echo wp_kses_post( $location ); ?></li>
+											<?php endforeach; ?>
+									</ul>
+							<?php else : ?>
+									<p><?php esc_html_e( 'No locations found. Please connect your Stripe account first.', 'stripe-terminal-for-woocommerce' ); ?></p>
+							<?php endif; ?>
+					</td>
+			</tr>
+		</table>
+		<?php
+	}
+
+	/**
+	 * Output the descriptions for the gateway settings.
+	 *
+	 * @param  array $data Data for the description.
+	 * @return string
+	 */
+	public function get_description_html( $data ) {
+		// Check if custom_attributes are set.
+		if ( isset( $data['custom_attributes'] ) && isset( $data['custom_attributes']['id'] ) ) {
+			switch ( $data['custom_attributes']['id'] ) {
+				case 'secret_key':
+					return '<p class="description">' . $this->check_key_status( 'live' ) . '</p>';
+				case 'test_secret_key':
+					return '<p class="description">' . $this->check_key_status( 'test' ) . '</p>';
+				case 'locations':
+					return '<p class="description">' . $this->fetch_terminal_locations() . '</p>';
+			}
+		}
+
+		return parent::get_description_html( $data );
 	}
 
 	/**
@@ -360,6 +411,8 @@ class Gateway extends WC_Payment_Gateway {
 			$webhooks = \Stripe\WebhookEndpoint::all();
 
 			$exists = false;
+			$webhook_secret = null;
+
 			foreach ( $webhooks->data as $webhook ) {
 				if ( $webhook->url === $webhook_url ) {
 						$exists = true;
@@ -367,21 +420,35 @@ class Gateway extends WC_Payment_Gateway {
 				}
 			}
 
+			/**
+			 * The webhook secret is only available when creating a new webhook.
+			 *
+			 * @TODO - add a way to manually update the webhook secret if the webhook already exists.
+			 * Or should we just delete the webhook and create a new one?
+			 */
 			if ( ! $exists ) {
-					\Stripe\WebhookEndpoint::create(
-						array(
-							'url'            => $webhook_url,
-							'enabled_events' => array( 'payment_intent.succeeded', 'payment_intent.payment_failed' ),
-						)
-					);
-					return '<span style="color: green;">&#10003; ' .
-							sprintf( __( 'Stripe webhook successfully created: %s', 'stripe-terminal-for-woocommerce' ), esc_html( $webhook_url ) ) .
-							'</span>';
-			} else {
-				return '<span style="color: green;">&#10003; ' .
-					__( 'Stripe webhook active.', 'stripe-terminal-for-woocommerce' ) .
-					'</span>';
+				$new_webhook = \Stripe\WebhookEndpoint::create(
+					array(
+						'url'            => $webhook_url,
+						'enabled_events' => array( 'payment_intent.succeeded', 'payment_intent.payment_failed' ),
+					)
+				);
+				$webhook_secret = $new_webhook->secret ?? null; // Get the secret for the new webhook.
+
+				// Save the secret in the plugin settings.
+				if ( $webhook_secret ) {
+					$settings = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
+					$settings[ $mode === 'test' ? 'test_webhook_secret' : 'webhook_secret' ] = $webhook_secret;
+					update_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', $settings );
+				}
 			}
+
+			return '<span style="color: green;">&#10003; ' .
+					( $exists
+							? __( 'Stripe webhook active.', 'stripe-terminal-for-woocommerce' )
+							: sprintf( __( 'Stripe webhook successfully created: %s', 'stripe-terminal-for-woocommerce' ), esc_html( $webhook_url ) )
+					) .
+					'</span>';
 		} catch ( \Exception $e ) {
 			return '<span style="color: red;">&#10060; ' .
 					__( 'Error setting Stripe webhook: ', 'stripe-terminal-for-woocommerce' ) .
@@ -390,6 +457,7 @@ class Gateway extends WC_Payment_Gateway {
 		}
 	}
 
+
 	/**
 	 * Fetch Stripe Terminal locations for the account and check for associated readers.
 	 *
@@ -397,15 +465,13 @@ class Gateway extends WC_Payment_Gateway {
 	 */
 	private function fetch_terminal_locations() {
 		try {
-			$api_key = $this->get_option( 'api_key' );
-
-			if ( empty( $api_key ) ) {
+			if ( empty( $this->api_key ) ) {
 				return array(
 					__( 'No API key provided. Please enter your Stripe API key and save the settings.', 'stripe-terminal-for-woocommerce' ),
 				);
 			}
 
-			\Stripe\Stripe::setApiKey( $api_key );
+			\Stripe\Stripe::setApiKey( $this->api_key );
 
 			// Fetch locations.
 			$locations = \Stripe\Terminal\Location::all();
