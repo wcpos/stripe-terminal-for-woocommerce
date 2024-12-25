@@ -30,6 +30,10 @@ jobs:
             echo "::set-output name=release::true"
           fi
 
+      - name: Install composer dependencies
+        if: steps.check_version.outputs.release == 'true'
+        run: composer install --no-dev
+
       - name: Install and Build terminal-ui
         if: steps.check_version.outputs.release == 'true'
         working-directory: packages/terminal-ui
