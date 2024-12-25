@@ -1,29 +1,19 @@
 <?php
 /**
- * Abstract Class APIController
- * A base class for API-related controllers.
+ * Provides shared Stripe error-handling functionality.
  *
  * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Abstracts;
 
-use WP_REST_Controller;
-use WP_Error;
+use WCPOS\WooCommercePOS\StripeTerminal\Logger;
 
 /**
- * Abstract Class StripeBaseController
- * A base class for Stripe-related controllers.
+ * Trait StripeErrorHandler
+ * Provides shared Stripe error-handling functionality.
  */
-abstract class APIController extends WP_REST_Controller {
-	use StripeErrorHandler; // Include the Stripe error handler trait.
-
-	/**
-	 * REST API namespace.
-	 *
-	 * @var string
-	 */
-	protected $namespace = 'stripe-terminal/v1';
+trait StripeErrorHandler {
 
 	/**
 	 * Process a Stripe exception and return a formatted WP_Error or string.
@@ -34,6 +24,26 @@ abstract class APIController extends WP_REST_Controller {
 	 * @return \WP_Error|string A formatted error for WordPress or a string for admin notices.
 	 */
 	public function handle_stripe_exception( \Exception $e, string $context = 'general' ) {
+		// Initialize logging.
+		$log_message = sprintf(
+			'[%s] Stripe API Exception: %s (Code: %s)',
+			$context,
+			$e->getMessage(),
+			$e->getCode()
+		);
+
+		// Add request ID and additional context if available.
+		if ( $e instanceof \Stripe\Exception\ApiErrorException ) {
+			$log_message .= sprintf(
+				' | Request ID: %s | Status Code: %s',
+				$e->getRequestId(),
+				method_exists( $e, 'getHttpStatus' ) ? $e->getHttpStatus() : 'unknown'
+			);
+		}
+
+		// Log the error.
+		Logger::log( $log_message );
+
 		if ( $e instanceof \Stripe\Exception\ApiErrorException ) {
 			$status_code = 500; // Default status.
 			$error_data = array(
@@ -83,6 +93,9 @@ abstract class APIController extends WP_REST_Controller {
 
 			$error_data['status'] = $status_code;
 
+			// Log detailed error data for debugging.
+			Logger::log( $error_data );
+
 			// For admin notices, return a string.
 			if ( $context === 'admin' ) {
 				return sprintf(
@@ -99,6 +112,9 @@ abstract class APIController extends WP_REST_Controller {
 				$error_data
 			);
 		}
+
+		// For non-Stripe exceptions.
+		Logger::log( 'Non-Stripe exception encountered: ' . $e->getMessage() );
 
 		// For non-Stripe exceptions.
 		return $context === 'admin'
