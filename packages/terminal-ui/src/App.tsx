@@ -1,6 +1,6 @@
 import React from 'react';
 import { Readers } from './readers/Readers';
-import { Logs } from './logs/Logs';
+import { Logs } from './Logs';
 import { ConnectionInfo } from './ConnectionInfo';
 import { SimulatorPayment } from './payment/SimulatorPayment';
 import { Payment } from './payment/Payment';
