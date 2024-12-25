@@ -1,9 +1,9 @@
 import React from 'react';
 import { CSSTransition, TransitionGroup } from 'react-transition-group';
-import { Button } from '../components/Button/Button';
-import { Logger, LogEntry } from '../logger';
-import { Text } from '../components/Text/Text';
-import { Link } from '../components/Link/Link';
+import { Button } from './components/Button/Button';
+import { Logger, LogEntry } from './logger';
+import { Text } from './components/Text/Text';
+import { Link } from './components/Link/Link';
 
 export const Logs = () => {
 	const [logs, setLogs] = React.useState<LogEntry[]>([]);
