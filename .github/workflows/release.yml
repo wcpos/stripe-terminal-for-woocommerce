@@ -52,6 +52,7 @@ jobs:
       - name: Build and upload ZIP
         if: steps.check_version.outputs.release == 'true'
         run: |
+          rm -rf packages # Remove the packages folder
           zip -r stripe-terminal-for-woocommerce.zip . -x "*.git*"
           gh release upload v${{ env.VERSION }} stripe-terminal-for-woocommerce.zip --clobber
         env:
