@@ -2,9 +2,6 @@ import { Logger } from './logger';
 import { Client } from './client';
 
 interface StwcConfig {
-	chargeAmount: number | null;
-	taxAmount: number | null;
-	currency: string | null;
 	restUrl: string | null;
 	orderId: number | null;
 	client: Client | null;
@@ -23,9 +20,6 @@ const validateConfig = (key: string, value: any, type: string): any => {
 };
 
 // Validate and extract config values
-const chargeAmount = validateConfig('chargeAmount', rawConfig.chargeAmount, 'number');
-const taxAmount = validateConfig('taxAmount', rawConfig.taxAmount, 'number');
-const currency = validateConfig('currency', rawConfig.currency, 'string');
 const restUrl = validateConfig('restUrl', rawConfig.restUrl, 'string');
 const orderId = validateConfig('orderId', rawConfig.orderId, 'number');
 
@@ -143,9 +137,6 @@ if (terminal) {
 
 // Export the validated configuration and initialized instances
 export const stwcConfig: StwcConfig = {
-	chargeAmount,
-	taxAmount,
-	currency,
 	restUrl,
 	client,
 	terminal,

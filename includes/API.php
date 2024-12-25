@@ -8,6 +8,8 @@
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
+use WCPOS\WooCommercePOS\StripeTerminal\Utils\CurrencyConverter;
+
 /**
  * Class API
  * Handles the API for Stripe Terminal.
@@ -214,10 +216,24 @@ class API extends Abstracts\APIController {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
 			$params = $request->get_json_params();
-			$amount = $params['amount'] ?? null;
-			$currency = $params['currency'] ?? 'usd';
-			$description = $params['description'] ?? null;
-			$payment_method_types = $params['payment_method_types'] ?? array( 'card' );
+			$order_id = $params['order_id'] ?? null;
+
+			if ( empty( $order_id ) ) {
+				return new \WP_Error(
+					'missing_params',
+					'Order ID is required.',
+					array( 'status' => 400 )
+				);
+			}
+
+			$order = wc_get_order( $order_id );
+			$tax_included = get_option( 'woocommerce_prices_include_tax', 'no' ) === 'yes';
+			$total_amount = CurrencyConverter::convert_to_stripe_amount( $order->get_total(), $order->get_currency() );
+			$tax_amount   = CurrencyConverter::convert_to_stripe_amount( $order->get_total_tax(), $order->get_currency() );
+			$amount       = $tax_included ? $total_amount : $total_amount + $tax_amount;
+			$currency     = strtolower( $order->get_currency() );
+			$description  = sprintf( 'Order #%s', $order_id );
+			$payment_method_types = $currency === 'cad' ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
 
 			if ( empty( $amount ) || empty( $currency ) ) {
 				return new \WP_Error(
@@ -233,6 +249,7 @@ class API extends Abstracts\APIController {
 					'currency' => $currency,
 					'payment_method_types' => $payment_method_types,
 					'description' => $description,
+					'metadata' => array( 'order_id' => $order_id ),
 				)
 			);
 
@@ -308,15 +325,12 @@ class API extends Abstracts\APIController {
 
 			// Extract charge data.
 			$charge = $payment_intent['charges']['data'][0] ?? null;
-			$balance_transaction_id = $charge['balance_transaction'] ?? null;
 
 			// Save immediate metadata.
 			$order->update_meta_data( '_transaction_id', $charge['id'] ?? null );
 			$order->update_meta_data( '_stripe_currency', strtoupper( $charge['currency'] ?? '' ) );
 			$order->update_meta_data( '_stripe_charge_captured', $charge['captured'] ? 'yes' : 'no' );
 			$order->update_meta_data( '_stripe_intent_id', $payment_intent['id'] ?? null );
-			$order->update_meta_data( '_stripe_terminal_reader_id', $payment_intent['terminal_reader_id'] ?? null );
-			$order->update_meta_data( '_stripe_terminal_location_id', $payment_intent['terminal_location_id'] ?? null );
 			$order->update_meta_data( '_stripe_card_type', ucfirst( $charge['payment_method_details']['card']['brand'] ?? '' ) );
 
 			// Save order.
@@ -430,8 +444,8 @@ class API extends Abstracts\APIController {
 		}
 
 		$order->update_meta_data( '_stripe_transaction_id', $charge->id );
-		$order->update_meta_data( '_stripe_fee', number_format( $charge->balance_transaction->fee / 100, 2 ) );
-		$order->update_meta_data( '_stripe_net', number_format( $charge->balance_transaction->net / 100, 2 ) );
+		$order->update_meta_data( '_stripe_fee', CurrencyConverter::convert_from_stripe_amount( $charge->balance_transaction->fee, $charge->currency ) );
+		$order->update_meta_data( '_stripe_net', CurrencyConverter::convert_from_stripe_amount( $charge->balance_transaction->net, $charge->currency ) );
 		$order->save();
 	}
 }

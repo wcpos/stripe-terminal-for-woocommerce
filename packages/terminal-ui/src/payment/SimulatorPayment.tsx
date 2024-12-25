@@ -5,10 +5,9 @@ import { TextInput } from '../components/TextInput/TextInput';
 import { CheckBox } from '../components/CheckBox/CheckBox';
 import { Select } from '../components/Select/Select';
 import { Button } from '../components/Button/Button';
-import { Logger } from '../logger';
-import { stwcConfig } from '../stwcConfig';
 import type { Terminal } from '@stripe/terminal-js';
 import type { Client } from '../client';
+import { useCollectPayment } from './useCollectPayment';
 
 const middot = '\u00b7';
 const placeholder = 'xxxx xxxx xxxx xxxx'.replace(/x/g, middot);
@@ -66,46 +65,40 @@ interface SimulatorPaymentProps {
 	terminal: Terminal;
 }
 
-interface SimulatorConfig {
-	testPaymentMethod: string;
-	testCardNumber: string;
-	tipAmount?: number;
-}
-
 export const SimulatorPayment = ({ client, terminal }: SimulatorPaymentProps) => {
-	const { chargeAmount, taxAmount, currency, orderId } = stwcConfig;
+	// Use the base hook
+	const {
+		showPaymentOptions,
+		paymentProgress,
+		cancelablePayment,
+		handleCollectCardPayment: baseCollectCardPayment,
+		handleCancelPayment,
+	} = useCollectPayment({ client, terminal });
+
 	const [testCardNumber, setTestCardNumber] = React.useState(testPaymentMethodCardNumbers['visa']);
 	const [testPaymentMethod, setTestPaymentMethod] = React.useState('visa');
-	const [tipAmount, setTipAmount] = React.useState<number | null>(null);
 	const [simulateOnReaderTip, setSimulateOnReaderTip] = React.useState(false);
-	const [cancelablePayment, setCancelablePayment] = React.useState(false);
-	const pendingPaymentIntentSecret = React.useRef<string | null>(null);
+	const [tipAmount, setTipAmount] = React.useState<number | null>(null);
 
-	const errorAlert = (error: unknown, fallbackMessage: string) => {
-		let errorMessage = fallbackMessage;
+	// We override the base handleCollectCardPayment to add simulator config
+	const handleCollectCardPayment = React.useCallback(async () => {
+		// Provide the simulator configuration
+		terminal.setSimulatorConfiguration({
+			testPaymentMethod,
+			testCardNumber,
+			...(simulateOnReaderTip && tipAmount !== null ? { tipAmount: Number(tipAmount) } : {}),
+		});
 
-		if (error instanceof Error) {
-			// Attempt to parse the message as JSON if possible
-			try {
-				const parsedError = JSON.parse(error.message);
-				errorMessage = parsedError.message || fallbackMessage;
-			} catch {
-				// If parsing fails, use the raw message
-				errorMessage = error.message;
-			}
-		} else if (typeof error === 'string') {
-			// Handle string errors, attempting JSON parsing
-			try {
-				const parsedError = JSON.parse(error);
-				errorMessage = parsedError.message || fallbackMessage;
-			} catch {
-				errorMessage = error; // Fallback to raw string
-			}
-		}
-
-		// Show the error message to the user
-		alert(errorMessage);
-	};
+		// Delegate to the base logic
+		await baseCollectCardPayment();
+	}, [
+		testPaymentMethod,
+		testCardNumber,
+		simulateOnReaderTip,
+		tipAmount,
+		terminal,
+		baseCollectCardPayment,
+	]);
 
 	const handleCardNumberChange = (value: string) => {
 		setTestCardNumber(value);
@@ -129,150 +122,58 @@ export const SimulatorPayment = ({ client, terminal }: SimulatorPaymentProps) =>
 		setTestCardNumber(testPaymentMethodCardNumbers[value] || '');
 	};
 
-	const handleCollectCardPayment = async () => {
-		if (chargeAmount === null || taxAmount === null || currency === null || orderId === null) {
-			Logger.logMessage('Cannot proceed with payment: Invalid configuration.', 'error');
-			alert('Cannot proceed with payment: Invalid configuration.');
-			return;
-		}
-
-		// Create or reuse a PaymentIntent
-		if (!pendingPaymentIntentSecret.current) {
-			try {
-				const paymentMethodTypes =
-					currency === 'cad' ? ['card_present', 'interac_present'] : ['card_present'];
-				const createIntentResponse = await client.createPaymentIntent({
-					amount: chargeAmount + taxAmount,
-					currency,
-					description: 'Test Charge',
-					paymentMethodTypes,
-				});
-				pendingPaymentIntentSecret.current = createIntentResponse.client_secret;
-			} catch (error) {
-				errorAlert(error, 'Failed to create payment intent.');
-				return;
-			}
-		}
-
-		const simulatorConfiguration: SimulatorConfig = {
-			testPaymentMethod,
-			testCardNumber,
-		};
-		if (simulateOnReaderTip) {
-			simulatorConfiguration.tipAmount = Number(tipAmount);
-		}
-
-		// Read a card from the customer
-		if (!pendingPaymentIntentSecret.current) return;
-
-		try {
-			terminal.setSimulatorConfiguration(simulatorConfiguration);
-			const paymentMethodPromise = terminal.collectPaymentMethod(
-				pendingPaymentIntentSecret.current
-			);
-			setCancelablePayment(true);
-
-			const result = await paymentMethodPromise;
-
-			if ('error' in result) {
-				Logger.logMessage(`Collect payment method failed: ${result.error.message}`, 'error');
-				alert(`Collect payment method failed: ${result.error.message}`);
-				return;
-			}
-
-			// Confirm the payment
-			const confirmResult = await terminal.processPayment(result.paymentIntent);
-			setCancelablePayment(false);
-
-			if ('error' in confirmResult) {
-				errorAlert(confirmResult.error, 'Confirm failed.');
-				return;
-			}
-
-			if (confirmResult.paymentIntent.status === 'succeeded') {
-				// Capture the PaymentIntent via the client
-				try {
-					await client.capturePaymentIntent({
-						paymentIntent: confirmResult.paymentIntent,
-						orderId: orderId,
-					});
-
-					// Trigger the WooCommerce place_order button
-					const placeOrderButton = document.getElementById('place_order');
-					if (placeOrderButton) {
-						const event = new MouseEvent('click', {
-							bubbles: true,
-							cancelable: true,
-							view: window,
-						});
-
-						placeOrderButton.dispatchEvent(event);
-					}
-				} catch (error) {
-					errorAlert(error, 'Failed to capture payment intent.');
-				}
-			} else {
-				alert('Payment failed to succeed.');
-			}
-		} catch (error) {
-			errorAlert(error, 'An error occurred during payment collection.');
-		} finally {
-			setCancelablePayment(false);
-		}
-	};
-
-	const handleCancelPayment = async () => {
-		await terminal.cancelCollectPaymentMethod();
-		pendingPaymentIntentSecret.current = null;
-		setCancelablePayment(false);
-	};
-
 	return (
 		<Group>
 			<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-border-b stwc-border-gray-200 stwc-p-4">
 				Simulator Payment
 			</div>
-			<div className="stwc-flex stwc-flex-col stwc-gap-4 stwc-p-4">
-				<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-space-x-4">
-					<Text color="darkGrey">Test Card Number</Text>
-					<TextInput
-						aria-label="Test Card Number"
-						onChange={handleCardNumberChange}
-						value={testCardNumber}
-						placeholder={placeholder}
-						className="stwc-w-64"
-					/>
-				</div>
-				<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-space-x-4">
-					<Text color="darkGrey">Test Payment Method</Text>
-					<Select
-						items={testPaymentMethods}
-						value={testPaymentMethod}
-						onChange={handlePaymentMethodChange}
-					/>
-				</div>
-				<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-space-x-4">
-					<Text color="darkGrey">Simulate on-reader tip?</Text>
-					<CheckBox
-						aria-label="Simulate on-reader tip?"
-						checked={simulateOnReaderTip} // Use `checked` prop
-						onChange={handleSimulateTipChange} // Toggle state correctly
-					/>
-				</div>
-				{simulateOnReaderTip && (
+			{showPaymentOptions ? (
+				<div className="stwc-flex stwc-flex-col stwc-gap-4 stwc-p-4">
 					<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-space-x-4">
-						<Text color="darkGrey">Tip Amount</Text>
+						<Text color="darkGrey">Test Card Number</Text>
 						<TextInput
-							aria-label="Tip Amount"
-							onChange={(value) => handleTipAmountChange(Number(value) || null)}
-							value={tipAmount !== null ? tipAmount.toString() : ''}
-							type="number"
-							min="0"
-							step="1"
+							aria-label="Test Card Number"
+							onChange={handleCardNumberChange}
+							value={testCardNumber}
+							placeholder={placeholder}
+							className="stwc-w-64"
 						/>
 					</div>
-				)}
-			</div>
+					<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-space-x-4">
+						<Text color="darkGrey">Test Payment Method</Text>
+						<Select
+							items={testPaymentMethods}
+							value={testPaymentMethod}
+							onChange={handlePaymentMethodChange}
+						/>
+					</div>
+					<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-space-x-4">
+						<Text color="darkGrey">Simulate on-reader tip?</Text>
+						<CheckBox
+							aria-label="Simulate on-reader tip?"
+							checked={simulateOnReaderTip} // Use `checked` prop
+							onChange={handleSimulateTipChange} // Toggle state correctly
+						/>
+					</div>
+					{simulateOnReaderTip && (
+						<div className="stwc-flex stwc-flex-row stwc-justify-between stwc-items-center stwc-space-x-4">
+							<Text color="darkGrey">Tip Amount</Text>
+							<TextInput
+								aria-label="Tip Amount"
+								onChange={(value) => handleTipAmountChange(Number(value) || null)}
+								value={tipAmount !== null ? tipAmount.toString() : ''}
+								type="number"
+								min="0"
+								step="1"
+							/>
+						</div>
+					)}
+				</div>
+			) : (
+				<div className="stwc-flex stwc-flex-col stwc-gap-4 stwc-p-4">
+					<Text color="darkGrey">{paymentProgress}</Text>
+				</div>
+			)}
 
 			{/* Actions */}
 			<div className="stwc-flex stwc-flex-row stwc-gap-4 stwc-justify-center stwc-border-t stwc-border-gray-200 stwc-p-4">

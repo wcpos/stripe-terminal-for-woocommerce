@@ -5,12 +5,15 @@ import { ConnectionInfo } from './ConnectionInfo';
 import { SimulatorPayment } from './payment/SimulatorPayment';
 import { Payment } from './payment/Payment';
 import { Group } from './components/Group/Group';
+import { Button } from './components/Button/Button';
+import { Text } from './components/Text/Text';
 import { stwcConfig } from './stwcConfig';
 import type { Reader } from '@stripe/terminal-js';
 
 export const App = () => {
 	const { client, terminal } = stwcConfig;
 	const [reader, setReader] = React.useState<Reader | null>(null);
+	const [showLogs, setShowLogs] = React.useState(false);
 
 	const disconnectReader = async () => {
 		if (terminal) {
@@ -36,7 +39,7 @@ export const App = () => {
 		return reader.id === 'SIMULATOR' ? (
 			<SimulatorPayment client={client} terminal={terminal} />
 		) : (
-			<Payment />
+			<Payment client={client} terminal={terminal} />
 		);
 	};
 
@@ -44,7 +47,12 @@ export const App = () => {
 		<div className="stwc-p-4">
 			<ConnectionInfo reader={reader} onClickDisconnect={disconnectReader} />
 			{renderContent()}
-			<Logs />
+			<div className="stwc-my-4 stwc-flex stwc-justify-end">
+				<Button onClick={() => setShowLogs(!showLogs)}>
+					<Text>{showLogs ? 'Hide logs' : 'Show logs'}</Text>
+				</Button>
+			</div>
+			{showLogs && <Logs />}
 		</div>
 	);
 };

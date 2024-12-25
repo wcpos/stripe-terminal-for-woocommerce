@@ -208,34 +208,14 @@ class Gateway extends WC_Payment_Gateway {
 		// Fallback message for users without JavaScript enabled.
 		echo '<noscript>' . esc_html__( 'Please enable JavaScript to use the Stripe Terminal integration.', 'stripe-terminal-for-woocommerce' ) . '</noscript>';
 
-		// Initialize variables.
-		$charge_amount = 0;
-		$tax_amount    = 0;
-		$currency      = get_woocommerce_currency();
-
 		// Check if we're on the order-pay page.
 		if ( is_checkout_pay_page() ) {
 			// Extract the order ID from the URL.
 			$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
-
-			if ( $order_id ) {
-				$order = wc_get_order( $order_id );
-
-				if ( $order ) {
-					$charge_amount = $this->convert_to_stripe_amount( $order->get_total(), $order->get_currency() );
-					$tax_amount    = $this->convert_to_stripe_amount( $order->get_total_tax(), $order->get_currency() );
-					$currency      = $order->get_currency();
-				}
-			}
 		} else {
 			// Default behavior for the main checkout page.
-			$cart_total  = WC()->cart ? WC()->cart->get_total( 'edit' ) : 0;
-			$cart_taxes  = WC()->cart ? WC()->cart->get_total_tax() : 0;
-			$tax_included = get_option( 'woocommerce_prices_include_tax', 'no' ) === 'yes';
-			$final_total = $tax_included ? $cart_total : $cart_total + $cart_taxes;
-
-			$charge_amount = $this->convert_to_stripe_amount( $final_total, $currency );
-			$tax_amount    = $this->convert_to_stripe_amount( $cart_taxes, $currency );
+			// @TODO - Do we use the WC Cart ID?
+			$order_id = null;
 		}
 
 		// REST URL for the Stripe Terminal endpoint.
@@ -246,68 +226,10 @@ class Gateway extends WC_Payment_Gateway {
 		echo 'var stwcConfig = ' . wp_json_encode(
 			array(
 				'restUrl'      => $rest_url,
-				'chargeAmount' => $charge_amount,
-				'taxAmount'    => $tax_amount,
-				'currency'     => strtolower( $currency ),
 				'orderId'      => $order_id,
 			)
 		) . ';';
 		echo '</script>';
-	}
-
-	/**
-	 * Convert an amount to the correct smallest currency unit for Stripe.
-	 *
-	 * @param float  $amount   The amount in standard currency format.
-	 * @param string $currency The ISO 4217 currency code.
-	 * @return int The amount in the smallest currency unit.
-	 */
-	private function convert_to_stripe_amount( $amount, $currency ) {
-		// List of zero-decimal currencies.
-		$zero_decimal_currencies = array(
-			'BIF',
-			'CLP',
-			'DJF',
-			'GNF',
-			'JPY',
-			'KMF',
-			'KRW',
-			'MGA',
-			'PYG',
-			'RWF',
-			'UGX',
-			'VND',
-			'VUV',
-			'XAF',
-			'XOF',
-			'XPF',
-		);
-
-		// Special cases for certain currencies.
-		$special_cases = array(
-			'ISK' => 2, // Always treat as two-decimal but no fractional amounts allowed.
-			'HUF' => 0, // Payouts in HUF require integer amounts divisible by 100.
-			'TWD' => 0, // Payouts in TWD require integer amounts divisible by 100.
-		);
-
-		if ( in_array( strtoupper( $currency ), $zero_decimal_currencies, true ) ) {
-			// Zero-decimal currency: no multiplication needed.
-			return intval( round( $amount ) );
-		}
-
-		if ( isset( $special_cases[ strtoupper( $currency ) ] ) ) {
-			$decimals = $special_cases[ strtoupper( $currency ) ];
-
-			if ( $decimals === 0 ) {
-				// Enforce integer amounts divisible by 100 (Stripe handles the rounding).
-				return intval( round( $amount ) );
-			}
-			// Multiply by the defined decimal factor (e.g., ISK is treated as 2 decimals).
-			return intval( round( $amount * pow( 10, $decimals ) ) );
-		}
-
-		// Default to two-decimal currency.
-		return intval( round( $amount * 100 ) );
 	}
 
 	/**

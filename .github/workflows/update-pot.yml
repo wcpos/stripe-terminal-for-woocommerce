@@ -1,0 +1,55 @@
+name: Update POT file
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**.php"
+  workflow_dispatch:
+
+jobs:
+  update-pot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP with tools
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "7.3"
+          tools: composer, wp-cli
+
+      - name: Install dependencies
+        run: |
+          wp package install wp-cli/i18n-command:2.2.8
+
+      - name: Update POT file
+        run: wp i18n make-pot . languages/stripe-terminal-for-woocommerce.pot --domain=stripe-terminal-for-woocommerce --slug=stripe-terminal-for-woocommerce --package-name="WooCommerce POS Email Invoice Gateway" --headers="{\"Report-Msgid-Bugs-To\":\"https://github.com/wcpos/email-invoice-gateway/issues\"}"
+
+      - name: Check for changes
+        id: git-diff
+        run: |
+          # Extract the current and previous versions of the .pot file
+          git show HEAD:languages/stripe-terminal-for-woocommerce.pot > old.pot
+          tail -n +16 languages/stripe-terminal-for-woocommerce.pot > new-trimmed.pot
+          tail -n +16 old.pot > old-trimmed.pot
+
+          # Compare the trimmed files
+          if diff old-trimmed.pot new-trimmed.pot; then
+            echo "No changes detected."
+          else
+            echo "::set-output name=changes::true"
+          fi
+
+          # Clean up temporary files
+          rm old.pot new-trimmed.pot old-trimmed.pot
+
+      - name: Commit updated POT file
+        if: steps.git-diff.outputs.changes == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "chore(i18n): update languages/stripe-terminal-for-woocommerce.pot"
+          file_pattern: "*.pot"

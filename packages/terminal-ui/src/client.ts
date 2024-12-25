@@ -28,22 +28,9 @@ export class Client {
 		return this.doPost(`${this.url}/register-reader`, body);
 	}
 
-	createPaymentIntent({
-		amount,
-		currency,
-		description,
-		paymentMethodTypes,
-	}: {
-		amount: number;
-		currency: string;
-		description: string;
-		paymentMethodTypes: string[];
-	}): Promise<any> {
+	createPaymentIntent({ orderId }: { orderId: number }): Promise<any> {
 		const body = JSON.stringify({
-			amount,
-			currency,
-			description,
-			payment_method_types: paymentMethodTypes,
+			order_id: orderId,
 		});
 		return this.doPost(`${this.url}/create-payment-intent`, body);
 	}
