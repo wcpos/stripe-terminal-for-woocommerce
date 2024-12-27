@@ -227,10 +227,8 @@ class API extends Abstracts\APIController {
 			}
 
 			$order = wc_get_order( $order_id );
-			$tax_included = get_option( 'woocommerce_prices_include_tax', 'no' ) === 'yes';
-			$total_amount = CurrencyConverter::convert_to_stripe_amount( $order->get_total(), $order->get_currency() );
+			$amount       = CurrencyConverter::convert_to_stripe_amount( $order->get_total(), $order->get_currency() );
 			$tax_amount   = CurrencyConverter::convert_to_stripe_amount( $order->get_total_tax(), $order->get_currency() );
-			$amount       = $tax_included ? $total_amount : $total_amount + $tax_amount;
 			$currency     = strtolower( $order->get_currency() );
 			$description  = sprintf( 'Order #%s', $order_id );
 			$payment_method_types = $currency === 'cad' ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
