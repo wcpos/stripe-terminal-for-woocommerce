@@ -59,6 +59,39 @@ export const Readers = ({ terminal, client, setReader }: ReadersProps) => {
 	const [discoveredReaders, setDiscoveredReaders] = React.useState<Reader[]>([]);
 	const [mode, setMode] = React.useState<'list' | 'register'>('list');
 
+	React.useEffect(() => {
+		const discoverAndConnect = async () => {
+			if (!terminal) {
+				Logger.logMessage('Stripe Terminal is not initialized.');
+				return;
+			}
+
+			const storedReaderId = localStorage.getItem('readerId');
+			if (storedReaderId) {
+				Logger.logMessage(`Stored reader ID: ${storedReaderId}`);
+				setDiscoveryInProgress(true);
+				setRequestInProgress(true);
+				try {
+					const discoverResult = await terminal.discoverReaders();
+					if ('error' in discoverResult) {
+						Logger.logMessage(`Failed to discover readers: ${discoverResult.error.message}`);
+					} else {
+						setDiscoveredReaders(discoverResult.discoveredReaders);
+						const reader = discoverResult.discoveredReaders.find(r => r.id === storedReaderId);
+						if (reader) {
+							await handleConnect(reader);
+						}
+					}
+				} finally {
+					setDiscoveryInProgress(false);
+					setRequestInProgress(false);
+				}
+			}
+		};
+
+		discoverAndConnect();
+	}, [terminal]);
+
 	const handleDiscover = async () => {
 		if (!terminal) {
 			Logger.logMessage('Stripe Terminal is not initialized.');
@@ -104,6 +137,7 @@ export const Readers = ({ terminal, client, setReader }: ReadersProps) => {
 			} else {
 				Logger.logMessage(`Connected to reader: ${connectResult.reader.label}`);
 				setReader(connectResult.reader);
+				localStorage.setItem('readerId', connectResult.reader.id);
 			}
 		} finally {
 			setRequestInProgress(false);
