@@ -98,6 +98,7 @@ class Gateway extends WC_Payment_Gateway {
 				'type'        => 'checkbox',
 				'label'       => __( 'Enable Test Mode', 'stripe-terminal-for-woocommerce' ),
 				'default'     => 'no',
+				'description' => ! is_ssl() ? '<span style="color: #996b00; background-color: #fcf9e8; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">⚠</span>' . __( 'Test Mode is enforced when not using SSL.', 'stripe-terminal-for-woocommerce' ) . '</span>' : '',
 			),
 		);
 	}
@@ -241,8 +242,8 @@ class Gateway extends WC_Payment_Gateway {
 			add_action(
 				'admin_notices',
 				function () {
-					echo '<div class="notice notice-error">
-					<p>' . esc_html__( 'Stripe Terminal requires HTTPS for live mode. Test mode has been enabled.', 'woocommerce' ) . '</p>
+					echo '<div class="notice notice-warning">
+					<p><span style="font-weight: bold; margin-right: 5px;">⚠</span>' . esc_html__( 'Stripe Terminal requires HTTPS for live mode. Test mode has been enabled.', 'woocommerce' ) . '</p>
 				</div>';
 				}
 			);
@@ -279,13 +280,13 @@ class Gateway extends WC_Payment_Gateway {
 		$is_live_key = str_starts_with( $api_key, 'sk_live_' );
 
 		if ( $mode === 'test' && ! $is_test_key ) {
-			return '<span style="color: red;">&#10060; ' .
+			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
 			__( 'Invalid test API key. Test keys must start with sk_test_.', 'stripe-terminal-for-woocommerce' ) .
 			'</span>';
 		}
 
 		if ( $mode === 'live' && ! $is_live_key ) {
-			return '<span style="color: red;">&#10060; ' .
+			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
 			__( 'Invalid live API key. Live keys must start with sk_live_.', 'stripe-terminal-for-woocommerce' ) .
 			'</span>';
 		}
@@ -297,22 +298,22 @@ class Gateway extends WC_Payment_Gateway {
 			$account = \Stripe\Account::retrieve();
 
 			if ( $mode === 'test' && ! $account->charges_enabled ) {
-				return '<span style="color: red;">&#10060; ' .
+				return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
 				__( 'Test key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
 				'</span>';
 			}
 
 			if ( $mode === 'live' && ! $account->charges_enabled ) {
-				return '<span style="color: red;">&#10060; ' .
+				return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
 				__( 'Live key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
 				'</span>';
 			}
 
-			return '<span style="color: green;">&#10003; ' .
+			return '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
 			__( 'Stripe API key is valid.', 'stripe-terminal-for-woocommerce' ) .
 			'</span>';
 		} catch ( \Stripe\Exception\ApiErrorException $e ) {
-			return '<span style="color: red;">&#10060; ' .
+			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
 			$this->handle_stripe_exception( $e, 'admin' ) .
 			'</span>';
 		}
@@ -365,14 +366,14 @@ class Gateway extends WC_Payment_Gateway {
 				}
 			}
 
-			return '<span style="color: green;">&#10003; ' .
+			return '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
 					( $exists
 							? __( 'Stripe webhook active.', 'stripe-terminal-for-woocommerce' )
 							: sprintf( __( 'Stripe webhook successfully created: %s', 'stripe-terminal-for-woocommerce' ), esc_html( $webhook_url ) )
 					) .
 					'</span>';
 		} catch ( \Exception $e ) {
-			return '<span style="color: red;">&#10060; ' .
+			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
 					__( 'Error setting Stripe webhook: ', 'stripe-terminal-for-woocommerce' ) .
 					esc_html( $e->getMessage() ) .
 					'</span>';
