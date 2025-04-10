@@ -1,15 +1,15 @@
-# Copyright (C) 2024 kilbot
+# Copyright (C) 2025 kilbot
 # This file is distributed under the GPL v2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: WooCommerce POS Email Invoice Gateway 0.0.2\n"
+"Project-Id-Version: WooCommerce POS Email Invoice Gateway 0.0.6\n"
 "Report-Msgid-Bugs-To: https://github.com/wcpos/email-invoice-gateway/issues\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2024-12-25T17:23:38+00:00\n"
+"POT-Creation-Date: 2025-04-10T16:54:04+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.11.0\n"
 "X-Domain: stripe-terminal-for-woocommerce\n"
@@ -97,10 +97,10 @@ msgstr ""
 msgid "Invalid live API key. Live keys must start with sk_live_."
 msgstr ""
 
-msgid "Test key provided, but it is being used in live mode."
+msgid "Test key provided, but charges are not enabled for the account."
 msgstr ""
 
-msgid "Live key provided, but it is being used in test mode."
+msgid "Live key provided, but charges are not enabled for the account."
 msgstr ""
 
 msgid "Stripe API key is valid."
