@@ -296,15 +296,15 @@ class Gateway extends WC_Payment_Gateway {
 			// Test the API key by fetching account details.
 			$account = \Stripe\Account::retrieve();
 
-			if ( $mode === 'test' && $account->livemode ) {
+			if ( $mode === 'test' && ! $account->charges_enabled ) {
 				return '<span style="color: red;">&#10060; ' .
-				__( 'Test key provided, but it is being used in live mode.', 'stripe-terminal-for-woocommerce' ) .
+				__( 'Test key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
 				'</span>';
 			}
 
-			if ( $mode === 'live' && ! $account->livemode ) {
+			if ( $mode === 'live' && ! $account->charges_enabled ) {
 				return '<span style="color: red;">&#10060; ' .
-				__( 'Live key provided, but it is being used in test mode.', 'stripe-terminal-for-woocommerce' ) .
+				__( 'Live key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
 				'</span>';
 			}
 
