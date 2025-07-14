@@ -2,16 +2,16 @@
 # This file is distributed under the GPL v2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: WooCommerce POS Email Invoice Gateway 0.0.7\n"
+"Project-Id-Version: WooCommerce POS Email Invoice Gateway 0.0.8\n"
 "Report-Msgid-Bugs-To: https://github.com/wcpos/email-invoice-gateway/issues\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2025-04-10T17:27:36+00:00\n"
+"POT-Creation-Date: 2025-07-14T09:42:14+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"X-Generator: WP-CLI 2.11.0\n"
+"X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: stripe-terminal-for-woocommerce\n"
 
 #. Plugin Name of the plugin
@@ -30,6 +30,7 @@ msgstr ""
 msgid "https://kilbot.com/"
 msgstr ""
 
+#, php-format
 msgid "Stripe error (%1$s): %2$s"
 msgstr ""
 
@@ -46,6 +47,7 @@ msgid "Enable/Disable"
 msgstr ""
 
 #. Translators: Placeholders %s is the link to WooCommerce POS.
+#, php-format
 msgid "Enable Stripe Terminal for web checkout (not necessary for %s)"
 msgstr ""
 
@@ -112,6 +114,7 @@ msgstr ""
 msgid "Stripe webhook active."
 msgstr ""
 
+#, php-format
 msgid "Stripe webhook successfully created: %s"
 msgstr ""
 
@@ -121,14 +124,17 @@ msgstr ""
 msgid "No API key provided. Please enter your Stripe API key and save the settings."
 msgstr ""
 
+#, php-format
 msgid "No Stripe Terminal locations found. Please <a href=\"%s\" target=\"_blank\">set up locations</a> in your Stripe Dashboard."
 msgstr ""
 
 msgid "No readers associated with this location."
 msgstr ""
 
+#, php-format
 msgid "%d reader(s) available."
 msgstr ""
 
+#, php-format
 msgid "<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s"
 msgstr ""
