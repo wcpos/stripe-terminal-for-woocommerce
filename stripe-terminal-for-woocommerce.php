@@ -2,29 +2,27 @@
 /**
  * Plugin Name: Stripe Terminal for WooCommerce
  * Description: Adds Stripe Terminal support to WooCommerce for in-person payments.
- * Version:     0.0.7
+ * Version:     0.0.8
  * Author:      kilbot
  * Author URI:  https://kilbot.com/
  * License:     GPL v2 or later
- * Text Domain: stripe-terminal-for-woocommerce
+ * Text Domain: stripe-terminal-for-woocommerce.
  *
  * Requires at least: 5.2
  * Requires PHP:      7.4
  * Requires Plugins:  woocommerce
- *
- * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
-if ( ! defined( 'ABSPATH' ) ) {
+if ( ! \defined( 'ABSPATH' ) ) {
 	exit; // Exit if accessed directly.
 }
 
 // Define constants.
-define( 'STWC_VERSION', '0.0.4' );
-define( 'STWC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
-define( 'STWC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+\define( 'STWC_VERSION', '0.0.4' );
+\define( 'STWC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
+\define( 'STWC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
 // Include Composer's autoloader.
 if ( file_exists( STWC_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
@@ -35,12 +33,12 @@ if ( file_exists( STWC_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
 
 // Autoload classes using PSR-4.
 spl_autoload_register(
-	function ( $class ) {
+	function ( $class ): void {
 		$prefix   = __NAMESPACE__ . '\\';
 		$base_dir = STWC_PLUGIN_DIR . 'includes/';
-		$len      = strlen( $prefix );
+		$len      = \strlen( $prefix );
 
-		if ( strncmp( $prefix, $class, $len ) !== 0 ) {
+		if ( 0 !== strncmp( $prefix, $class, $len ) ) {
 			return; // Not in our namespace.
 		}
 
@@ -54,16 +52,16 @@ spl_autoload_register(
 );
 
 /**
- * Initialize the plugin
+ * Initialize the plugin.
  */
-function init() {
+function init(): void {
 	// Register the gateway.
 	add_filter( 'woocommerce_payment_gateways', array( Gateway::class, 'register_gateway' ) );
 
 	// Initialize API.
 	add_action(
 		'rest_api_init',
-		function () {
+		function (): void {
 			new API();
 		}
 	);

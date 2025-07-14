@@ -2,19 +2,16 @@
 /**
  * Stripe Terminal frontend
  * Handles frontend assets for Stripe Terminal.
- *
- * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
 /**
- * Class Frontend
+ * Class Frontend.
  */
 class Frontend {
-
 	/**
-	 * Constructor
+	 * Constructor.
 	 */
 	public function __construct() {
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
@@ -23,7 +20,16 @@ class Frontend {
 	/**
 	 * Enqueue frontend JavaScript and CSS.
 	 */
-	public function enqueue_assets() {
+	public function enqueue_assets(): void {
+		// Only enqueue on the POS checkout 'order-pay' endpoint
+		if (
+			! \function_exists( 'woocommerce_pos_request' )
+			 || ! woocommerce_pos_request()
+			 || ! get_query_var( 'order-pay' )
+		) {
+			return;
+		}
+		
 		// Enqueue Stripe Terminal SDK.
 		wp_enqueue_script(
 			'stripe-terminal-js',
