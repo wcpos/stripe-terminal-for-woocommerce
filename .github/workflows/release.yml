@@ -34,9 +34,9 @@ jobs:
         if: steps.check_version.outputs.release == 'true'
         run: composer install --no-dev
 
-      - name: Install and Build terminal-ui
+      - name: Install and Build payment-frontend
         if: steps.check_version.outputs.release == 'true'
-        working-directory: packages/terminal-ui
+        working-directory: packages/payment-frontend
         run: |
           npm install
           npm run build
