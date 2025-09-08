@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stripe Terminal Payment - Development</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .payment-section {
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .stripe-terminal-pay-button {
+            background: #007cba;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .stripe-terminal-pay-button:hover {
+            background: #005a87;
+        }
+        .stripe-terminal-pay-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .stripe-terminal-cancel-button {
+            background: #dc3232;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Stripe Terminal Payment - Development</h1>
+    
+    <div class="payment-section">
+        <h2>Test Payment</h2>
+        <p>Order ID: #12345</p>
+        <p>Amount: $25.00</p>
+        <button class="stripe-terminal-pay-button" data-order-id="12345" data-amount="2500">
+            Pay with Terminal
+        </button>
+        <button class="stripe-terminal-cancel-button">
+            Cancel
+        </button>
+    </div>
+
+    <div class="payment-section">
+        <h2>Another Test Payment</h2>
+        <p>Order ID: #67890</p>
+        <p>Amount: $50.00</p>
+        <button class="stripe-terminal-pay-button" data-order-id="67890" data-amount="5000">
+            Pay with Terminal
+        </button>
+        <button class="stripe-terminal-cancel-button">
+            Cancel
+        </button>
+    </div>
+
+    <script type="module" src="/src/payment.js"></script>
+</body>
+</html>

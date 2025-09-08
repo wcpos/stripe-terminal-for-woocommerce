@@ -6,6 +6,7 @@ node_modules/
 *.tar.gz
 .idea
 coverage/
+dist/
 build/
 vendor/
 c3.php
