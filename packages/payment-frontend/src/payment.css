@@ -345,6 +345,23 @@
     background: #218838;
 }
 
+.stripe-terminal-check-status-button {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 160px;
+}
+
+.stripe-terminal-check-status-button:hover {
+    background: #5a6268;
+}
+
 /* Logging Section */
 .stripe-terminal-logging-section {
     background: #2d3748;

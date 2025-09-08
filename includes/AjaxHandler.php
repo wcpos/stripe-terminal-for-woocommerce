@@ -48,6 +48,9 @@ class AjaxHandler {
 		// Payment status check
 		add_action( 'wp_ajax_stripe_terminal_check_payment_status', array( $this, 'check_payment_status' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_check_payment_status', array( $this, 'check_payment_status' ) );
+		
+		add_action( 'wp_ajax_stripe_terminal_check_stripe_status', array( $this, 'check_stripe_status' ) );
+		add_action( 'wp_ajax_nopriv_stripe_terminal_check_stripe_status', array( $this, 'check_stripe_status' ) );
 
 		// Test helper - simulate payment
 		add_action( 'wp_ajax_stripe_terminal_simulate_payment', array( $this, 'simulate_payment' ) );
@@ -346,13 +349,21 @@ class AjaxHandler {
 				return;
 			}
 
-			// Check if order is paid
+			// Check if order is paid or has successful payment metadata
 			$is_paid = $order->is_paid();
 			$status  = $order->get_status();
+			
+			// Also check for saved payment metadata (from webhooks)
+			$payment_status         = $order->get_meta( '_stripe_terminal_payment_status' );
+			$payment_intent_id      = $order->get_meta( '_stripe_terminal_payment_intent_id' );
+			$has_successful_payment = ( 'succeeded' === $payment_status && ! empty( $payment_intent_id ) );
+			
+			// Consider payment successful if order is paid OR has successful payment metadata
+			$payment_successful = $is_paid || $has_successful_payment;
 
 			// Get the return URL if payment is successful
 			$return_url = null;
-			if ( $is_paid ) {
+			if ( $payment_successful ) {
 				$gateway = WC()->payment_gateways()->payment_gateways()['stripe_terminal_for_woocommerce'] ?? null;
 				if ( $gateway ) {
 					// Get the default return URL first
@@ -363,15 +374,87 @@ class AjaxHandler {
 			}
 
 			wp_send_json_success( array(
-				'is_paid'        => $is_paid,
-				'status'         => $status,
-				'order_id'       => $order_id,
-				'transaction_id' => $order->get_transaction_id(),
-				'return_url'     => $return_url,
+				'is_paid'          => $payment_successful, // Use the combined check
+				'status'           => $status,
+				'order_id'         => $order_id,
+				'transaction_id'   => $order->get_transaction_id(),
+				'return_url'       => $return_url,
+				'payment_metadata' => array(
+					'payment_status'         => $payment_status,
+					'payment_intent_id'      => $payment_intent_id,
+					'has_successful_payment' => $has_successful_payment,
+				),
 			) );
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in check_payment_status: ' . $e->getMessage() );
 			wp_send_json_error( 'An error occurred while checking payment status: ' . $e->getMessage() );
+		}
+	}
+
+	/**
+	 * Check payment status directly from Stripe API (manual check).
+	 */
+	public function check_stripe_status(): void {
+		try {
+			// Get and validate parameters
+			$order_id = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+
+			if ( ! $order_id ) {
+				wp_send_json_error( 'Missing order ID' );
+
+				return;
+			}
+
+			// Get the order
+			$order = wc_get_order( $order_id );
+			if ( ! $order ) {
+				wp_send_json_error( 'Order not found' );
+
+				return;
+			}
+
+			// Verify access using order key
+			if ( ! $this->can_access_order( $order ) ) {
+				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+
+				return;
+			}
+
+			// Initialize Stripe service
+			$stripe_service = $this->init_stripe_service();
+			if ( is_wp_error( $stripe_service ) ) {
+				wp_send_json_error( 'Failed to initialize Stripe service: ' . $stripe_service->get_error_message() );
+
+				return;
+			}
+
+			// Check payment status from Stripe
+			$result = $stripe_service->check_payment_status_from_stripe( $order );
+			
+			if ( is_wp_error( $result ) ) {
+				wp_send_json_error( 'Failed to check payment status: ' . $result->get_error_message() );
+
+				return;
+			}
+
+			// Determine if payment was found and successful
+			$payment_found      = ! empty( $result['charge'] );
+			$payment_successful = $payment_found && true === $result['charge']['paid'];
+
+			wp_send_json_success( array(
+				'payment_found'      => $payment_found,
+				'payment_successful' => $payment_successful,
+				'payment_status'     => $result['charge']['status'] ?? null,
+				'payment_intent'     => $result['payment_intent']   ?? null,
+				'charge'             => $result['charge']           ?? null,
+				'order_status'       => $result['order_status'],
+				'order_paid'         => $result['order_paid'],
+				'metadata_saved'     => $result['metadata_saved'] ?? false,
+				'return_url'         => $result['return_url']     ?? null,
+			) );
+		} catch ( Exception $e ) {
+			Logger::log( 'Stripe Terminal AJAX - Exception in check_stripe_status: ' . $e->getMessage() );
+			wp_send_json_error( 'An error occurred while checking Stripe status: ' . $e->getMessage() );
 		}
 	}
 
@@ -464,8 +547,10 @@ class AjaxHandler {
 
 	/**
 	 * Initialize the Stripe Terminal service.
+	 *
+	 * @return StripeTerminalService|WP_Error The service instance or error.
 	 */
-	private function init_stripe_service(): void {
+	private function init_stripe_service() {
 		// Get the API key from the gateway settings
 		$settings  = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
 		$test_mode = $settings['test_mode'] ?? 'no';
@@ -476,10 +561,12 @@ class AjaxHandler {
 		if ( empty( $api_key ) ) {
 			Logger::log( 'Stripe Terminal AJAX - No API key found in settings' );
 
-			return;
+			return new WP_Error( 'no_api_key', 'No API key found in settings' );
 		}
 
 		$this->stripe_service = new StripeTerminalService( $api_key );
+		
+		return $this->stripe_service;
 	}
 
 

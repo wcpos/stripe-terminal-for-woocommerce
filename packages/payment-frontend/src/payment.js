@@ -39,6 +39,7 @@ class StripeTerminalPayment {
     jQuery(document).on('click', '.stripe-terminal-pay-button', this.handlePayment.bind(this));
     jQuery(document).on('click', '.stripe-terminal-cancel-button', this.handleCancel.bind(this));
     jQuery(document).on('click', '.stripe-terminal-simulate-button', this.handleSimulatePayment.bind(this));
+    jQuery(document).on('click', '.stripe-terminal-check-status-button', this.handleCheckStatus.bind(this));
     
     // Reader management events
     jQuery(document).on('click', '.stripe-terminal-connect-button', this.handleConnectReader.bind(this));
@@ -327,6 +328,63 @@ class StripeTerminalPayment {
       console.error('Simulate payment error:', error);
       this.showError('Simulation failed: ' + error);
       button.prop('disabled', false).text('Simulate Payment');
+    });
+  }
+
+  handleCheckStatus(event) {
+    event.preventDefault();
+    
+    const button = jQuery(event.target);
+    const orderId = button.data('order-id') || this.config.orderId;
+    
+    if (!orderId) {
+      this.showError('Missing order ID');
+      return;
+    }
+    
+    button.prop('disabled', true).text('Checking...');
+    this.addToLog('Checking payment status with Stripe...', 'info');
+    
+    // Call the manual check status AJAX endpoint
+    jQuery.ajax({
+      url: this.ajaxUrl,
+      type: 'POST',
+      data: {
+        action: 'stripe_terminal_check_stripe_status',
+        order_id: orderId,
+        order_key: this.config.orderKey
+      }
+    })
+    .done((response) => {
+      if (response.success) {
+        const data = response.data;
+        this.addToLog('Payment status check completed', 'info');
+        
+        if (data.payment_found && data.payment_successful) {
+          this.addToLog('Successful payment found! Processing order...', 'success');
+          this.showSuccess('Payment found! Processing order...');
+          
+          // Trigger order processing
+          this.handleSuccessfulPayment(data);
+        } else if (data.payment_found && !data.payment_successful) {
+          this.addToLog('Payment found but not successful: ' + (data.payment_status || 'unknown'), 'warning');
+          this.showMessage('Payment found but not successful: ' + (data.payment_status || 'unknown'));
+        } else {
+          this.addToLog('No payment found for this order', 'info');
+          this.showMessage('No payment found for this order');
+        }
+      } else {
+        this.addToLog('Status check failed: ' + (response.data || 'Unknown error'), 'error');
+        this.showError('Status check failed: ' + (response.data || 'Unknown error'));
+      }
+    })
+    .fail((xhr, status, error) => {
+      console.error('Check status error:', error);
+      this.addToLog('Status check error: ' + error, 'error');
+      this.showError('Status check error: ' + error);
+    })
+    .always(() => {
+      button.prop('disabled', false).text('Check Payment Status');
     });
   }
 

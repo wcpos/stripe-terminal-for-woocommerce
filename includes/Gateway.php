@@ -320,6 +320,10 @@ class Gateway extends WC_Payment_Gateway {
 		echo esc_html__( 'Simulate Payment', 'stripe-terminal-for-woocommerce' );
 		echo '</button>';
 		
+		echo '<button type="button" class="stripe-terminal-check-status-button" data-order-id="' . esc_attr( $order_id ) . '">';
+		echo esc_html__( 'Check Payment Status', 'stripe-terminal-for-woocommerce' );
+		echo '</button>';
+		
 		echo '</div>';
 
 		// Logging area (moved to bottom)
