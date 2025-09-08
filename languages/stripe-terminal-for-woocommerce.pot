@@ -2,14 +2,14 @@
 # This file is distributed under the GPL v2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: WooCommerce POS Email Invoice Gateway 0.0.8\n"
+"Project-Id-Version: WooCommerce POS Email Invoice Gateway 0.0.9\n"
 "Report-Msgid-Bugs-To: https://github.com/wcpos/email-invoice-gateway/issues\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2025-07-14T09:42:14+00:00\n"
+"POT-Creation-Date: 2025-09-08T18:56:08+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: stripe-terminal-for-woocommerce\n"
@@ -87,7 +87,138 @@ msgstr ""
 msgid "No locations found. Please connect your Stripe account first."
 msgstr ""
 
+#, php-format
+msgid "Order processed via Stripe Terminal. Payment Intent: %s, Charge: %s"
+msgstr ""
+
+#, php-format
+msgid "Order processed via Stripe Terminal (API check). Payment Intent: %s, Charge: %s"
+msgstr ""
+
+msgid "Payment error: No successful payment found for this order."
+msgstr ""
+
+msgid "Loading Stripe Terminal..."
+msgstr ""
+
+msgid "Available Readers"
+msgstr ""
+
+msgid "Connected Reader"
+msgstr ""
+
+msgid "Disconnect"
+msgstr ""
+
+msgid "Pay with Terminal"
+msgstr ""
+
+msgid "Cancel Payment"
+msgstr ""
+
+msgid "Simulate Payment"
+msgstr ""
+
+msgid "Logs"
+msgstr ""
+
+msgid "Show logs"
+msgstr ""
+
+msgid "CLEAR"
+msgstr ""
+
+msgid "Payment activity will appear here..."
+msgstr ""
+
 msgid "Please enable JavaScript to use the Stripe Terminal integration."
+msgstr ""
+
+msgid "Starting payment..."
+msgstr ""
+
+msgid "Payment in progress..."
+msgstr ""
+
+msgid "Cancellation request sent. Please check the reader."
+msgstr ""
+
+msgid "Payment successful!"
+msgstr ""
+
+msgid "Payment failed:"
+msgstr ""
+
+msgid "Network error occurred"
+msgstr ""
+
+msgid "Payment system not initialized"
+msgstr ""
+
+msgid "Missing order ID or amount"
+msgstr ""
+
+msgid "Please use the terminal to complete the payment"
+msgstr ""
+
+msgid "Payment timed out"
+msgstr ""
+
+msgid "No active payment to cancel"
+msgstr ""
+
+msgid "Connecting..."
+msgstr ""
+
+msgid "Connected"
+msgstr ""
+
+msgid "Disconnected"
+msgstr ""
+
+msgid "Please select a reader to continue"
+msgstr ""
+
+msgid "Loading readers..."
+msgstr ""
+
+msgid "No readers available. Please register a reader in your Stripe Dashboard."
+msgstr ""
+
+msgid "Stripe Terminal service is not properly configured. Please check your API key settings."
+msgstr ""
+
+msgid "Unable to retrieve available readers. Please try again later."
+msgstr ""
+
+msgid "Stripe webhook active."
+msgstr ""
+
+#, php-format
+msgid "Stripe webhook successfully created: %s"
+msgstr ""
+
+msgid "Error setting Stripe webhook: "
+msgstr ""
+
+#. translators: %s: Human readable time
+#, php-format
+msgid "Last seen: %s"
+msgstr ""
+
+msgid "Offline"
+msgstr ""
+
+msgid "Online"
+msgstr ""
+
+msgid "Device:"
+msgstr ""
+
+msgid "Serial:"
+msgstr ""
+
+msgid "Connect"
 msgstr ""
 
 msgid "Your Stripe test secret API key."
@@ -111,16 +242,6 @@ msgstr ""
 msgid "Stripe API key is valid."
 msgstr ""
 
-msgid "Stripe webhook active."
-msgstr ""
-
-#, php-format
-msgid "Stripe webhook successfully created: %s"
-msgstr ""
-
-msgid "Error setting Stripe webhook: "
-msgstr ""
-
 msgid "No API key provided. Please enter your Stripe API key and save the settings."
 msgstr ""
 
@@ -137,4 +258,15 @@ msgstr ""
 
 #, php-format
 msgid "<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s"
+msgstr ""
+
+#, php-format
+msgid "Stripe Terminal payment detected via manual check. Payment Intent: %s, Charge: %s. Order ready for processing."
+msgstr ""
+
+#, php-format
+msgid "Stripe Terminal payment detected via webhook. Payment Intent: %s, Charge: %s. Order ready for processing."
+msgstr ""
+
+msgid "Payment failed via Stripe Terminal."
 msgstr ""
