@@ -60,16 +60,17 @@ class AjaxHandler {
 	}
 
 	/**
-	 * Create a payment intent for Stripe Terminal.
+	 * Create and process a payment intent for Stripe Terminal.
 	 */
 	public function create_payment_intent(): void {
 		try {
 			// Get and validate parameters
-			$order_id = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
-			$amount   = isset( $_POST['amount'] ) ? absint( $_POST['amount'] ) : 0;
+			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			$amount    = isset( $_POST['amount'] ) ? absint( $_POST['amount'] ) : 0;
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
 
-			if ( ! $order_id || ! $amount ) {
-				wp_send_json_error( 'Missing order ID or amount' );
+			if ( ! $order_id || ! $amount || ! $reader_id ) {
+				wp_send_json_error( 'Missing order ID, amount, or reader ID' );
 
 				return;
 			}
@@ -101,7 +102,8 @@ class AjaxHandler {
 				return;
 			}
 
-			// Create payment intent using the service
+			// Step 1: Create payment intent using the service
+			Logger::log( 'Stripe Terminal AJAX - Creating payment intent for Order #' . $order_id . ' (Amount: ' . $amount . ')' );
 			$payment_intent = $this->stripe_service->create_payment_intent( $order, $amount );
 
 			if ( is_wp_error( $payment_intent ) ) {
@@ -111,7 +113,46 @@ class AjaxHandler {
 				return;
 			}
 
-			wp_send_json_success( $payment_intent );
+			$payment_intent_id = $payment_intent['id'];
+			Logger::log( 'Stripe Terminal AJAX - Payment intent created: ' . $payment_intent_id );
+
+			// Add order note with payment intent ID
+			$order->add_order_note(
+				\sprintf(
+					'Stripe Terminal: Payment intent created - ID: %s, Amount: %s %s',
+					$payment_intent_id,
+					number_format( $amount / 100, 2 ),
+					strtoupper( $order->get_currency() )
+				)
+			);
+
+			// Step 2: Process payment intent on the reader
+			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
+			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id );
+
+			if ( is_wp_error( $reader_result ) ) {
+				Logger::log( 'Stripe Terminal AJAX - Payment intent processing failed: ' . $reader_result->get_error_message() );
+				wp_send_json_error( 'Failed to process payment on reader: ' . $reader_result->get_error_message() );
+
+				return;
+			}
+
+			Logger::log( 'Stripe Terminal AJAX - Payment intent processed successfully on reader ' . $reader_id );
+
+			// Add order note with reader processing info
+			$order->add_order_note(
+				\sprintf(
+					'Stripe Terminal: Payment intent processed on reader %s - Status: %s',
+					$reader_id,
+					$reader_result['action']['status'] ?? 'unknown'
+				)
+			);
+
+			// Return both payment intent and reader data
+			wp_send_json_success( array(
+				'payment_intent' => $payment_intent,
+				'reader'         => $reader_result,
+			) );
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in create_payment_intent: ' . $e->getMessage() );
 			wp_send_json_error( 'An error occurred while creating payment intent: ' . $e->getMessage() );

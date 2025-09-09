@@ -434,15 +434,18 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_method', 'card_present' );
 		$order->save();
 
-		// Add order note
+		// Add detailed order note
 		$order->add_order_note(
 			\sprintf(
-				__( 'Stripe Terminal payment intent succeeded. Payment Intent: %s. Order ready for processing.', 'stripe-terminal-for-woocommerce' ),
-				$payment_intent->id
+				__( 'Stripe Terminal: Payment Intent succeeded - ID: %s, Amount: %s %s, Status: %s. Order ready for processing.', 'stripe-terminal-for-woocommerce' ),
+				$payment_intent->id,
+				number_format( $payment_intent->amount / 100, 2 ),
+				strtoupper( $payment_intent->currency ),
+				$payment_intent->status
 			)
 		);
 
-		Logger::log( 'Payment intent webhook: Metadata saved for order ' . $order_id, 'info' );
+		Logger::log( 'Payment intent webhook: Metadata saved for order ' . $order_id . ' - Payment Intent: ' . $payment_intent->id, 'info' );
 	}
 
 
@@ -493,15 +496,18 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_method', 'card_present' );
 		$order->save();
 
-		// Add order note
+		// Add detailed order note
 		$order->add_order_note(
 			\sprintf(
-				__( 'Stripe Terminal charge succeeded. Payment Intent: %s, Charge: %s. Order ready for processing.', 'stripe-terminal-for-woocommerce' ),
+				__( 'Stripe Terminal: Charge succeeded - Payment Intent: %s, Charge: %s, Amount: %s %s, Status: %s. Order ready for processing.', 'stripe-terminal-for-woocommerce' ),
 				$payment_intent_id,
-				$charge->id
+				$charge->id,
+				number_format( $charge->amount / 100, 2 ),
+				strtoupper( $charge->currency ),
+				$charge->status
 			)
 		);
 
-		Logger::log( 'Charge webhook: Metadata saved for order ' . $order_id, 'info' );
+		Logger::log( 'Charge webhook: Metadata saved for order ' . $order_id . ' - Payment Intent: ' . $payment_intent_id . ', Charge: ' . $charge->id, 'info' );
 	}
 }

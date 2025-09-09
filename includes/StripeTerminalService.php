@@ -108,6 +108,40 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Process a payment intent on a reader.
+	 *
+	 * @param string $reader_id         The reader ID.
+	 * @param string $payment_intent_id The payment intent ID.
+	 * @param array  $process_config    Optional process configuration.
+	 *
+	 * @return array|WP_Error The updated reader data or error.
+	 */
+	public function process_payment_intent( string $reader_id, string $payment_intent_id, array $process_config = array() ) {
+		try {
+			\Stripe\Stripe::setApiKey( $this->api_key );
+
+			// Default process config
+			$default_config = array(
+				'enable_customer_cancellation' => true,
+			);
+			$process_config = array_merge( $default_config, $process_config );
+
+			$stripe = new \Stripe\StripeClient( $this->api_key );
+			$reader = $stripe->terminal->readers->processPaymentIntent(
+				$reader_id,
+				array(
+					'payment_intent' => $payment_intent_id,
+					'process_config' => $process_config,
+				)
+			);
+
+			return $reader->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'process_payment_intent_error' );
+		}
+	}
+
+	/**
 	 * Confirm a payment intent.
 	 *
 	 * @param string   $payment_intent_id The payment intent ID.

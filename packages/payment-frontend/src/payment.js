@@ -77,14 +77,14 @@ class StripeTerminalPayment {
     try {
       button.prop('disabled', true).text(this.strings.startingPayment || 'Starting payment...');
       
-      // Create payment intent via AJAX
-      const paymentIntent = await this.createPaymentIntent(orderId, amount);
+      // Create and process payment intent via AJAX
+      const response = await this.createPaymentIntent(orderId, amount);
       
-      if (!paymentIntent || !paymentIntent.id) {
+      if (!response || !response.payment_intent || !response.payment_intent.id) {
         throw new Error('Failed to create payment intent');
       }
       
-      this.currentPaymentIntent = paymentIntent;
+      this.currentPaymentIntent = response.payment_intent;
       button.text(this.strings.paymentInProgress || 'Payment in progress...');
       
       // Update button visibility
@@ -94,7 +94,7 @@ class StripeTerminalPayment {
       this.showMessage(this.strings.useTerminal || 'Please use the terminal to complete the payment');
       
       // Start polling for payment status
-      this.pollPaymentStatus(paymentIntent.id, orderId, button);
+      this.pollPaymentStatus(this.currentPaymentIntent.id, orderId, button);
       
     } catch (error) {
       console.error('Payment error:', error);
@@ -108,7 +108,8 @@ class StripeTerminalPayment {
       const ajaxData = {
         action: 'stripe_terminal_create_payment_intent',
         order_id: orderId,
-        amount: amount
+        amount: amount,
+        reader_id: this.connectedReader.id
       };
 
       // Add order key for guest users
@@ -128,7 +129,18 @@ class StripeTerminalPayment {
           }
         },
         error: (xhr, status, error) => {
-          reject(new Error('AJAX error: ' + error));
+          let errorMessage = 'AJAX error: ' + error;
+          try {
+            const response = JSON.parse(xhr.responseText);
+            if (response.data && response.data.message) {
+              errorMessage = response.data.message;
+            } else if (response.data) {
+              errorMessage = response.data;
+            }
+          } catch (e) {
+            // If we can't parse the response, use the generic error
+          }
+          reject(new Error(errorMessage));
         }
       });
     });
@@ -159,7 +171,18 @@ class StripeTerminalPayment {
           }
         },
         error: (xhr, status, error) => {
-          reject(new Error('AJAX error: ' + error));
+          let errorMessage = 'AJAX error: ' + error;
+          try {
+            const response = JSON.parse(xhr.responseText);
+            if (response.data && response.data.message) {
+              errorMessage = response.data.message;
+            } else if (response.data) {
+              errorMessage = response.data;
+            }
+          } catch (e) {
+            // If we can't parse the response, use the generic error
+          }
+          reject(new Error(errorMessage));
         }
       });
     });
@@ -190,7 +213,18 @@ class StripeTerminalPayment {
           }
         },
         error: (xhr, status, error) => {
-          reject(new Error('AJAX error: ' + error));
+          let errorMessage = 'AJAX error: ' + error;
+          try {
+            const response = JSON.parse(xhr.responseText);
+            if (response.data && response.data.message) {
+              errorMessage = response.data.message;
+            } else if (response.data) {
+              errorMessage = response.data;
+            }
+          } catch (e) {
+            // If we can't parse the response, use the generic error
+          }
+          reject(new Error(errorMessage));
         }
       });
     });
