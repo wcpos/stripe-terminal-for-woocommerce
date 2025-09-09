@@ -116,6 +116,10 @@ class AjaxHandler {
 			$payment_intent_id = $payment_intent['id'];
 			Logger::log( 'Stripe Terminal AJAX - Payment intent created: ' . $payment_intent_id );
 
+			// Save payment intent ID to order metadata for later use
+			$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
+			$order->save();
+
 			// Add order note with payment intent ID
 			$order->add_order_note(
 				\sprintf(
@@ -543,30 +547,18 @@ class AjaxHandler {
 				return;
 			}
 
-			// First, create a payment intent for this order
-			$payment_intent_result = $this->stripe_service->create_payment_intent( $order );
-			if ( is_wp_error( $payment_intent_result ) ) {
-				wp_send_json_error( 'Failed to create payment intent: ' . $payment_intent_result->get_error_message() );
+			// Get the existing payment intent from order metadata
+			$payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
+			if ( empty( $payment_intent_id ) ) {
+				wp_send_json_error( 'No payment intent found for this order. Please create a payment intent first.' );
 
 				return;
 			}
 
-			$payment_intent = $payment_intent_result;
-			
+			Logger::log( 'Stripe Terminal AJAX - Simulating payment for existing payment intent: ' . $payment_intent_id );
 
-			// Now process the payment intent on the reader
+			// Get Stripe client and simulate payment method presentation on the existing payment intent
 			$stripe = $this->stripe_service->get_stripe_client();
-			$reader = $stripe->terminal->readers->processPaymentIntent(
-				$reader_id,
-				array(
-					'payment_intent' => $payment_intent['id'],
-				)
-			);
-
-			// Wait a moment for the reader to be ready, then simulate payment method presentation
-			sleep( 1 );
-
-			// Now simulate the payment method presentation
 			$reader = $stripe->testHelpers->terminal->readers->presentPaymentMethod(
 				$reader_id,
 				array()
@@ -577,7 +569,7 @@ class AjaxHandler {
 				'reader_id'       => $reader_id,
 				'reader_status'   => $reader->status,
 				'action'          => $reader->action ?? null,
-				'payment_intent'  => $payment_intent['id'],
+				'payment_intent'  => $payment_intent_id,
 			) );
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in simulate_payment: ' . $e->getMessage() );
