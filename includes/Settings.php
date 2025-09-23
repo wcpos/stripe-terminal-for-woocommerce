@@ -1,24 +1,20 @@
 <?php
 /**
  * Settings for the Stripe Terminal integration.
- *
- * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
 /**
- * Settings
+ * Settings.
  */
 class Settings {
-
 	/**
 	 * Get the Gateway settings.
 	 */
 	public static function get_gateway_settings() {
 		// Retrieve and return the gateway settings.
-		$settings = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
-		return $settings;
+		return get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
 	}
 
 	/**
@@ -26,10 +22,11 @@ class Settings {
 	 */
 	public static function get_api_key() {
 		$settings = self::get_gateway_settings();
-		if ( isset( $settings['test_mode'] ) && $settings['test_mode'] === 'yes' ) {
-			return isset( $settings['test_secret_key'] ) ? $settings['test_secret_key'] : '';
+		if ( isset( $settings['test_mode'] ) && 'yes' === $settings['test_mode'] ) {
+			return $settings['test_secret_key'] ?? '';
 		}
-		return isset( $settings['secret_key'] ) ? $settings['secret_key'] : '';
+
+		return $settings['secret_key'] ?? '';
 	}
 
 	/**
@@ -37,9 +34,10 @@ class Settings {
 	 */
 	public static function get_webhook_secret() {
 		$settings = self::get_gateway_settings();
-		if ( isset( $settings['test_mode'] ) && $settings['test_mode'] === 'yes' ) {
-			return isset( $settings['test_webhook_secret'] ) ? $settings['test_webhook_secret'] : '';
+		if ( isset( $settings['test_mode'] ) && 'yes' === $settings['test_mode'] ) {
+			return $settings['test_webhook_secret'] ?? '';
 		}
-		return isset( $settings['webhook_secret'] ) ? $settings['webhook_secret'] : '';
+
+		return $settings['webhook_secret'] ?? '';
 	}
 }

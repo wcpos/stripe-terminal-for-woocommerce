@@ -1,16 +1,12 @@
 <?php
 /**
  * Logger for the Stripe Terminal integration.
- *
- * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
-use function is_string;
-
 /**
- * Class Logger
+ * Class Logger.
  *
  * NOTE: do not put any SQL queries in this class, eg: options table lookup
  */
@@ -38,11 +34,11 @@ class Logger {
 				self::$logger = wc_get_logger();
 			}
 
-			if ( is_null( self::$log_level ) ) {
+			if ( \is_null( self::$log_level ) ) {
 				self::$log_level = 'info';
 			}
 
-			if ( ! is_string( $message ) ) {
+			if ( ! \is_string( $message ) ) {
 				$message = print_r( $message, true );
 			}
 

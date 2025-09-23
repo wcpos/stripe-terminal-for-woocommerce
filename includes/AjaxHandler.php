@@ -4,6 +4,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal;
 
 use Exception;
 use WC_Order;
+use WP_Error;
 
 /**
  * Handles AJAX requests for Stripe Terminal payments.
