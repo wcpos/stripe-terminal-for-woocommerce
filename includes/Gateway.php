@@ -266,8 +266,10 @@ class Gateway extends WC_Payment_Gateway {
 	public function payment_fields(): void {
 		global $wp;
 
-		// Description for the payment method.
-		echo '<p>' . esc_html( $this->get_option( 'description' ) ) . '</p>';
+		$description = apply_filters( 'woocommerce_gateway_description', $this->get_option( 'description' ), $this->id );
+		if ( $description ) {
+			echo '<p>' . wp_kses_post( $description ) . '</p>';
+		}
 
 		// Show loading state initially - readers will be loaded via AJAX
 		echo '<div class="stripe-terminal-loading">';
