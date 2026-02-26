@@ -9,7 +9,7 @@
 	},
 	"dependencies": {},
 	"devDependencies": {
-		"webpack": "^5.95.0",
+		"webpack": "^5.105.3",
 		"webpack-cli": "^5.1.4",
 		"terser-webpack-plugin": "^5.3.10",
 		"css-loader": "^7.1.1",
