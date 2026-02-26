@@ -19,7 +19,7 @@
     "woocommerce/woocommerce-sniffs": "^1.0",
     "wp-coding-standards/wpcs": "^3.0",
     "wp-phpunit/wp-phpunit": "^6.0",
-    "yoast/phpunit-polyfills": "^3.0"
+    "yoast/phpunit-polyfills": "^4.0"
   },
   "require": {
     "php": ">=7.4",
