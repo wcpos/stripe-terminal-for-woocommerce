@@ -24,7 +24,7 @@
   "require": {
     "php": ">=7.4",
     "ext-json": "*",
-    "stripe/stripe-php": "^16.0"
+    "stripe/stripe-php": "^19.4"
   },
   "config": {
     "platform": {
