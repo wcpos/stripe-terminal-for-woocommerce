@@ -47,8 +47,8 @@
     "lint": "phpcs --standard=./.phpcs.xml.dist",
     "lint-report": "phpcs --standard=./.phpcs.xml.dist --report=checkstyle",
     "fix": "php-cs-fixer fix .",
-    "test": "phpunit --configuration phpunit.xml",
-    "test:coverage": "phpunit --configuration phpunit.xml --coverage-clover=coverage.xml",
+    "test": "phpunit --configuration phpunit.xml.dist",
+    "test:coverage": "phpunit --configuration phpunit.xml.dist --coverage-clover=coverage.xml",
     "prefix-dependencies": [
       "composer --working-dir=php-scoper install",
       "cd php-scoper && vendor/bin/php-scoper add-prefix --output-dir=../vendor_prefixed --force && cd ..",
