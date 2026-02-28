@@ -14,13 +14,9 @@
         </testsuite>
     </testsuites>
 
-    <coverage processUncoveredFiles="true">
+    <coverage processUncoveredFiles="false">
         <include>
             <directory suffix=".php">includes</directory>
         </include>
-        <exclude>
-            <file>includes/Abstracts/APIController.php</file>
-            <file>includes/API.php</file>
-        </exclude>
     </coverage>
 </phpunit>
