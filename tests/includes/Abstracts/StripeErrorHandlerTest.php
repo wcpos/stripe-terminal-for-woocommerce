@@ -155,8 +155,6 @@ class StripeErrorHandlerTest extends TestCase {
 		$charge      = new \stdClass();
 		$charge->outcome = $outcome;
 
-		$chargesData = new \stdClass();
-		// Use ArrayObject to support array access on data property.
 		$charges      = new \stdClass();
 		$charges->data = array( $charge );
 

@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-echo "Waiting for WordPress to be ready..."
-until wp core is-installed --path=/var/www/html 2>/dev/null; do
+echo "Waiting for WordPress files to be ready..."
+until wp core version --path=/var/www/html 2>/dev/null; do
   sleep 2
 done
 

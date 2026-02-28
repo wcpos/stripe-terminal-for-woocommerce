@@ -49,6 +49,7 @@ services:
       WORDPRESS_DB_USER: wordpress
       WORDPRESS_DB_PASSWORD: wordpress
       WORDPRESS_DB_NAME: wordpress
+      STRIPE_TEST_SECRET_KEY: ${STRIPE_TEST_SECRET_KEY:-sk_test_placeholder}
 
 volumes:
   wordpress_data:
