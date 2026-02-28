@@ -11,7 +11,8 @@ class StripeTerminalPayment {
     this.currentPaymentIntent = null;
     this.connectedReader = null;
     this.pollingInterval = null; // Track polling interval
-    
+    this.isDeclined = false;
+
     // Get WordPress localized data
     this.config = window.stripeTerminalData || {};
     this.ajaxUrl = this.config.ajaxUrl || window.ajaxurl || '/wp-admin/admin-ajax.php';
@@ -40,7 +41,8 @@ class StripeTerminalPayment {
     jQuery(document).on('click', '.stripe-terminal-cancel-button', this.handleCancel.bind(this));
     jQuery(document).on('click', '.stripe-terminal-simulate-button', this.handleSimulatePayment.bind(this));
     jQuery(document).on('click', '.stripe-terminal-check-status-button', this.handleCheckStatus.bind(this));
-    
+    jQuery(document).on('click', '.stripe-terminal-retry-button', this.handleRetryPayment.bind(this));
+
     // Reader management events
     jQuery(document).on('click', '.stripe-terminal-connect-button', this.handleConnectReader.bind(this));
     jQuery(document).on('click', '.stripe-terminal-disconnect-button', this.handleDisconnectReader.bind(this));
@@ -231,12 +233,10 @@ class StripeTerminalPayment {
   }
 
   pollPaymentStatus(paymentIntentId, orderId, button) {
-    // Clear any existing polling
     this.stopPolling();
-    
+
     this.pollingInterval = setInterval(async () => {
       try {
-        // Check payment status using lightweight endpoint
         const response = await jQuery.ajax({
           url: this.ajaxUrl,
           type: 'POST',
@@ -246,39 +246,107 @@ class StripeTerminalPayment {
             order_key: this.config.orderKey
           }
         });
-        
+
         if (response.success) {
           const data = response.data;
-          
+
           if (data.is_paid) {
-            // Payment successful, stop polling and trigger order processing
             this.stopPolling();
             this.handleSuccessfulPayment(data);
+          } else if (data.payment_intent_status === 'requires_payment_method' && data.last_payment_error) {
+            this.stopPolling();
+            this.handleDecline(data, button);
           } else if (data.status === 'failed' || data.status === 'cancelled') {
             this.stopPolling();
             this.showError(this.strings.paymentFailed || 'Payment failed');
             button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
+            this.currentPaymentIntent = null;
+            this.isDeclined = false;
+            this.updateButtonVisibility();
           }
-          // If order is still pending/processing, continue polling
-        } else {
-          console.error('Payment status check failed:', response.data);
-          // Continue polling on error, might be temporary
         }
-        
       } catch (error) {
         console.error('Payment polling error:', error);
-        // Continue polling on network errors, might be temporary
       }
-    }, 2000); // Poll every 2 seconds
+    }, 2000);
 
-    // Stop polling after 5 minutes
     setTimeout(() => {
       this.stopPolling();
       if (button.prop('disabled')) {
         this.showError(this.strings.paymentTimeout || 'Payment timed out');
         button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
+        this.currentPaymentIntent = null;
+        this.isDeclined = false;
+        this.updateButtonVisibility();
       }
-    }, 300000); // 5 minutes
+    }, 300000);
+  }
+
+  handleDecline(data, button) {
+    const errorMessage = data.last_payment_error.message || this.strings.cardDeclined || 'Card declined';
+    this.showError(errorMessage);
+    this.addToLog('Card declined: ' + errorMessage, 'warning');
+
+    this.isDeclined = true;
+
+    button.text(this.strings.payWithTerminal || 'Pay with Terminal');
+    button.prop('disabled', true);
+
+    this.updateButtonVisibility();
+  }
+
+  handleRetryPayment(event) {
+    event.preventDefault();
+
+    if (!this.currentPaymentIntent || !this.currentPaymentIntent.id) {
+      this.showError('No active payment to retry');
+      return;
+    }
+
+    if (!this.connectedReader) {
+      this.showError(this.strings.selectReader || 'Please select a reader to continue');
+      return;
+    }
+
+    const button = jQuery(event.target);
+    const orderId = button.data('order-id') || this.config.orderId;
+    const payButton = jQuery('.stripe-terminal-pay-button');
+
+    button.prop('disabled', true).text('Retrying...');
+    this.isDeclined = false;
+
+    jQuery.ajax({
+      url: this.ajaxUrl,
+      type: 'POST',
+      data: {
+        action: 'stripe_terminal_retry_payment',
+        order_id: orderId,
+        reader_id: this.connectedReader.id,
+        order_key: this.config.orderKey
+      }
+    })
+    .done((response) => {
+      if (response.success) {
+        this.addToLog('Payment retry sent to reader. Present a new card.', 'info');
+        this.showMessage(this.strings.useTerminal || 'Please use the terminal to complete the payment');
+
+        payButton.text(this.strings.paymentInProgress || 'Payment in progress...');
+        this.updateButtonVisibility();
+
+        this.pollPaymentStatus(this.currentPaymentIntent.id, orderId, payButton);
+      } else {
+        this.showError('Retry failed: ' + (response.data || 'Unknown error'));
+        this.isDeclined = true;
+        this.updateButtonVisibility();
+      }
+      button.prop('disabled', false).text(this.strings.tryAnotherCard || 'Try Another Card');
+    })
+    .fail((xhr, status, error) => {
+      this.showError('Retry failed: ' + error);
+      button.prop('disabled', false).text(this.strings.tryAnotherCard || 'Try Another Card');
+      this.isDeclined = true;
+      this.updateButtonVisibility();
+    });
   }
 
   stopPolling() {
@@ -301,6 +369,7 @@ class StripeTerminalPayment {
         .then(() => {
           this.showMessage(this.strings.paymentCancelled || 'Payment cancelled');
           this.currentPaymentIntent = null;
+          this.isDeclined = false;
           // Reset button state
           jQuery('.stripe-terminal-pay-button').prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
           // Update button visibility
@@ -877,22 +946,27 @@ class StripeTerminalPayment {
 
   updateButtonVisibility() {
     if (!this.connectedReader) return;
-    
+
     const simulateButton = jQuery('.stripe-terminal-simulate-button');
     const cancelButton = jQuery('.stripe-terminal-cancel-button');
-    
-    // Simulate button: only show for simulated readers when payment intent is active
-    if (this.connectedReader.device_type && this.connectedReader.device_type.includes('simulated') && this.currentPaymentIntent) {
+    const retryButton = jQuery('.stripe-terminal-retry-button');
+
+    if (this.connectedReader.device_type && this.connectedReader.device_type.includes('simulated') && this.currentPaymentIntent && !this.isDeclined) {
       simulateButton.show();
     } else {
       simulateButton.hide();
     }
-    
-    // Cancel button: only show when payment intent is active
+
     if (this.currentPaymentIntent) {
       cancelButton.show();
     } else {
       cancelButton.hide();
+    }
+
+    if (this.isDeclined && this.currentPaymentIntent) {
+      retryButton.show();
+    } else {
+      retryButton.hide();
     }
   }
 
