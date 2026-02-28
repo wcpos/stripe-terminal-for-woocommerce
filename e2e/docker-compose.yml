@@ -1,0 +1,54 @@
+services:
+  wordpress:
+    image: wordpress:6.7-php8.2
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DEBUG: "1"
+    volumes:
+      - wordpress_data:/var/www/html
+      - ../:/var/www/html/wp-content/plugins/stripe-terminal-for-woocommerce
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  db:
+    image: mariadb:10.11
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  wp-cli:
+    image: wordpress:cli-2.10-php8.2
+    depends_on:
+      wordpress:
+        condition: service_healthy
+    volumes:
+      - wordpress_data:/var/www/html
+      - ../:/var/www/html/wp-content/plugins/stripe-terminal-for-woocommerce
+      - ./setup.sh:/setup.sh
+    entrypoint: ["/bin/sh", "/setup.sh"]
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+
+volumes:
+  wordpress_data:
