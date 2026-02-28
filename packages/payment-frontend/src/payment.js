@@ -11,6 +11,7 @@ class StripeTerminalPayment {
     this.currentPaymentIntent = null;
     this.connectedReader = null;
     this.pollingInterval = null; // Track polling interval
+    this.pollingTimeout = null; // Track polling timeout
     this.isDeclined = false;
 
     // Get WordPress localized data
@@ -270,7 +271,7 @@ class StripeTerminalPayment {
       }
     }, 2000);
 
-    setTimeout(() => {
+    this.pollingTimeout = setTimeout(() => {
       this.stopPolling();
       if (button.prop('disabled')) {
         this.showError(this.strings.paymentTimeout || 'Payment timed out');
@@ -353,6 +354,10 @@ class StripeTerminalPayment {
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
       this.pollingInterval = null;
+    }
+    if (this.pollingTimeout) {
+      clearTimeout(this.pollingTimeout);
+      this.pollingTimeout = null;
     }
   }
 
