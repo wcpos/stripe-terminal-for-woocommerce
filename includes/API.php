@@ -362,6 +362,12 @@ class API extends Abstracts\APIController {
 					$this->update_order_with_charge( $charge );
 
 					break;
+
+				case 'payment_intent.payment_failed':
+					$payment_intent = $event->data->object;
+					$this->update_order_with_failed_payment( $payment_intent );
+
+					break;
 				default:
 					// Event type not handled.
 					return rest_ensure_response(
@@ -509,5 +515,53 @@ class API extends Abstracts\APIController {
 		);
 
 		Logger::log( 'Charge webhook: Metadata saved for order ' . $order_id . ' - Payment Intent: ' . $payment_intent_id . ', Charge: ' . $charge->id, 'info' );
+	}
+
+	/**
+	 * Update the order with failed payment intent details.
+	 *
+	 * @param object $payment_intent The failed payment intent object.
+	 */
+	private function update_order_with_failed_payment( $payment_intent ): void {
+		$order_id = $payment_intent->metadata->order_id ?? null;
+		if ( ! $order_id ) {
+			Logger::log( 'Payment failed webhook: No order_id found in metadata', 'warning' );
+			return;
+		}
+
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			Logger::log( 'Payment failed webhook: Order not found: ' . $order_id, 'error' );
+			return;
+		}
+
+		// Guard against stale failed events arriving after a successful payment.
+		$current_terminal_status = $order->get_meta( '_stripe_terminal_payment_status' );
+		if ( $order->is_paid() || 'succeeded' === $current_terminal_status ) {
+			Logger::log( 'Payment failed webhook: Ignored stale failed event for order ' . $order_id, 'info' );
+			return;
+		}
+
+		// Save failure metadata.
+		$error_message = $payment_intent->last_payment_error->message ?? 'Unknown error';
+		$error_code    = $payment_intent->last_payment_error->code ?? null;
+		$decline_code  = $payment_intent->last_payment_error->decline_code ?? null;
+
+		$order->update_meta_data( '_stripe_terminal_payment_status', 'failed' );
+		$order->update_meta_data( '_stripe_terminal_payment_error', $error_message );
+		$order->save();
+
+		$order->add_order_note(
+			\sprintf(
+				/* translators: 1: error message, 2: error code, 3: decline code, 4: payment intent ID */
+				__( 'Stripe Terminal: Payment declined - %1$s (code: %2$s, decline_code: %3$s). Payment Intent: %4$s', 'stripe-terminal-for-woocommerce' ),
+				$error_message,
+				$error_code ?? 'n/a',
+				$decline_code ?? 'n/a',
+				$payment_intent->id
+			)
+		);
+
+		Logger::log( 'Payment failed webhook: Failure metadata saved for order ' . $order_id . ' - ' . $error_message, 'info' );
 	}
 }

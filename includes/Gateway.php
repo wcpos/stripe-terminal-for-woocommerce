@@ -317,7 +317,11 @@ class Gateway extends WC_Payment_Gateway {
 		echo '<button type="button" class="stripe-terminal-cancel-button" style="display: none;">';
 		echo esc_html__( 'Cancel Payment', 'stripe-terminal-for-woocommerce' );
 		echo '</button>';
-		
+
+		echo '<button type="button" class="stripe-terminal-retry-button" data-order-id="' . esc_attr( $order_id ) . '" style="display: none;">';
+		echo esc_html__( 'Try Another Card', 'stripe-terminal-for-woocommerce' );
+		echo '</button>';
+
 		echo '<button type="button" class="stripe-terminal-simulate-button" data-order-id="' . esc_attr( $order_id ) . '" style="display: none;">';
 		echo esc_html__( 'Simulate Payment', 'stripe-terminal-for-woocommerce' );
 		echo '</button>';
@@ -402,6 +406,8 @@ class Gateway extends WC_Payment_Gateway {
 					'paymentCancelled'     => __( 'Cancellation request sent. Please check the reader.', 'stripe-terminal-for-woocommerce' ),
 					'paymentSuccess'       => __( 'Payment successful!', 'stripe-terminal-for-woocommerce' ),
 					'paymentFailed'        => __( 'Payment failed:', 'stripe-terminal-for-woocommerce' ),
+					'cardDeclined'         => __( 'Card declined', 'stripe-terminal-for-woocommerce' ),
+					'tryAnotherCard'       => __( 'Try Another Card', 'stripe-terminal-for-woocommerce' ),
 					'networkError'         => __( 'Network error occurred', 'stripe-terminal-for-woocommerce' ),
 					'systemNotInitialized' => __( 'Payment system not initialized', 'stripe-terminal-for-woocommerce' ),
 					'missingData'          => __( 'Missing order ID or amount', 'stripe-terminal-for-woocommerce' ),
