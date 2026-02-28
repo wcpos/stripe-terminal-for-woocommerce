@@ -1,0 +1,550 @@
+/* Stripe Terminal Payment Styles - Redesigned to match Stripe Terminal SDK */
+
+/* Main Container */
+.stripe-terminal-payment-section {
+    background: #f6f8fa;
+    border-radius: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    max-width: 600px;
+}
+
+/* Main Title */
+.stripe-terminal-main-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin: 0 0 24px 0;
+    padding: 0;
+}
+
+/* Status Card */
+.stripe-terminal-status-card {
+    background: #ffffff;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.stripe-terminal-status-icon {
+    color: #dc3545;
+    display: flex;
+    align-items: center;
+}
+
+.stripe-terminal-status-text {
+    flex: 1;
+}
+
+.stripe-terminal-status-label {
+    color: #6c757d;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* Connect Card */
+.stripe-terminal-connect-card {
+    background: #ffffff;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.stripe-terminal-connect-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.stripe-terminal-connect-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.stripe-terminal-discover-button {
+    background: none;
+    border: none;
+    color: #007cba;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stripe-terminal-discover-button:hover {
+    color: #005a87;
+}
+
+.stripe-terminal-connect-description {
+    color: #6c757d;
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 0 0 16px 0;
+}
+
+.stripe-terminal-connect-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.stripe-terminal-register-button,
+.stripe-terminal-simulator-button {
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
+    color: #495057;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.stripe-terminal-register-button:hover,
+.stripe-terminal-simulator-button:hover {
+    background: #e9ecef;
+    border-color: #ced4da;
+}
+
+/* Readers Section */
+.stripe-terminal-readers-section {
+    background: #ffffff;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.stripe-terminal-readers-section h4 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.stripe-terminal-readers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.stripe-terminal-reader-card {
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    padding: 16px;
+    transition: all 0.2s ease;
+}
+
+.stripe-terminal-reader-card:hover {
+    border-color: #007cba;
+    box-shadow: 0 2px 8px rgba(0, 124, 186, 0.1);
+}
+
+.stripe-terminal-reader-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.stripe-terminal-reader-label {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.stripe-terminal-reader-status {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stripe-terminal-reader-status.online {
+    background: #d4edda;
+    color: #155724;
+}
+
+.stripe-terminal-reader-status.offline {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.stripe-terminal-reader-details {
+    margin-bottom: 12px;
+}
+
+.stripe-terminal-reader-details p {
+    margin: 4px 0;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.stripe-terminal-reader-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.stripe-terminal-connect-button {
+    background: #007cba;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.stripe-terminal-connect-button:hover:not(:disabled) {
+    background: #005a87;
+}
+
+.stripe-terminal-connect-button:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+}
+
+/* Connected Reader */
+.stripe-terminal-connected-reader {
+    background: #ffffff;
+    border: 1px solid #28a745;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.stripe-terminal-connected-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.stripe-terminal-connected-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.stripe-terminal-disconnect-button {
+    background: #dc3545;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.stripe-terminal-disconnect-button:hover {
+    background: #c82333;
+}
+
+.stripe-terminal-reader-details p {
+    margin: 4px 0;
+    font-size: 14px;
+    color: #495057;
+}
+
+/* Status indicators */
+.status-online {
+    color: #28a745;
+    font-weight: 600;
+}
+
+.status-offline {
+    color: #dc3545;
+    font-weight: 600;
+}
+
+/* Payment Buttons */
+.stripe-terminal-payment-buttons {
+    background: #ffffff;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+}
+
+.stripe-terminal-pay-button {
+    background: #007cba;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 160px;
+}
+
+.stripe-terminal-pay-button:hover:not(:disabled) {
+    background: #005a87;
+}
+
+.stripe-terminal-pay-button:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.stripe-terminal-cancel-button {
+    background: #dc3545;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 140px;
+}
+
+.stripe-terminal-cancel-button:hover {
+    background: #c82333;
+}
+
+.stripe-terminal-simulate-button {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 140px;
+}
+
+.stripe-terminal-simulate-button:hover {
+    background: #218838;
+}
+
+.stripe-terminal-check-status-button {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 160px;
+}
+
+.stripe-terminal-check-status-button:hover {
+    background: #5a6268;
+}
+
+/* Logging Section */
+.stripe-terminal-logging-section {
+    background: #2d3748;
+    border-radius: 8px;
+    color: #ffffff;
+    overflow: hidden;
+}
+
+.stripe-terminal-logging-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: #1a202c;
+    border-bottom: 1px solid #4a5568;
+}
+
+.stripe-terminal-logging-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.stripe-terminal-logging-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.stripe-terminal-toggle-log {
+    background: #4a5568;
+    color: #ffffff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.stripe-terminal-toggle-log:hover {
+    background: #718096;
+}
+
+.stripe-terminal-clear-log {
+    background: none;
+    color: #007cba;
+    border: none;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stripe-terminal-clear-log:hover {
+    color: #005a87;
+}
+
+.stripe-terminal-log-content {
+}
+
+.stripe-terminal-log-textarea {
+    width: 100%;
+    height: 200px;
+    background: #1a202c;
+    border: 1px solid #4a5568;
+    border-radius: 4px;
+    padding: 12px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #e2e8f0;
+    resize: vertical;
+    overflow-y: auto;
+}
+
+.stripe-terminal-log-textarea:focus {
+    outline: none;
+    border-color: #007cba;
+}
+
+/* Retry Button */
+.stripe-terminal-retry-button {
+    background: #ffc107;
+    color: #212529;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 160px;
+}
+
+.stripe-terminal-retry-button:hover:not(:disabled) {
+    background: #e0a800;
+}
+
+.stripe-terminal-retry-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .stripe-terminal-payment-section {
+        padding: 0;
+        margin: 0;
+    }
+    
+    .stripe-terminal-connect-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    
+    .stripe-terminal-connect-actions {
+        flex-direction: column;
+    }
+    
+    .stripe-terminal-payment-buttons {
+        flex-direction: column;
+    }
+    
+    .stripe-terminal-payment-buttons button {
+        width: 100%;
+    }
+}
+
+/* Loading States */
+.stripe-terminal-loading {
+    text-align: center;
+    padding: 20px;
+    color: #6c757d;
+}
+
+.stripe-terminal-loading::after {
+    content: '';
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007cba;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-left: 10px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Error States */
+.stripe-terminal-error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 12px 0;
+    font-size: 14px;
+}
+
+.stripe-terminal-success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 12px 0;
+    font-size: 14px;
+}
+
+.stripe-terminal-info {
+    background: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 12px 0;
+    font-size: 14px;
+}
