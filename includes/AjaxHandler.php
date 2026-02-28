@@ -401,7 +401,7 @@ class AjaxHandler {
 			$has_successful_payment = ( 'succeeded' === $payment_status && ! empty( $payment_intent_id ) );
 			$payment_successful     = $is_paid || $has_successful_payment;
 
-			// If payment hasn't succeeded locally and we have an intent ID, check Stripe directly
+			// If payment hasn't succeeded locally and we have an intent ID, check Stripe directly.
 			$payment_intent_status = null;
 			$last_payment_error    = null;
 
@@ -419,7 +419,7 @@ class AjaxHandler {
 						);
 					}
 
-					// If Stripe says succeeded but local metadata didn't catch it yet
+					// If Stripe says succeeded but local metadata didn't catch it yet.
 					if ( 'succeeded' === $payment_intent_status ) {
 						$payment_successful = true;
 					}

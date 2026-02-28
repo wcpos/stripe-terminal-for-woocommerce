@@ -535,7 +535,7 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
-		// Save failure metadata
+		// Save failure metadata.
 		$error_message = $payment_intent->last_payment_error->message ?? 'Unknown error';
 		$error_code    = $payment_intent->last_payment_error->code ?? null;
 		$decline_code  = $payment_intent->last_payment_error->decline_code ?? null;
@@ -546,7 +546,8 @@ class API extends Abstracts\APIController {
 
 		$order->add_order_note(
 			\sprintf(
-				__( 'Stripe Terminal: Payment declined - %s (code: %s, decline_code: %s). Payment Intent: %s', 'stripe-terminal-for-woocommerce' ),
+				/* translators: 1: error message, 2: error code, 3: decline code, 4: payment intent ID */
+				__( 'Stripe Terminal: Payment declined - %1$s (code: %2$s, decline_code: %3$s). Payment Intent: %4$s', 'stripe-terminal-for-woocommerce' ),
 				$error_message,
 				$error_code ?? 'n/a',
 				$decline_code ?? 'n/a',
