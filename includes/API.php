@@ -535,6 +535,13 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
+		// Guard against stale failed events arriving after a successful payment.
+		$current_terminal_status = $order->get_meta( '_stripe_terminal_payment_status' );
+		if ( $order->is_paid() || 'succeeded' === $current_terminal_status ) {
+			Logger::log( 'Payment failed webhook: Ignored stale failed event for order ' . $order_id, 'info' );
+			return;
+		}
+
 		// Save failure metadata.
 		$error_message = $payment_intent->last_payment_error->message ?? 'Unknown error';
 		$error_code    = $payment_intent->last_payment_error->code ?? null;

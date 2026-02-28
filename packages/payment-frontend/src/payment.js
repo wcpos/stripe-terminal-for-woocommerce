@@ -313,7 +313,7 @@ class StripeTerminalPayment {
     const orderId = button.data('order-id') || this.config.orderId;
     const payButton = jQuery('.stripe-terminal-pay-button');
 
-    button.prop('disabled', true).text('Retrying...');
+    button.prop('disabled', true).text(this.strings.retrying || 'Retrying...');
     this.isDeclined = false;
 
     jQuery.ajax({
