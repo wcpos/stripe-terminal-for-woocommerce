@@ -57,6 +57,10 @@ class AjaxHandler {
 		add_action( 'wp_ajax_stripe_terminal_simulate_payment', array( $this, 'simulate_payment' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_simulate_payment', array( $this, 'simulate_payment' ) );
 
+		// Retry payment on reader
+		add_action( 'wp_ajax_stripe_terminal_retry_payment', array( $this, 'retry_payment' ) );
+		add_action( 'wp_ajax_nopriv_stripe_terminal_retry_payment', array( $this, 'retry_payment' ) );
+
 		// Check payment status from Stripe
 	}
 
@@ -591,6 +595,71 @@ class AjaxHandler {
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in simulate_payment: ' . $e->getMessage() );
 			wp_send_json_error( 'Failed to simulate payment: ' . $e->getMessage() );
+		}
+	}
+
+	/**
+	 * Retry a payment by re-processing the existing payment intent on the reader.
+	 */
+	public function retry_payment(): void {
+		try {
+			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
+
+			if ( ! $order_id || ! $reader_id ) {
+				wp_send_json_error( 'Missing order ID or reader ID' );
+				return;
+			}
+
+			$order = wc_get_order( $order_id );
+			if ( ! $order ) {
+				wp_send_json_error( 'Order not found' );
+				return;
+			}
+
+			if ( ! $this->can_access_order( $order ) ) {
+				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+				return;
+			}
+
+			if ( ! $this->stripe_service ) {
+				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
+				return;
+			}
+
+			$payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
+			if ( empty( $payment_intent_id ) ) {
+				wp_send_json_error( 'No payment intent found for this order' );
+				return;
+			}
+
+			Logger::log( 'Stripe Terminal AJAX - Retrying payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
+
+			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id );
+
+			if ( is_wp_error( $reader_result ) ) {
+				Logger::log( 'Stripe Terminal AJAX - Retry failed: ' . $reader_result->get_error_message() );
+				wp_send_json_error( 'Failed to retry payment on reader: ' . $reader_result->get_error_message() );
+				return;
+			}
+
+			Logger::log( 'Stripe Terminal AJAX - Retry successful on reader ' . $reader_id );
+
+			$order->add_order_note(
+				\sprintf(
+					'Stripe Terminal: Payment retry sent to reader %s - Payment Intent: %s',
+					$reader_id,
+					$payment_intent_id
+				)
+			);
+
+			wp_send_json_success( array(
+				'payment_intent_id' => $payment_intent_id,
+				'reader'            => $reader_result,
+			) );
+		} catch ( Exception $e ) {
+			Logger::log( 'Stripe Terminal AJAX - Exception in retry_payment: ' . $e->getMessage() );
+			wp_send_json_error( 'An error occurred while retrying payment: ' . $e->getMessage() );
 		}
 	}
 
