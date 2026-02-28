@@ -445,6 +445,29 @@
     border-color: #007cba;
 }
 
+/* Retry Button */
+.stripe-terminal-retry-button {
+    background: #ffc107;
+    color: #212529;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 160px;
+}
+
+.stripe-terminal-retry-button:hover:not(:disabled) {
+    background: #e0a800;
+}
+
+.stripe-terminal-retry-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .stripe-terminal-payment-section {
