@@ -61,6 +61,15 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Set the Stripe client instance (primarily for testing).
+	 *
+	 * @param \Stripe\StripeClient $client The Stripe client to use.
+	 */
+	public function set_stripe_client( \Stripe\StripeClient $client ): void {
+		$this->stripe_client = $client;
+	}
+
+	/**
 	 * Create a payment intent for an order.
 	 *
 	 * @param WC_Order $order  The WooCommerce order.
