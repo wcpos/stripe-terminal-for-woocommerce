@@ -371,61 +371,77 @@ class AjaxHandler {
 	 */
 	public function check_payment_status(): void {
 		try {
-			// Get and validate parameters
 			$order_id = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $order_id ) {
 				wp_send_json_error( 'Missing order ID' );
-
 				return;
 			}
 
-			// Get the order
 			$order = wc_get_order( $order_id );
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
-
 				return;
 			}
 
-			// Verify access using order key
 			if ( ! $this->can_access_order( $order ) ) {
 				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
-
 				return;
 			}
 
-			// Check if order is paid or has successful payment metadata
 			$is_paid = $order->is_paid();
 			$status  = $order->get_status();
-			
-			// Also check for saved payment metadata (from webhooks)
+
 			$payment_status         = $order->get_meta( '_stripe_terminal_payment_status' );
 			$payment_intent_id      = $order->get_meta( '_stripe_terminal_payment_intent_id' );
 			$has_successful_payment = ( 'succeeded' === $payment_status && ! empty( $payment_intent_id ) );
-			
-			// Consider payment successful if order is paid OR has successful payment metadata
-			$payment_successful = $is_paid || $has_successful_payment;
+			$payment_successful     = $is_paid || $has_successful_payment;
 
-			// Get the return URL if payment is successful
+			// If payment hasn't succeeded locally and we have an intent ID, check Stripe directly
+			$payment_intent_status = null;
+			$last_payment_error    = null;
+
+			if ( ! $payment_successful && ! empty( $payment_intent_id ) && $this->stripe_service ) {
+				try {
+					\Stripe\Stripe::setApiKey( $this->stripe_service->get_api_key() );
+					$stripe_intent         = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+					$payment_intent_status = $stripe_intent->status;
+
+					if ( $stripe_intent->last_payment_error ) {
+						$last_payment_error = array(
+							'message'      => $stripe_intent->last_payment_error->message ?? 'Card declined',
+							'code'         => $stripe_intent->last_payment_error->code ?? null,
+							'decline_code' => $stripe_intent->last_payment_error->decline_code ?? null,
+						);
+					}
+
+					// If Stripe says succeeded but local metadata didn't catch it yet
+					if ( 'succeeded' === $payment_intent_status ) {
+						$payment_successful = true;
+					}
+				} catch ( \Exception $e ) {
+					Logger::log( 'Stripe Terminal AJAX - Failed to retrieve payment intent: ' . $e->getMessage() );
+				}
+			}
+
 			$return_url = null;
 			if ( $payment_successful ) {
 				$gateway = WC()->payment_gateways()->payment_gateways()['stripe_terminal_for_woocommerce'] ?? null;
 				if ( $gateway ) {
-					// Get the default return URL first
 					$default_url = $gateway->get_return_url( $order );
-					// Then apply our custom POS logic
-					$return_url = $gateway->order_received_url( $default_url, $order );
+					$return_url  = $gateway->order_received_url( $default_url, $order );
 				}
 			}
 
 			wp_send_json_success( array(
-				'is_paid'          => $payment_successful, // Use the combined check
-				'status'           => $status,
-				'order_id'         => $order_id,
-				'transaction_id'   => $order->get_transaction_id(),
-				'return_url'       => $return_url,
-				'payment_metadata' => array(
+				'is_paid'               => $payment_successful,
+				'status'                => $status,
+				'order_id'              => $order_id,
+				'transaction_id'        => $order->get_transaction_id(),
+				'return_url'            => $return_url,
+				'payment_intent_status' => $payment_intent_status,
+				'last_payment_error'    => $last_payment_error,
+				'payment_metadata'      => array(
 					'payment_status'         => $payment_status,
 					'payment_intent_id'      => $payment_intent_id,
 					'has_successful_payment' => $has_successful_payment,

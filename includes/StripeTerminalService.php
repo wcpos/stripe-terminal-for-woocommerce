@@ -52,6 +52,15 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Get the API key.
+	 *
+	 * @return string
+	 */
+	public function get_api_key(): string {
+		return $this->api_key;
+	}
+
+	/**
 	 * Create a payment intent for an order.
 	 *
 	 * @param WC_Order $order  The WooCommerce order.
