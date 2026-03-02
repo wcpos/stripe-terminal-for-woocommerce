@@ -145,7 +145,10 @@ class StripeTerminalService {
 		$process_config = array_merge( $default_config, $process_config );
 
 		// Pre-flight: check reader state and clear stale actions.
-		$this->clear_stale_reader_action( $reader_id, $payment_intent_id );
+		$preflight = $this->clear_stale_reader_action( $reader_id, $payment_intent_id );
+		if ( is_wp_error( $preflight ) ) {
+			return $preflight;
+		}
 
 		// Attempt to process payment on the reader.
 		$result = $this->send_process_payment_intent( $reader_id, $payment_intent_id, $process_config );
@@ -153,7 +156,17 @@ class StripeTerminalService {
 		// On timeout, cancel reader action and retry once.
 		if ( is_wp_error( $result ) && $this->is_timeout_error( $result ) ) {
 			Logger::log( 'process_payment_intent: Timeout detected, cancelling reader action and retrying.' );
-			$this->cancel_reader_action( $reader_id );
+			$cancel_result = $this->cancel_reader_action( $reader_id );
+
+			// If cancel returned busy, the reader is mid-authorization — don't retry.
+			if ( isset( $cancel_result['status'] ) && 'busy' === $cancel_result['status'] ) {
+				Logger::log( 'process_payment_intent: Reader is busy, cannot retry.' );
+				return new WP_Error(
+					'reader_busy',
+					'Reader is busy processing a payment and cannot accept a retry.',
+					array( 'status' => 409 )
+				);
+			}
 
 			$result = $this->send_process_payment_intent( $reader_id, $payment_intent_id, $process_config );
 		}
@@ -190,24 +203,25 @@ class StripeTerminalService {
 	/**
 	 * Check reader for stale actions and cancel them if found.
 	 *
-	 * A stale action is one that has failed, or is processing a different
-	 * payment intent than the one we're about to send.
+	 * A stale action is one that has failed, or is for a different payment
+	 * intent and is no longer in progress.
 	 *
 	 * @param string $reader_id         The reader ID.
 	 * @param string $payment_intent_id The payment intent ID we intend to process.
+	 *
+	 * @return null|WP_Error Null on success, WP_Error if reader is busy.
 	 */
-	private function clear_stale_reader_action( string $reader_id, string $payment_intent_id ): void {
+	private function clear_stale_reader_action( string $reader_id, string $payment_intent_id ) {
 		$reader = $this->get_reader( $reader_id );
 
 		if ( is_wp_error( $reader ) ) {
-			// Can't check reader state — proceed anyway, the main call will fail with a clear error.
 			Logger::log( 'clear_stale_reader_action: Could not retrieve reader state, proceeding.' );
-			return;
+			return null;
 		}
 
 		$action = $reader['action'] ?? null;
 		if ( ! $action ) {
-			return; // No action on reader, nothing to clear.
+			return null;
 		}
 
 		$action_status = $action['status'] ?? null;
@@ -217,14 +231,26 @@ class StripeTerminalService {
 		if ( 'failed' === $action_status ) {
 			Logger::log( 'clear_stale_reader_action: Cancelling failed action on reader.' );
 			$this->cancel_reader_action( $reader_id );
-			return;
+			return null;
 		}
 
-		// Cancel if the action is for a different payment intent.
+		// If action is for a different payment intent...
 		if ( $action_pi && $action_pi !== $payment_intent_id ) {
+			// Don't cancel if the action is actively in progress.
+			if ( 'in_progress' === $action_status ) {
+				Logger::log( 'clear_stale_reader_action: Reader is processing a different payment intent.' );
+				return new WP_Error(
+					'reader_busy',
+					'Reader is currently processing a different payment.',
+					array( 'status' => 409 )
+				);
+			}
+
 			Logger::log( 'clear_stale_reader_action: Cancelling stale action for different payment intent.' );
 			$this->cancel_reader_action( $reader_id );
 		}
+
+		return null;
 	}
 
 	/**
