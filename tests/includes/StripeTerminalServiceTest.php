@@ -821,7 +821,23 @@ class StripeTerminalServiceTest extends TestCase {
 			'register_reader'       => array( 'register_reader', array( 'tml_fake', 'code123' ) ),
 			'get_reader_status'      => array( 'get_reader_status', array( 'tmr_fake' ) ),
 			'cancel_reader_action'   => array( 'cancel_reader_action', array( 'tmr_fake' ) ),
+			'get_reader'             => array( 'get_reader', array( 'tmr_fake' ) ),
 		);
+	}
+
+	// -----------------------------------------------------------------------
+	// get_reader tests
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Test get_reader returns WP_Error with fake key.
+	 */
+	public function test_get_reader_returns_wp_error_with_fake_key(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$result = $service->get_reader( 'tmr_fake_reader' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
 	}
 
 	// -----------------------------------------------------------------------

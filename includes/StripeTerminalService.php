@@ -250,6 +250,24 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Retrieve a single reader to inspect its current state.
+	 *
+	 * @param string $reader_id The reader ID.
+	 *
+	 * @return array|WP_Error The reader data or error.
+	 */
+	public function get_reader( string $reader_id ) {
+		try {
+			$stripe = $this->get_stripe_client();
+			$reader = $stripe->terminal->readers->retrieve( $reader_id );
+
+			return $reader->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'get_reader_error' );
+		}
+	}
+
+	/**
 	 * Update order from payment intent data.
 	 *
 	 * @param WC_Order              $order          The WooCommerce order.
