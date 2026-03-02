@@ -261,7 +261,12 @@ class AjaxHandler {
 			}
 
 			// Cancel the reader action first (clear hardware state).
-			$this->stripe_service->cancel_reader_action( $reader_id );
+			$cancel_result = $this->stripe_service->cancel_reader_action( $reader_id );
+			if ( is_wp_error( $cancel_result ) ) {
+				Logger::log( 'Stripe Terminal AJAX - Failed to clear reader action: ' . $cancel_result->get_error_message() );
+				wp_send_json_error( 'Failed to clear reader action: ' . $cancel_result->get_error_message() );
+				return;
+			}
 
 			// Then cancel the payment intent.
 			$result = $this->stripe_service->cancel_payment_intent( $payment_intent_id, $order );

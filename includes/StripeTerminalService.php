@@ -158,6 +158,11 @@ class StripeTerminalService {
 			Logger::log( 'process_payment_intent: Timeout detected, cancelling reader action and retrying.' );
 			$cancel_result = $this->cancel_reader_action( $reader_id );
 
+			if ( is_wp_error( $cancel_result ) ) {
+				Logger::log( 'process_payment_intent: cancel_reader_action failed before retry: ' . $cancel_result->get_error_message() );
+				return $cancel_result;
+			}
+
 			// If cancel returned busy, the reader is mid-authorization — don't retry.
 			if ( isset( $cancel_result['status'] ) && 'busy' === $cancel_result['status'] ) {
 				Logger::log( 'process_payment_intent: Reader is busy, cannot retry.' );
@@ -230,7 +235,17 @@ class StripeTerminalService {
 		// Cancel if the action has failed.
 		if ( 'failed' === $action_status ) {
 			Logger::log( 'clear_stale_reader_action: Cancelling failed action on reader.' );
-			$this->cancel_reader_action( $reader_id );
+			$cancel_result = $this->cancel_reader_action( $reader_id );
+			if ( is_wp_error( $cancel_result ) ) {
+				return $cancel_result;
+			}
+			if ( isset( $cancel_result['status'] ) && 'busy' === $cancel_result['status'] ) {
+				return new WP_Error(
+					'reader_busy',
+					'Reader is currently processing a payment and cannot be cleared.',
+					array( 'status' => 409 )
+				);
+			}
 			return null;
 		}
 
@@ -247,7 +262,17 @@ class StripeTerminalService {
 			}
 
 			Logger::log( 'clear_stale_reader_action: Cancelling stale action for different payment intent.' );
-			$this->cancel_reader_action( $reader_id );
+			$cancel_result = $this->cancel_reader_action( $reader_id );
+			if ( is_wp_error( $cancel_result ) ) {
+				return $cancel_result;
+			}
+			if ( isset( $cancel_result['status'] ) && 'busy' === $cancel_result['status'] ) {
+				return new WP_Error(
+					'reader_busy',
+					'Reader is currently processing a different payment.',
+					array( 'status' => 409 )
+				);
+			}
 		}
 
 		return null;
