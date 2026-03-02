@@ -196,7 +196,8 @@ class StripeTerminalPayment {
       const ajaxData = {
         action: 'stripe_terminal_cancel_payment',
         payment_intent_id: paymentIntentId,
-        order_id: orderId
+        order_id: orderId,
+        reader_id: this.connectedReader ? this.connectedReader.id : ''
       };
 
       // Add order key for guest users
