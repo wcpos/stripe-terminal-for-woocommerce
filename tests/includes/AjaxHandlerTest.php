@@ -201,32 +201,44 @@ class AjaxHandlerTest extends TestCase {
 	}
 
 	// -------------------------------------------------------------------
-	// cancel_payment — missing parameters
+	// cancel_payment — missing parameters (now requires reader_id too)
 	// -------------------------------------------------------------------
 
-	public function test_cancel_payment_rejects_missing_payment_intent_id(): void {
+	public function test_cancel_payment_rejects_missing_reader_id(): void {
 		$_POST = array(
-			'order_id' => '42',
+			'payment_intent_id' => 'pi_abc123',
+			'order_id'          => '42',
 		);
 
 		$error = $this->call_and_capture_error( 'cancel_payment' );
-		$this->assertSame( 'Missing payment intent ID or order ID', $error );
+		$this->assertSame( 'Missing payment intent ID, order ID, or reader ID', $error );
+	}
+
+	public function test_cancel_payment_rejects_missing_payment_intent_id(): void {
+		$_POST = array(
+			'order_id'  => '42',
+			'reader_id' => 'tmr_abc123',
+		);
+
+		$error = $this->call_and_capture_error( 'cancel_payment' );
+		$this->assertSame( 'Missing payment intent ID, order ID, or reader ID', $error );
 	}
 
 	public function test_cancel_payment_rejects_missing_order_id(): void {
 		$_POST = array(
 			'payment_intent_id' => 'pi_abc123',
+			'reader_id'         => 'tmr_abc123',
 		);
 
 		$error = $this->call_and_capture_error( 'cancel_payment' );
-		$this->assertSame( 'Missing payment intent ID or order ID', $error );
+		$this->assertSame( 'Missing payment intent ID, order ID, or reader ID', $error );
 	}
 
 	public function test_cancel_payment_rejects_all_missing_params(): void {
 		$_POST = array();
 
 		$error = $this->call_and_capture_error( 'cancel_payment' );
-		$this->assertSame( 'Missing payment intent ID or order ID', $error );
+		$this->assertSame( 'Missing payment intent ID, order ID, or reader ID', $error );
 	}
 
 	// -------------------------------------------------------------------
@@ -321,6 +333,7 @@ class AjaxHandlerTest extends TestCase {
 		$_POST = array(
 			'payment_intent_id' => 'pi_abc123',
 			'order_id'          => '999',
+			'reader_id'         => 'tmr_abc123',
 		);
 
 		Functions\when( 'wc_get_order' )->justReturn( false );
