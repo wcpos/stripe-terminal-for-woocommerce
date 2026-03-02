@@ -10,6 +10,7 @@ class StripeTerminalPayment {
     this.isInitialized = false;
     this.currentPaymentIntent = null;
     this.connectedReader = null;
+    this.activePaymentReaderId = null; // Reader ID bound at payment start
     this.pollingInterval = null; // Track polling interval
     this.pollingTimeout = null; // Track polling timeout
     this.isDeclined = false;
@@ -79,7 +80,10 @@ class StripeTerminalPayment {
     
     try {
       button.prop('disabled', true).text(this.strings.startingPayment || 'Starting payment...');
-      
+
+      // Capture the reader ID at payment start so cancel targets the correct reader.
+      this.activePaymentReaderId = this.connectedReader?.id || null;
+
       // Create and process payment intent via AJAX
       const response = await this.createPaymentIntent(orderId, amount);
       
@@ -102,6 +106,7 @@ class StripeTerminalPayment {
     } catch (error) {
       console.error('Payment error:', error);
       this.showError((this.strings.paymentFailed || 'Payment failed') + ': ' + error.message);
+      this.activePaymentReaderId = null;
       button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
     }
   }
@@ -196,7 +201,8 @@ class StripeTerminalPayment {
       const ajaxData = {
         action: 'stripe_terminal_cancel_payment',
         payment_intent_id: paymentIntentId,
-        order_id: orderId
+        order_id: orderId,
+        reader_id: this.activePaymentReaderId || (this.connectedReader ? this.connectedReader.id : '')
       };
 
       // Add order key for guest users
@@ -262,6 +268,7 @@ class StripeTerminalPayment {
             this.showError(this.strings.paymentFailed || 'Payment failed');
             button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
             this.currentPaymentIntent = null;
+            this.activePaymentReaderId = null;
             this.isDeclined = false;
             this.updateButtonVisibility();
           }
@@ -277,6 +284,7 @@ class StripeTerminalPayment {
         this.showError(this.strings.paymentTimeout || 'Payment timed out');
         button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
         this.currentPaymentIntent = null;
+        this.activePaymentReaderId = null;
         this.isDeclined = false;
         this.updateButtonVisibility();
       }
@@ -374,6 +382,7 @@ class StripeTerminalPayment {
         .then(() => {
           this.showMessage(this.strings.paymentCancelled || 'Payment cancelled');
           this.currentPaymentIntent = null;
+          this.activePaymentReaderId = null;
           this.isDeclined = false;
           // Reset button state
           jQuery('.stripe-terminal-pay-button').prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
@@ -546,6 +555,7 @@ class StripeTerminalPayment {
     
     // Clear current payment intent
     this.currentPaymentIntent = null;
+    this.activePaymentReaderId = null;
     this.updateButtonVisibility();
     
     // Trigger WordPress event for other scripts to listen to

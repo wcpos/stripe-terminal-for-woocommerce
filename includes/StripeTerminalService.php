@@ -128,6 +128,9 @@ class StripeTerminalService {
 	/**
 	 * Process a payment intent on a reader.
 	 *
+	 * Pre-flight: checks for stale reader actions and clears them.
+	 * On timeout: cancels reader action and retries once.
+	 *
 	 * @param string $reader_id         The reader ID.
 	 * @param string $payment_intent_id The payment intent ID.
 	 * @param array  $process_config    Optional process configuration.
@@ -135,16 +138,59 @@ class StripeTerminalService {
 	 * @return array|WP_Error The updated reader data or error.
 	 */
 	public function process_payment_intent( string $reader_id, string $payment_intent_id, array $process_config = array() ) {
+		// Default process config.
+		$default_config = array(
+			'enable_customer_cancellation' => true,
+		);
+		$process_config = array_merge( $default_config, $process_config );
+
+		// Pre-flight: check reader state and clear stale actions.
+		$preflight = $this->clear_stale_reader_action( $reader_id, $payment_intent_id );
+		if ( is_wp_error( $preflight ) ) {
+			return $preflight;
+		}
+
+		// Attempt to process payment on the reader.
+		$result = $this->send_process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+
+		// On timeout, cancel reader action and retry once.
+		if ( is_wp_error( $result ) && $this->is_timeout_error( $result ) ) {
+			Logger::log( 'process_payment_intent: Timeout detected, cancelling reader action and retrying.' );
+			$cancel_result = $this->cancel_reader_action( $reader_id );
+
+			if ( is_wp_error( $cancel_result ) ) {
+				Logger::log( 'process_payment_intent: cancel_reader_action failed before retry: ' . $cancel_result->get_error_message() );
+				return $cancel_result;
+			}
+
+			// If cancel returned busy, the reader is mid-authorization — don't retry.
+			if ( isset( $cancel_result['status'] ) && 'busy' === $cancel_result['status'] ) {
+				Logger::log( 'process_payment_intent: Reader is busy, cannot retry.' );
+				return new WP_Error(
+					'reader_busy',
+					'Reader is busy processing a payment and cannot accept a retry.',
+					array( 'status' => 409 )
+				);
+			}
+
+			$result = $this->send_process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Send the processPaymentIntent command to the reader.
+	 *
+	 * @param string $reader_id         The reader ID.
+	 * @param string $payment_intent_id The payment intent ID.
+	 * @param array  $process_config    Process configuration.
+	 *
+	 * @return array|WP_Error The reader data or error.
+	 */
+	private function send_process_payment_intent( string $reader_id, string $payment_intent_id, array $process_config ) {
 		try {
-			\Stripe\Stripe::setApiKey( $this->api_key );
-
-			// Default process config
-			$default_config = array(
-				'enable_customer_cancellation' => true,
-			);
-			$process_config = array_merge( $default_config, $process_config );
-
-			$stripe = new \Stripe\StripeClient( $this->api_key );
+			$stripe = $this->get_stripe_client();
 			$reader = $stripe->terminal->readers->processPaymentIntent(
 				$reader_id,
 				array(
@@ -157,6 +203,103 @@ class StripeTerminalService {
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'process_payment_intent_error' );
 		}
+	}
+
+	/**
+	 * Check reader for stale actions and cancel them if found.
+	 *
+	 * A stale action is one that has failed, or is for a different payment
+	 * intent and is no longer in progress.
+	 *
+	 * @param string $reader_id         The reader ID.
+	 * @param string $payment_intent_id The payment intent ID we intend to process.
+	 *
+	 * @return null|WP_Error Null on success, WP_Error if reader is busy.
+	 */
+	private function clear_stale_reader_action( string $reader_id, string $payment_intent_id ) {
+		$reader = $this->get_reader( $reader_id );
+
+		if ( is_wp_error( $reader ) ) {
+			Logger::log( 'clear_stale_reader_action: Could not retrieve reader state, proceeding.' );
+			return null;
+		}
+
+		$action = $reader['action'] ?? null;
+		if ( ! $action ) {
+			return null;
+		}
+
+		$action_status = $action['status'] ?? null;
+		$action_pi     = $action['process_payment_intent']['payment_intent'] ?? null;
+
+		// Cancel if the action has failed.
+		if ( 'failed' === $action_status ) {
+			Logger::log( 'clear_stale_reader_action: Cancelling failed action on reader.' );
+			$cancel_result = $this->cancel_reader_action( $reader_id );
+			if ( is_wp_error( $cancel_result ) ) {
+				return $cancel_result;
+			}
+			if ( isset( $cancel_result['status'] ) && 'busy' === $cancel_result['status'] ) {
+				return new WP_Error(
+					'reader_busy',
+					'Reader is currently processing a payment and cannot be cleared.',
+					array( 'status' => 409 )
+				);
+			}
+			return null;
+		}
+
+		// If action is for a different payment intent...
+		if ( $action_pi && $action_pi !== $payment_intent_id ) {
+			// Don't cancel if the action is actively in progress.
+			if ( 'in_progress' === $action_status ) {
+				Logger::log( 'clear_stale_reader_action: Reader is processing a different payment intent.' );
+				return new WP_Error(
+					'reader_busy',
+					'Reader is currently processing a different payment.',
+					array( 'status' => 409 )
+				);
+			}
+
+			Logger::log( 'clear_stale_reader_action: Cancelling stale action for different payment intent.' );
+			$cancel_result = $this->cancel_reader_action( $reader_id );
+			if ( is_wp_error( $cancel_result ) ) {
+				return $cancel_result;
+			}
+			if ( isset( $cancel_result['status'] ) && 'busy' === $cancel_result['status'] ) {
+				return new WP_Error(
+					'reader_busy',
+					'Reader is currently processing a different payment.',
+					array( 'status' => 409 )
+				);
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Check if a WP_Error represents a timeout error.
+	 *
+	 * @param WP_Error $error The error to check.
+	 *
+	 * @return bool True if the error is a timeout.
+	 */
+	private function is_timeout_error( WP_Error $error ): bool {
+		$data = $error->get_error_data();
+
+		// Check for HTTP status 408 or Stripe connection errors (502 from our error handler).
+		if ( isset( $data['status'] ) && \in_array( $data['status'], array( 408, 502 ), true ) ) {
+			return true;
+		}
+
+		// Check error message for timeout keywords.
+		$message = strtolower( $error->get_error_message() );
+		if ( false !== strpos( $message, 'timeout' ) || false !== strpos( $message, 'timed out' ) ) {
+			return true;
+		}
+
+		return false;
 	}
 
 	/**
@@ -208,6 +351,62 @@ class StripeTerminalService {
 			return $payment_intent->toArray();
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'cancel_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Cancel the current action on a reader.
+	 *
+	 * Clears any in-progress or failed action on the reader hardware.
+	 * Gracefully handles cases where the reader is mid-authorization
+	 * (terminal_reader_busy) or has no action to cancel (resource_missing).
+	 *
+	 * @param string $reader_id The reader ID.
+	 *
+	 * @return array|WP_Error The reader data or error.
+	 */
+	public function cancel_reader_action( string $reader_id ) {
+		try {
+			$stripe = $this->get_stripe_client();
+			$reader = $stripe->terminal->readers->cancelAction( $reader_id );
+
+			return $reader->toArray();
+		} catch ( \Stripe\Exception\InvalidRequestException $e ) {
+			$stripe_code = $e->getStripeCode();
+
+			// Reader is mid-authorization — can't cancel, not an error we need to surface.
+			if ( 'terminal_reader_busy' === $stripe_code ) {
+				Logger::log( 'cancel_reader_action: Reader is busy (mid-authorization), cannot cancel.' );
+				return array( 'status' => 'busy' );
+			}
+
+			// No action to cancel — reader is already idle.
+			if ( 'resource_missing' === $stripe_code ) {
+				Logger::log( 'cancel_reader_action: No action to cancel on reader.' );
+				return array( 'status' => 'idle' );
+			}
+
+			return $this->handle_stripe_exception( $e, 'cancel_reader_action_error' );
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'cancel_reader_action_error' );
+		}
+	}
+
+	/**
+	 * Retrieve a single reader to inspect its current state.
+	 *
+	 * @param string $reader_id The reader ID.
+	 *
+	 * @return array|WP_Error The reader data or error.
+	 */
+	public function get_reader( string $reader_id ) {
+		try {
+			$stripe = $this->get_stripe_client();
+			$reader = $stripe->terminal->readers->retrieve( $reader_id );
+
+			return $reader->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'get_reader_error' );
 		}
 	}
 

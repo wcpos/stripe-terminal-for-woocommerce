@@ -223,16 +223,17 @@ class AjaxHandler {
 	}
 
 	/**
-	 * Cancel a payment intent.
+	 * Cancel a payment intent and clear the reader action.
 	 */
 	public function cancel_payment(): void {
 		try {
 			// Get and validate parameters
 			$payment_intent_id = isset( $_POST['payment_intent_id'] ) ? sanitize_text_field( $_POST['payment_intent_id'] ) : '';
 			$order_id          = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			$reader_id         = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
 
-			if ( ! $payment_intent_id || ! $order_id ) {
-				wp_send_json_error( 'Missing payment intent ID or order ID' );
+			if ( ! $payment_intent_id || ! $order_id || ! $reader_id ) {
+				wp_send_json_error( 'Missing payment intent ID, order ID, or reader ID' );
 
 				return;
 			}
@@ -259,7 +260,15 @@ class AjaxHandler {
 				return;
 			}
 
-			// Cancel payment using the service
+			// Cancel the reader action first (clear hardware state).
+			$cancel_result = $this->stripe_service->cancel_reader_action( $reader_id );
+			if ( is_wp_error( $cancel_result ) ) {
+				Logger::log( 'Stripe Terminal AJAX - Failed to clear reader action: ' . $cancel_result->get_error_message() );
+				wp_send_json_error( 'Failed to clear reader action: ' . $cancel_result->get_error_message() );
+				return;
+			}
+
+			// Then cancel the payment intent.
 			$result = $this->stripe_service->cancel_payment_intent( $payment_intent_id, $order );
 
 			if ( is_wp_error( $result ) ) {

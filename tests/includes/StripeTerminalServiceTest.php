@@ -820,6 +820,114 @@ class StripeTerminalServiceTest extends TestCase {
 			'list_locations'         => array( 'list_locations', array() ),
 			'register_reader'       => array( 'register_reader', array( 'tml_fake', 'code123' ) ),
 			'get_reader_status'      => array( 'get_reader_status', array( 'tmr_fake' ) ),
+			'cancel_reader_action'   => array( 'cancel_reader_action', array( 'tmr_fake' ) ),
+			'get_reader'             => array( 'get_reader', array( 'tmr_fake' ) ),
 		);
+	}
+
+	// -----------------------------------------------------------------------
+	// get_reader tests
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Test get_reader returns WP_Error with fake key.
+	 */
+	public function test_get_reader_returns_wp_error_with_fake_key(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$result = $service->get_reader( 'tmr_fake_reader' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+	}
+
+	// -----------------------------------------------------------------------
+	// cancel_reader_action tests
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Test cancel_reader_action returns WP_Error with fake key.
+	 */
+	public function test_cancel_reader_action_returns_wp_error_with_fake_key(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$result = $service->cancel_reader_action( 'tmr_fake_reader' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+	}
+
+	/**
+	 * Test cancel_reader_action returns idle status when reader has no action to cancel.
+	 *
+	 * When Stripe throws InvalidRequestException with stripeCode 'resource_missing',
+	 * the method should gracefully return array('status' => 'idle') instead of an error.
+	 */
+	public function test_cancel_reader_action_returns_idle_for_resource_missing(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		// Build the mock chain: $stripe->terminal->readers->cancelAction() throws.
+		$readers_mock = Mockery::mock();
+		$readers_mock->shouldReceive( 'cancelAction' )
+			->with( 'tmr_fake_reader' )
+			->andThrow(
+				\Stripe\Exception\InvalidRequestException::factory(
+					'This reader does not have an action to cancel.',
+					400,
+					null,
+					null,
+					null,
+					'resource_missing'
+				)
+			);
+
+		$terminal_mock          = Mockery::mock();
+		$terminal_mock->readers = $readers_mock;
+
+		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe_mock->terminal = $terminal_mock;
+
+		$service->set_stripe_client( $stripe_mock );
+
+		$result = $service->cancel_reader_action( 'tmr_fake_reader' );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( array( 'status' => 'idle' ), $result );
+	}
+
+	/**
+	 * Test cancel_reader_action returns busy status when reader is mid-authorization.
+	 *
+	 * When Stripe throws InvalidRequestException with stripeCode 'terminal_reader_busy',
+	 * the method should gracefully return array('status' => 'busy') instead of an error.
+	 */
+	public function test_cancel_reader_action_returns_busy_for_terminal_reader_busy(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		// Build the mock chain: $stripe->terminal->readers->cancelAction() throws.
+		$readers_mock = Mockery::mock();
+		$readers_mock->shouldReceive( 'cancelAction' )
+			->with( 'tmr_fake_reader' )
+			->andThrow(
+				\Stripe\Exception\InvalidRequestException::factory(
+					'The reader is busy and cannot cancel the action.',
+					400,
+					null,
+					null,
+					null,
+					'terminal_reader_busy'
+				)
+			);
+
+		$terminal_mock          = Mockery::mock();
+		$terminal_mock->readers = $readers_mock;
+
+		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe_mock->terminal = $terminal_mock;
+
+		$service->set_stripe_client( $stripe_mock );
+
+		$result = $service->cancel_reader_action( 'tmr_fake_reader' );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( array( 'status' => 'busy' ), $result );
 	}
 }
