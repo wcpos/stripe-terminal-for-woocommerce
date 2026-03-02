@@ -128,6 +128,9 @@ class StripeTerminalService {
 	/**
 	 * Process a payment intent on a reader.
 	 *
+	 * Pre-flight: checks for stale reader actions and clears them.
+	 * On timeout: cancels reader action and retries once.
+	 *
 	 * @param string $reader_id         The reader ID.
 	 * @param string $payment_intent_id The payment intent ID.
 	 * @param array  $process_config    Optional process configuration.
@@ -135,16 +138,41 @@ class StripeTerminalService {
 	 * @return array|WP_Error The updated reader data or error.
 	 */
 	public function process_payment_intent( string $reader_id, string $payment_intent_id, array $process_config = array() ) {
+		// Default process config.
+		$default_config = array(
+			'enable_customer_cancellation' => true,
+		);
+		$process_config = array_merge( $default_config, $process_config );
+
+		// Pre-flight: check reader state and clear stale actions.
+		$this->clear_stale_reader_action( $reader_id, $payment_intent_id );
+
+		// Attempt to process payment on the reader.
+		$result = $this->send_process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+
+		// On timeout, cancel reader action and retry once.
+		if ( is_wp_error( $result ) && $this->is_timeout_error( $result ) ) {
+			Logger::log( 'process_payment_intent: Timeout detected, cancelling reader action and retrying.' );
+			$this->cancel_reader_action( $reader_id );
+
+			$result = $this->send_process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Send the processPaymentIntent command to the reader.
+	 *
+	 * @param string $reader_id         The reader ID.
+	 * @param string $payment_intent_id The payment intent ID.
+	 * @param array  $process_config    Process configuration.
+	 *
+	 * @return array|WP_Error The reader data or error.
+	 */
+	private function send_process_payment_intent( string $reader_id, string $payment_intent_id, array $process_config ) {
 		try {
-			\Stripe\Stripe::setApiKey( $this->api_key );
-
-			// Default process config
-			$default_config = array(
-				'enable_customer_cancellation' => true,
-			);
-			$process_config = array_merge( $default_config, $process_config );
-
-			$stripe = new \Stripe\StripeClient( $this->api_key );
+			$stripe = $this->get_stripe_client();
 			$reader = $stripe->terminal->readers->processPaymentIntent(
 				$reader_id,
 				array(
@@ -157,6 +185,70 @@ class StripeTerminalService {
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'process_payment_intent_error' );
 		}
+	}
+
+	/**
+	 * Check reader for stale actions and cancel them if found.
+	 *
+	 * A stale action is one that has failed, or is processing a different
+	 * payment intent than the one we're about to send.
+	 *
+	 * @param string $reader_id         The reader ID.
+	 * @param string $payment_intent_id The payment intent ID we intend to process.
+	 */
+	private function clear_stale_reader_action( string $reader_id, string $payment_intent_id ): void {
+		$reader = $this->get_reader( $reader_id );
+
+		if ( is_wp_error( $reader ) ) {
+			// Can't check reader state — proceed anyway, the main call will fail with a clear error.
+			Logger::log( 'clear_stale_reader_action: Could not retrieve reader state, proceeding.' );
+			return;
+		}
+
+		$action = $reader['action'] ?? null;
+		if ( ! $action ) {
+			return; // No action on reader, nothing to clear.
+		}
+
+		$action_status = $action['status'] ?? null;
+		$action_pi     = $action['process_payment_intent']['payment_intent'] ?? null;
+
+		// Cancel if the action has failed.
+		if ( 'failed' === $action_status ) {
+			Logger::log( 'clear_stale_reader_action: Cancelling failed action on reader.' );
+			$this->cancel_reader_action( $reader_id );
+			return;
+		}
+
+		// Cancel if the action is for a different payment intent.
+		if ( $action_pi && $action_pi !== $payment_intent_id ) {
+			Logger::log( 'clear_stale_reader_action: Cancelling stale action for different payment intent.' );
+			$this->cancel_reader_action( $reader_id );
+		}
+	}
+
+	/**
+	 * Check if a WP_Error represents a timeout error.
+	 *
+	 * @param WP_Error $error The error to check.
+	 *
+	 * @return bool True if the error is a timeout.
+	 */
+	private function is_timeout_error( WP_Error $error ): bool {
+		$data = $error->get_error_data();
+
+		// Check for HTTP status 408 or Stripe connection errors (502 from our error handler).
+		if ( isset( $data['status'] ) && \in_array( $data['status'], array( 408, 502 ), true ) ) {
+			return true;
+		}
+
+		// Check error message for timeout keywords.
+		$message = strtolower( $error->get_error_message() );
+		if ( false !== strpos( $message, 'timeout' ) || false !== strpos( $message, 'timed out' ) ) {
+			return true;
+		}
+
+		return false;
 	}
 
 	/**
