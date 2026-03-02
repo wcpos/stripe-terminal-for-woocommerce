@@ -212,6 +212,44 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Cancel the current action on a reader.
+	 *
+	 * Clears any in-progress or failed action on the reader hardware.
+	 * Gracefully handles cases where the reader is mid-authorization
+	 * (terminal_reader_busy) or has no action to cancel (resource_missing).
+	 *
+	 * @param string $reader_id The reader ID.
+	 *
+	 * @return array|WP_Error The reader data or error.
+	 */
+	public function cancel_reader_action( string $reader_id ) {
+		try {
+			$stripe = $this->get_stripe_client();
+			$reader = $stripe->terminal->readers->cancelAction( $reader_id );
+
+			return $reader->toArray();
+		} catch ( \Stripe\Exception\InvalidRequestException $e ) {
+			$stripe_code = $e->getStripeCode();
+
+			// Reader is mid-authorization — can't cancel, not an error we need to surface.
+			if ( 'terminal_reader_busy' === $stripe_code ) {
+				Logger::log( 'cancel_reader_action: Reader is busy (mid-authorization), cannot cancel.' );
+				return array( 'status' => 'busy' );
+			}
+
+			// No action to cancel — reader is already idle.
+			if ( 'resource_missing' === $stripe_code ) {
+				Logger::log( 'cancel_reader_action: No action to cancel on reader.' );
+				return array( 'status' => 'idle' );
+			}
+
+			return $this->handle_stripe_exception( $e, 'cancel_reader_action_error' );
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'cancel_reader_action_error' );
+		}
+	}
+
+	/**
 	 * Update order from payment intent data.
 	 *
 	 * @param WC_Order              $order          The WooCommerce order.
