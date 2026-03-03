@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.16 - 2026-03-03
+
+### Fixed
+
+- Add description to enable/disable checkbox clarifying it's for web store checkout, not POS
+
 ## 0.0.15 - 2026-03-03
 
 ### Added

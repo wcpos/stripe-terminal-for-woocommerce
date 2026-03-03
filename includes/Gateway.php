@@ -70,6 +70,7 @@ class Gateway extends WC_Payment_Gateway {
 					__( 'Enable Stripe Terminal for web checkout (not necessary for %s)', 'stripe-terminal-for-woocommerce' ),
 					'<a href="https://wcpos.com" target="_blank">WooCommerce POS</a>'
 				),
+				'description' => __( 'This enables the gateway for online store checkout. The POS uses this gateway automatically when configured.', 'stripe-terminal-for-woocommerce' ),
 				'default'     => 'no',
 			),
 			'title' => array(
