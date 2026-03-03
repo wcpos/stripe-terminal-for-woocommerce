@@ -8,6 +8,9 @@ on:
       - "**.php"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   update-pot:
     runs-on: ubuntu-latest
@@ -41,7 +44,7 @@ jobs:
           if diff old-trimmed.pot new-trimmed.pot; then
             echo "No changes detected."
           else
-            echo "::set-output name=changes::true"
+            echo "changes=true" >> "$GITHUB_OUTPUT"
           fi
 
           # Clean up temporary files
