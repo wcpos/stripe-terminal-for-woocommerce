@@ -12,7 +12,10 @@ test.describe('Checkout Pay Page', () => {
     await page.goto('/wp-admin/post-new.php?post_type=shop_order');
   });
 
-  test('payment method shows loading state on checkout', async ({ page }) => {
+  test.skip('payment method shows loading state on checkout', async ({ page }) => {
+    // Stripe Terminal is an in-person payment method and does not appear
+    // on the regular online checkout page. This test needs to be rewritten
+    // to use the Pay for Order page instead.
     // Navigate to the shop and add a product to cart.
     await page.goto('/?post_type=product');
 

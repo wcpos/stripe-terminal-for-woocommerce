@@ -12,7 +12,7 @@ test.describe('Stripe Terminal Gateway', () => {
     await page.goto('/wp-admin/admin.php?page=wc-settings&tab=checkout');
 
     // Verify Stripe Terminal is listed as a payment method.
-    await expect(page.locator('text=Stripe Terminal')).toBeVisible();
+    await expect(page.locator('.woocommerce-list__item-title', { hasText: 'Stripe Terminal' })).toBeVisible();
   });
 
   test('gateway settings page loads', async ({ page }) => {
@@ -26,8 +26,8 @@ test.describe('Stripe Terminal Gateway', () => {
     );
 
     // Verify key settings fields are present.
-    await expect(page.locator('text=Enable/Disable')).toBeVisible();
-    await expect(page.locator('text=Test Mode')).toBeVisible();
-    await expect(page.locator('text=Test Secret Key')).toBeVisible();
+    await expect(page.locator('label', { hasText: 'Enable/Disable' })).toBeVisible();
+    await expect(page.locator('th', { hasText: 'Test Mode' })).toBeVisible();
+    await expect(page.locator('th', { hasText: 'Test Secret Key' })).toBeVisible();
   });
 });

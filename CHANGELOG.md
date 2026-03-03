@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.15 - 2026-03-03
+
+### Added
+
+- Pre-flight reader check before processing payment intents — detects stale reader actions and clears them automatically
+- Timeout retry logic for S700 reader ER400 errors (reader busy/timeout)
+- `cancel_reader_action()` and `get_reader()` methods on StripeTerminalService
+- Frontend now passes `reader_id` when cancelling payments for targeted cancellation
+
+### Fixed
+
+- S700 readers could get stuck with stale actions, causing ER400 timeout errors on subsequent payments
+- CI: Update POT workflow now has correct permissions to push commits
+- CI: E2E tests wait for WordPress setup to complete before running
+- CI: Bumped WordPress Docker image to 6.8 for WooCommerce 10.5 compatibility
+- CI: Fixed Docker volume permissions for wp-cli setup container
+
 ## 0.0.14 - 2026-02-28
 
 ### Added
