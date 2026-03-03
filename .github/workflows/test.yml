@@ -87,8 +87,16 @@ jobs:
           # The wp-cli container is a one-shot setup container that installs
           # WooCommerce, activates plugins, and creates test data. We need to
           # wait for it to finish before running tests.
-          docker compose logs -f wp-cli
-          EXIT_CODE=$(docker inspect --format='{{.State.ExitCode}}' "$(docker compose ps -aq wp-cli)")
+          if ! timeout 10m docker compose logs -f wp-cli; then
+            echo "::error::Timed out waiting for wp-cli setup to complete"
+            exit 1
+          fi
+          WPCLI_CONTAINER_ID="$(docker compose ps -aq wp-cli)"
+          if [ -z "$WPCLI_CONTAINER_ID" ]; then
+            echo "::error::wp-cli container was not found"
+            exit 1
+          fi
+          EXIT_CODE=$(docker inspect --format='{{.State.ExitCode}}' "$WPCLI_CONTAINER_ID")
           if [ "$EXIT_CODE" != "0" ]; then
             echo "::error::WordPress setup failed with exit code $EXIT_CODE"
             exit 1
