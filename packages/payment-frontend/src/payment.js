@@ -14,6 +14,8 @@ class StripeTerminalPayment {
     this.pollingInterval = null; // Track polling interval
     this.pollingTimeout = null; // Track polling timeout
     this.isDeclined = false;
+    this.readerLastSeenAt = null; // Reader's last_seen_at at payment start
+    this.readerVerifyTimeout = null; // Timeout handle for pickup verification
 
     // Get WordPress localized data
     this.config = window.stripeTerminalData || {};
@@ -92,6 +94,13 @@ class StripeTerminalPayment {
       }
       
       this.currentPaymentIntent = response.payment_intent;
+
+      // Store reader's last_seen_at for pickup verification.
+      this.readerLastSeenAt = response.reader?.last_seen_at || null;
+
+      // Schedule reader pickup verification at 15 seconds.
+      this.scheduleReaderVerification(orderId, button);
+
       button.text(this.strings.paymentInProgress || 'Payment in progress...');
       
       // Update button visibility
@@ -106,6 +115,7 @@ class StripeTerminalPayment {
     } catch (error) {
       console.error('Payment error:', error);
       this.showError((this.strings.paymentFailed || 'Payment failed') + ': ' + error.message);
+      this.readerLastSeenAt = null;
       this.activePaymentReaderId = null;
       button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
     }
@@ -269,6 +279,7 @@ class StripeTerminalPayment {
             button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
             this.currentPaymentIntent = null;
             this.activePaymentReaderId = null;
+            this.readerLastSeenAt = null;
             this.isDeclined = false;
             this.updateButtonVisibility();
           }
@@ -285,6 +296,7 @@ class StripeTerminalPayment {
         button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
         this.currentPaymentIntent = null;
         this.activePaymentReaderId = null;
+        this.readerLastSeenAt = null;
         this.isDeclined = false;
         this.updateButtonVisibility();
       }
@@ -367,6 +379,83 @@ class StripeTerminalPayment {
       clearTimeout(this.pollingTimeout);
       this.pollingTimeout = null;
     }
+    if (this.readerVerifyTimeout) {
+      clearTimeout(this.readerVerifyTimeout);
+      this.readerVerifyTimeout = null;
+    }
+  }
+
+  scheduleReaderVerification(orderId, button) {
+    // Clear any existing verification timeout.
+    if (this.readerVerifyTimeout) {
+      clearTimeout(this.readerVerifyTimeout);
+    }
+
+    this.readerVerifyTimeout = setTimeout(() => {
+      this.verifyReaderPickup(orderId, button);
+    }, 15000);
+  }
+
+  async verifyReaderPickup(orderId, button) {
+    this.readerVerifyTimeout = null;
+
+    // Skip if payment already completed or cancelled.
+    if (!this.currentPaymentIntent || !this.activePaymentReaderId) {
+      return;
+    }
+
+    // Skip if we don't have a baseline to compare against.
+    if (!this.readerLastSeenAt) {
+      return;
+    }
+
+    try {
+      const response = await jQuery.ajax({
+        url: this.ajaxUrl,
+        type: 'POST',
+        data: {
+          action: 'stripe_terminal_get_reader_status',
+          reader_id: this.activePaymentReaderId
+        }
+      });
+
+      if (!response.success) {
+        console.warn('Reader verification check failed:', response.data);
+        return;
+      }
+
+      const currentLastSeen = response.data.last_seen_at;
+
+      // If last_seen_at hasn't advanced, the reader likely didn't pick up the command.
+      if (currentLastSeen && currentLastSeen <= this.readerLastSeenAt) {
+        console.warn('Reader pickup verification failed: last_seen_at has not advanced');
+        this.addToLog('Reader did not respond to payment command', 'warning');
+
+        // Stop polling and cancel the payment.
+        this.stopPolling();
+
+        if (this.currentPaymentIntent && this.currentPaymentIntent.id) {
+          try {
+            await this.cancelPayment(this.currentPaymentIntent.id, orderId);
+          } catch (cancelError) {
+            console.error('Error cancelling after reader verification failure:', cancelError);
+          }
+        }
+
+        this.showError('Reader didn\'t respond to the payment command. It may need to be restarted.');
+        this.currentPaymentIntent = null;
+        this.activePaymentReaderId = null;
+        this.readerLastSeenAt = null;
+        this.isDeclined = false;
+        button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
+        this.updateButtonVisibility();
+      } else {
+        this.addToLog('Reader pickup verified — reader is responding', 'info');
+      }
+    } catch (error) {
+      // Non-fatal — don't interrupt the payment flow if verification fails.
+      console.warn('Reader verification check error:', error);
+    }
   }
 
   handleCancel(event) {
@@ -383,6 +472,7 @@ class StripeTerminalPayment {
           this.showMessage(this.strings.paymentCancelled || 'Payment cancelled');
           this.currentPaymentIntent = null;
           this.activePaymentReaderId = null;
+          this.readerLastSeenAt = null;
           this.isDeclined = false;
           // Reset button state
           jQuery('.stripe-terminal-pay-button').prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
