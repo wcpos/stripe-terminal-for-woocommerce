@@ -128,13 +128,14 @@ class AjaxHandler {
 			$payment_intent_id = $payment_intent['id'];
 			Logger::log( 'Stripe Terminal AJAX - Payment intent created: ' . $payment_intent_id );
 
-			// Save payment intent ID to order metadata for later use
+			// Save payment metadata for later use
 			$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
-			$order->save();
-
 			if ( $moto ) {
 				$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+			} else {
+				$order->delete_meta_data( '_stripe_terminal_moto' );
 			}
+			$order->save();
 
 			// Add order note with payment intent ID
 			$order->add_order_note(

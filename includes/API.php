@@ -442,10 +442,12 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $payment_intent->amount );
 		$order->update_meta_data( '_stripe_terminal_payment_currency', $payment_intent->currency );
-		$payment_method = 'card_present';
-		if ( isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true ) ) {
-			$payment_method = 'card';
+		$is_moto        = isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true );
+		$payment_method = $is_moto ? 'card' : 'card_present';
+		if ( $is_moto ) {
 			$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+		} else {
+			$order->delete_meta_data( '_stripe_terminal_moto' );
 		}
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();
@@ -509,10 +511,12 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $charge->amount );
 		$order->update_meta_data( '_stripe_terminal_payment_currency', $charge->currency );
-		$payment_method = 'card_present';
-		if ( isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true ) ) {
-			$payment_method = 'card';
+		$is_moto        = isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true );
+		$payment_method = $is_moto ? 'card' : 'card_present';
+		if ( $is_moto ) {
 			$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+		} else {
+			$order->delete_meta_data( '_stripe_terminal_moto' );
 		}
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();

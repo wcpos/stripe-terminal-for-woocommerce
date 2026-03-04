@@ -11,7 +11,7 @@ import { stwcConfig } from './stwcConfig';
 import type { Reader } from '@stripe/terminal-js';
 
 export const App = () => {
-	const { client, terminal } = stwcConfig;
+	const { client, terminal, enableMoto } = stwcConfig;
 	const [reader, setReader] = React.useState<Reader | null>(null);
 	const [showLogs, setShowLogs] = React.useState(false);
 
@@ -39,7 +39,7 @@ export const App = () => {
 		return reader.id === 'SIMULATOR' ? (
 			<SimulatorPayment client={client} terminal={terminal} />
 		) : (
-			<Payment client={client} terminal={terminal} reader={reader} />
+			<Payment client={client} terminal={terminal} reader={reader} enableMoto={enableMoto} />
 		);
 	};
 

@@ -4,6 +4,7 @@ import { Client } from './client';
 interface StwcConfig {
 	restUrl: string | null;
 	orderId: number | null;
+	enableMoto: boolean;
 	client: Client | null;
 	terminal: any | null;
 }
@@ -141,4 +142,5 @@ export const stwcConfig: StwcConfig = {
 	client,
 	terminal,
 	orderId,
+	enableMoto: !!rawConfig.enableMoto,
 };

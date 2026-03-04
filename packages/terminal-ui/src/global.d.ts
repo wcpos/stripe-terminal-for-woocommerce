@@ -8,6 +8,7 @@ declare global {
 			chargeAmount: number;
 			taxAmount: number;
 			currency: string;
+			enableMoto?: boolean;
 		};
 	}
 }

@@ -6,7 +6,7 @@
 import './payment.css';
 
 class StripeTerminalPayment {
-  static MOTO_COMPATIBLE_DEVICES = ['stripe_s700', 'bbpos_wisepos_e'];
+  static MOTO_COMPATIBLE_DEVICES = ['stripe_s700', 'stripe_s710', 'bbpos_wisepos_e'];
 
   constructor() {
     this.isInitialized = false;

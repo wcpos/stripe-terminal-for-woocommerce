@@ -6,7 +6,7 @@ import React from 'react';
 import type { Client } from '../client';
 import type { Reader, Terminal } from '@stripe/terminal-js';
 
-const MOTO_COMPATIBLE_DEVICES = ['stripe_s700', 'bbpos_wisepos_e'];
+const MOTO_COMPATIBLE_DEVICES = ['stripe_s700', 'stripe_s710', 'bbpos_wisepos_e'];
 
 interface PaymentProps {
 	client: Client;
@@ -20,6 +20,12 @@ export const Payment = ({ client, terminal, reader, enableMoto }: PaymentProps) 
 
 	const showMotoToggle =
 		enableMoto && reader?.device_type && MOTO_COMPATIBLE_DEVICES.includes(reader.device_type);
+
+	React.useEffect(() => {
+		if (!showMotoToggle) {
+			setIsMoto(false);
+		}
+	}, [showMotoToggle]);
 
 	const {
 		showPaymentOptions,
