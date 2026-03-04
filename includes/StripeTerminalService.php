@@ -224,6 +224,17 @@ class StripeTerminalService {
 			return null;
 		}
 
+		// Check reader freshness — if not seen recently, it's likely disconnected.
+		$last_seen = $reader['last_seen_at'] ?? null;
+		if ( $last_seen && ( time() - $last_seen ) > 120 ) {
+			Logger::log( 'clear_stale_reader_action: Reader last seen ' . ( time() - $last_seen ) . 's ago, likely disconnected.' );
+			return new WP_Error(
+				'reader_stale',
+				'Reader has not been seen recently and may be disconnected. Try restarting the reader.',
+				array( 'status' => 503 )
+			);
+		}
+
 		$action = $reader['action'] ?? null;
 		if ( ! $action ) {
 			return null;
