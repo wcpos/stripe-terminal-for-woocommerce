@@ -656,7 +656,12 @@ class StripeTerminalService {
 				$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 				$order->update_meta_data( '_stripe_terminal_payment_amount', $latest_charge->amount );
 				$order->update_meta_data( '_stripe_terminal_payment_currency', $latest_charge->currency );
-				$order->update_meta_data( '_stripe_terminal_payment_method', 'card_present' );
+				$payment_method = 'card_present';
+				if ( isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true ) ) {
+					$payment_method = 'card';
+					$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+				}
+				$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 				$order->save();
 
 				// Add order note
@@ -806,7 +811,12 @@ class StripeTerminalService {
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $charge->amount );
 		$order->update_meta_data( '_stripe_terminal_payment_currency', $charge->currency );
-		$order->update_meta_data( '_stripe_terminal_payment_method', 'card_present' );
+		$payment_method = 'card_present';
+		if ( isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true ) ) {
+			$payment_method = 'card';
+			$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+		}
+		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();
 
 		// Add order note
