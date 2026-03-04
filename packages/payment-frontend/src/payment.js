@@ -421,6 +421,7 @@ class StripeTerminalPayment {
 
     // Skip if we don't have a baseline to compare against.
     if (!this.readerLastSeenAt) {
+      this.addToLog('Reader pickup verification skipped (missing baseline last_seen_at)', 'warning');
       return;
     }
 
