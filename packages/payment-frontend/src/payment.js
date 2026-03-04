@@ -351,6 +351,10 @@ class StripeTerminalPayment {
         this.addToLog('Payment retry sent to reader. Present a new card.', 'info');
         this.showMessage(this.strings.useTerminal || 'Please use the terminal to complete the payment');
 
+        // Refresh verification baseline for the retry attempt.
+        this.readerLastSeenAt = response.data?.reader?.last_seen_at || null;
+        this.scheduleReaderVerification(orderId, payButton);
+
         payButton.text(this.strings.paymentInProgress || 'Payment in progress...');
         this.updateButtonVisibility();
 
@@ -415,7 +419,8 @@ class StripeTerminalPayment {
         type: 'POST',
         data: {
           action: 'stripe_terminal_get_reader_status',
-          reader_id: this.activePaymentReaderId
+          reader_id: this.activePaymentReaderId,
+          nonce: this.nonce
         }
       });
 
