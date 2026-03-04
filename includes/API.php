@@ -201,7 +201,8 @@ class API extends Abstracts\APIController {
 
 			$params   = $request->get_json_params();
 			$order_id = $params['order_id'] ?? null;
-			$moto     = isset( $params['moto'] ) && true === $params['moto'];
+			$settings = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
+			$moto     = isset( $params['moto'] ) && true === $params['moto'] && 'yes' === ( $settings['enable_moto'] ?? 'no' );
 
 			if ( empty( $order_id ) ) {
 				return new WP_Error(

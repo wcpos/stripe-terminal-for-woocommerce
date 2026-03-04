@@ -79,7 +79,7 @@ class AjaxHandler {
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 			$amount    = isset( $_POST['amount'] ) ? absint( $_POST['amount'] ) : 0;
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
-			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( $_POST['moto'] );
+			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( $_POST['moto'] ) && $this->is_moto_enabled();
 
 			if ( ! $order_id || ! $amount || ! $reader_id ) {
 				wp_send_json_error( 'Missing order ID, amount, or reader ID' );
@@ -628,7 +628,6 @@ class AjaxHandler {
 		try {
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
-			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( $_POST['moto'] );
 
 			if ( ! $order_id || ! $reader_id ) {
 				wp_send_json_error( 'Missing order ID or reader ID' );
@@ -656,6 +655,9 @@ class AjaxHandler {
 				wp_send_json_error( 'No payment intent found for this order' );
 				return;
 			}
+
+			// Use server-side MOTO state from order meta rather than trusting request input
+			$moto = 'yes' === $order->get_meta( '_stripe_terminal_moto' ) && $this->is_moto_enabled();
 
 			Logger::log( 'Stripe Terminal AJAX - Retrying payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
 
@@ -726,5 +728,14 @@ class AjaxHandler {
 		return ! empty( $provided_order_key )  &&
 			   $provided_order_key === $order_key &&
 			   $order->needs_payment();
+	}
+
+	/**
+	 * Check if MOTO payments are enabled in gateway settings.
+	 */
+	private function is_moto_enabled(): bool {
+		$settings = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
+
+		return 'yes' === ( $settings['enable_moto'] ?? 'no' );
 	}
 }
