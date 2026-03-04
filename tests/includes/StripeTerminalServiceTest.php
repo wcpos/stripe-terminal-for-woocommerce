@@ -930,4 +930,133 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertIsArray( $result );
 		$this->assertSame( array( 'status' => 'busy' ), $result );
 	}
+
+	// -----------------------------------------------------------------------
+	// Pre-flight reader freshness gate tests
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Test process_payment_intent returns reader_stale error when reader
+	 * last_seen_at is older than 120 seconds.
+	 */
+	public function test_process_payment_intent_returns_reader_stale_when_last_seen_old(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		// Build mock: readers->retrieve() returns reader with stale last_seen_at.
+		$reader_mock = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$reader_mock->shouldReceive( 'toArray' )
+			->andReturn(
+				array(
+					'id'           => 'tmr_fake_reader',
+					'last_seen_at' => time() - 300, // 5 minutes ago
+					'action'       => null,
+				)
+			);
+
+		$readers_mock = Mockery::mock();
+		$readers_mock->shouldReceive( 'retrieve' )
+			->with( 'tmr_fake_reader' )
+			->andReturn( $reader_mock );
+
+		$terminal_mock          = Mockery::mock();
+		$terminal_mock->readers = $readers_mock;
+
+		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe_mock->terminal = $terminal_mock;
+
+		$service->set_stripe_client( $stripe_mock );
+
+		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_fake_intent' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'reader_stale', $result->get_error_code() );
+	}
+
+	/**
+	 * Test process_payment_intent proceeds when reader last_seen_at is recent.
+	 *
+	 * The method should pass the freshness check but will still fail on the
+	 * actual processPaymentIntent call (fake key), proving it got past the gate.
+	 */
+	public function test_process_payment_intent_passes_freshness_when_last_seen_recent(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		// Build mock: readers->retrieve() returns reader with recent last_seen_at.
+		$reader_mock = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$reader_mock->shouldReceive( 'toArray' )
+			->andReturn(
+				array(
+					'id'           => 'tmr_fake_reader',
+					'last_seen_at' => time() - 30, // 30 seconds ago
+					'action'       => null,
+				)
+			);
+
+		// The processPaymentIntent call will fail with fake key — that's expected.
+		// We just need to prove the freshness check didn't block us.
+		$readers_mock = Mockery::mock();
+		$readers_mock->shouldReceive( 'retrieve' )
+			->with( 'tmr_fake_reader' )
+			->andReturn( $reader_mock );
+		$readers_mock->shouldReceive( 'processPaymentIntent' )
+			->andThrow(
+				\Stripe\Exception\AuthenticationException::factory( 'Invalid API Key' )
+			);
+
+		$terminal_mock          = Mockery::mock();
+		$terminal_mock->readers = $readers_mock;
+
+		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe_mock->terminal = $terminal_mock;
+
+		$service->set_stripe_client( $stripe_mock );
+
+		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_fake_intent' );
+
+		// Should be a WP_Error from the processPaymentIntent call, NOT reader_stale.
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertNotSame( 'reader_stale', $result->get_error_code() );
+	}
+
+	/**
+	 * Test process_payment_intent proceeds when last_seen_at is null.
+	 *
+	 * Some reader types may not report last_seen_at. The freshness check
+	 * should be skipped (not block) when the value is missing.
+	 */
+	public function test_process_payment_intent_skips_freshness_when_last_seen_null(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$reader_mock = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$reader_mock->shouldReceive( 'toArray' )
+			->andReturn(
+				array(
+					'id'           => 'tmr_fake_reader',
+					'last_seen_at' => null,
+					'action'       => null,
+				)
+			);
+
+		$readers_mock = Mockery::mock();
+		$readers_mock->shouldReceive( 'retrieve' )
+			->with( 'tmr_fake_reader' )
+			->andReturn( $reader_mock );
+		$readers_mock->shouldReceive( 'processPaymentIntent' )
+			->andThrow(
+				\Stripe\Exception\AuthenticationException::factory( 'Invalid API Key' )
+			);
+
+		$terminal_mock          = Mockery::mock();
+		$terminal_mock->readers = $readers_mock;
+
+		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe_mock->terminal = $terminal_mock;
+
+		$service->set_stripe_client( $stripe_mock );
+
+		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_fake_intent' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertNotSame( 'reader_stale', $result->get_error_code() );
+	}
 }
