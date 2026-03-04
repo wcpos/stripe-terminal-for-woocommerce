@@ -316,6 +316,19 @@ class Gateway extends WC_Payment_Gateway {
 		echo '<div class="stripe-terminal-reader-details"></div>';
 		echo '</div>';
 
+		// MOTO toggle (visibility controlled by JS based on reader compatibility)
+		if ( 'yes' === $this->get_option( 'enable_moto' ) ) {
+			echo '<div class="stripe-terminal-moto-toggle" style="display: none;">';
+			echo '<label class="stripe-terminal-moto-label">';
+			echo '<input type="checkbox" class="stripe-terminal-moto-checkbox" />';
+			echo '<span>' . esc_html__( 'Phone Order', 'stripe-terminal-for-woocommerce' ) . '</span>';
+			echo '</label>';
+			echo '<p class="stripe-terminal-moto-description">';
+			echo esc_html__( 'Enable to key in card details for phone/mail orders', 'stripe-terminal-for-woocommerce' );
+			echo '</p>';
+			echo '</div>';
+		}
+
 		// Payment buttons (hidden until reader is connected)
 		echo '<div class="stripe-terminal-payment-buttons" style="display: none;">';
 		echo '<button type="button" class="stripe-terminal-pay-button" data-order-id="' . esc_attr( $order_id ) . '" data-amount="' . esc_attr( $amount ) . '">';
