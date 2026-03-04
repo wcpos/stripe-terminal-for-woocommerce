@@ -74,10 +74,11 @@ class StripeTerminalService {
 	 *
 	 * @param WC_Order $order  The WooCommerce order.
 	 * @param null|int $amount Optional amount override (in cents).
+	 * @param bool     $moto   Whether this is a MOTO (Mail Order/Telephone Order) payment.
 	 *
 	 * @return array|WP_Error The payment intent data or error.
 	 */
-	public function create_payment_intent( WC_Order $order, ?int $amount = null ) {
+	public function create_payment_intent( WC_Order $order, ?int $amount = null, bool $moto = false ) {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
@@ -99,7 +100,11 @@ class StripeTerminalService {
 				);
 			}
 			
-			$payment_method_types = 'cad' === $currency ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
+			if ( $moto ) {
+				$payment_method_types = array( 'card' );
+			} else {
+				$payment_method_types = 'cad' === $currency ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
+			}
 
 			if ( empty( $amount ) || empty( $currency ) ) {
 				return new WP_Error(

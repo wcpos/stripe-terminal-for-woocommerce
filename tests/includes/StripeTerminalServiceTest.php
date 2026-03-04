@@ -893,6 +893,46 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertSame( array( 'status' => 'idle' ), $result );
 	}
 
+	// -----------------------------------------------------------------------
+	// create_payment_intent — MOTO tests
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Test create_payment_intent with moto=true reaches the API call.
+	 */
+	public function test_create_payment_intent_with_moto_reaches_api_call(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$order = Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_total' )->andReturn( '25.00' );
+		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+
+		$result = $service->create_payment_intent( $order, null, true );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertNotSame( 'unsupported_currency', $result->get_error_code() );
+		$this->assertNotSame( 'missing_params', $result->get_error_code() );
+	}
+
+	/**
+	 * Test create_payment_intent with moto=false behaves normally.
+	 */
+	public function test_create_payment_intent_with_moto_false_reaches_api_call(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$order = Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_total' )->andReturn( '25.00' );
+		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+
+		$result = $service->create_payment_intent( $order, null, false );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertNotSame( 'unsupported_currency', $result->get_error_code() );
+		$this->assertNotSame( 'missing_params', $result->get_error_code() );
+	}
+
 	/**
 	 * Test cancel_reader_action returns busy status when reader is mid-authorization.
 	 *
