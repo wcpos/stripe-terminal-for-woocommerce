@@ -250,7 +250,15 @@ class StripeTerminalPayment {
   }
 
   pollPaymentStatus(paymentIntentId, orderId, button) {
-    this.stopPolling();
+    // Clear only polling timers, not the reader verification timeout.
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+    }
+    if (this.pollingTimeout) {
+      clearTimeout(this.pollingTimeout);
+      this.pollingTimeout = null;
+    }
 
     this.pollingInterval = setInterval(async () => {
       try {
@@ -336,13 +344,16 @@ class StripeTerminalPayment {
     button.prop('disabled', true).text(this.strings.retrying || 'Retrying...');
     this.isDeclined = false;
 
+    // Bind retry lifecycle (verify/cancel) to the reader used for this retry.
+    this.activePaymentReaderId = this.connectedReader?.id || null;
+
     jQuery.ajax({
       url: this.ajaxUrl,
       type: 'POST',
       data: {
         action: 'stripe_terminal_retry_payment',
         order_id: orderId,
-        reader_id: this.connectedReader.id,
+        reader_id: this.activePaymentReaderId,
         order_key: this.config.orderKey
       }
     })
@@ -431,8 +442,14 @@ class StripeTerminalPayment {
 
       const currentLastSeen = response.data.last_seen_at;
 
+      // If last_seen_at is missing, treat as inconclusive rather than verified.
+      if (!currentLastSeen) {
+        this.addToLog('Reader pickup verification inconclusive (missing last_seen_at)', 'warning');
+        return;
+      }
+
       // If last_seen_at hasn't advanced, the reader likely didn't pick up the command.
-      if (currentLastSeen && currentLastSeen <= this.readerLastSeenAt) {
+      if (currentLastSeen <= this.readerLastSeenAt) {
         console.warn('Reader pickup verification failed: last_seen_at has not advanced');
         this.addToLog('Reader did not respond to payment command', 'warning');
 

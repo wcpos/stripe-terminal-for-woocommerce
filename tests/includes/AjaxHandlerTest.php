@@ -298,9 +298,8 @@ class AjaxHandlerTest extends TestCase {
 		$handler = new AjaxHandler( $mock_service );
 		$handler->get_reader_status();
 
-		// Mockery automatically verifies that get_reader_status was called
-		// with 'tmr_test_123' exactly once. If not, tearDown will throw.
-		$this->addToAssertionCount( 1 );
+		// Count Mockery expectations as PHPUnit assertions.
+		$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
 	}
 
 	public function test_validate_service_fails_without_service(): void {
