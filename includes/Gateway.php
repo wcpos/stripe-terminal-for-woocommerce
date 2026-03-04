@@ -110,6 +110,13 @@ class Gateway extends WC_Payment_Gateway {
 				'default'     => 'no',
 				'description' => ! is_ssl() ? '<span style="color: #996b00; background-color: #fcf9e8; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">⚠</span>' . __( 'Test Mode is enforced when not using SSL.', 'stripe-terminal-for-woocommerce' ) . '</span>' : '',
 			),
+			'enable_moto' => array(
+				'title'       => __( 'Phone Orders (MOTO)', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'label'       => __( 'Enable phone order payments via Stripe Terminal', 'stripe-terminal-for-woocommerce' ),
+				'default'     => 'no',
+				'description' => __( 'Allows merchants to key in card details on the reader for phone orders. Requires MOTO permissions enabled on your Stripe account — contact Stripe support to request access. Only works with S700, S710, and WisePOS E readers.', 'stripe-terminal-for-woocommerce' ),
+			),
 		);
 	}
 
@@ -309,6 +316,19 @@ class Gateway extends WC_Payment_Gateway {
 		echo '<div class="stripe-terminal-reader-details"></div>';
 		echo '</div>';
 
+		// MOTO toggle (visibility controlled by JS based on reader compatibility)
+		if ( 'yes' === $this->get_option( 'enable_moto' ) ) {
+			echo '<div class="stripe-terminal-moto-toggle" style="display: none;">';
+			echo '<label class="stripe-terminal-moto-label">';
+			echo '<input type="checkbox" class="stripe-terminal-moto-checkbox" />';
+			echo '<span>' . esc_html__( 'Phone Order', 'stripe-terminal-for-woocommerce' ) . '</span>';
+			echo '</label>';
+			echo '<p class="stripe-terminal-moto-description">';
+			echo esc_html__( 'Enable to key in card details for phone/mail orders', 'stripe-terminal-for-woocommerce' );
+			echo '</p>';
+			echo '</div>';
+		}
+
 		// Payment buttons (hidden until reader is connected)
 		echo '<div class="stripe-terminal-payment-buttons" style="display: none;">';
 		echo '<button type="button" class="stripe-terminal-pay-button" data-order-id="' . esc_attr( $order_id ) . '" data-amount="' . esc_attr( $amount ) . '">';
@@ -401,6 +421,7 @@ class Gateway extends WC_Payment_Gateway {
 				'ajaxUrl'  => admin_url( 'admin-ajax.php' ),
 				'orderId'  => $order_id,
 				'orderKey' => $order_key,
+				'enableMoto' => 'yes' === $this->get_option( 'enable_moto' ),
 				'strings'  => array(
 					'startingPayment'      => __( 'Starting payment...', 'stripe-terminal-for-woocommerce' ),
 					'paymentInProgress'    => __( 'Payment in progress...', 'stripe-terminal-for-woocommerce' ),
@@ -425,6 +446,8 @@ class Gateway extends WC_Payment_Gateway {
 					'noReaders'            => __( 'No readers available. Please register a reader in your Stripe Dashboard.', 'stripe-terminal-for-woocommerce' ),
 					'serviceError'         => __( 'Stripe Terminal service is not properly configured. Please check your API key settings.', 'stripe-terminal-for-woocommerce' ),
 					'readersError'         => __( 'Unable to retrieve available readers. Please try again later.', 'stripe-terminal-for-woocommerce' ),
+					'phoneOrder'        => __( 'Phone Order', 'stripe-terminal-for-woocommerce' ),
+					'phoneOrderTooltip' => __( 'Enable to key in card details for phone orders', 'stripe-terminal-for-woocommerce' ),
 				),
 			)
 		);

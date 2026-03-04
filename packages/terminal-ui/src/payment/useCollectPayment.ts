@@ -7,6 +7,7 @@ import { stwcConfig } from '../stwcConfig';
 interface UseCollectPaymentArgs {
 	client: Client;
 	terminal: Terminal;
+	moto?: boolean;
 }
 
 interface CreatePaymentIntentResponse {
@@ -15,13 +16,14 @@ interface CreatePaymentIntentResponse {
 
 type ErrorType = unknown;
 
-export function useCollectPayment({ client, terminal }: UseCollectPaymentArgs) {
+export function useCollectPayment({ client, terminal, moto = false }: UseCollectPaymentArgs) {
 	const { orderId } = stwcConfig;
 	const [showPaymentOptions, setShowPaymentOptions] = React.useState(true);
 	const [paymentProgress, setPaymentProgress] = React.useState<string | null>(null);
 	const [cancelablePayment, setCancelablePayment] = React.useState(false);
 
 	const pendingPaymentIntentSecret = React.useRef<string | null>(null);
+	const pendingPaymentIntentMoto = React.useRef<boolean | null>(null);
 
 	const errorAlert = (error: ErrorType, fallbackMessage: string) => {
 		let errorMessage = fallbackMessage;
@@ -55,12 +57,23 @@ export function useCollectPayment({ client, terminal }: UseCollectPaymentArgs) {
 		setShowPaymentOptions(false);
 		setPaymentProgress('Initializing payment...');
 
+		// Invalidate cached intent if MOTO mode changed
+		if (
+			pendingPaymentIntentSecret.current &&
+			pendingPaymentIntentMoto.current !== null &&
+			pendingPaymentIntentMoto.current !== moto
+		) {
+			pendingPaymentIntentSecret.current = null;
+		}
+
 		if (!pendingPaymentIntentSecret.current) {
 			try {
 				const createIntentResponse = (await client.createPaymentIntent({
 					orderId,
+					moto,
 				})) as CreatePaymentIntentResponse;
 				pendingPaymentIntentSecret.current = createIntentResponse.client_secret;
+				pendingPaymentIntentMoto.current = moto;
 				setPaymentProgress('Payment intent created.');
 			} catch (error) {
 				errorAlert(error, 'Failed to create payment intent.');
@@ -72,7 +85,6 @@ export function useCollectPayment({ client, terminal }: UseCollectPaymentArgs) {
 		if (!pendingPaymentIntentSecret.current) return;
 
 		try {
-			// In the base version, we do not configure the simulator at all:
 			setPaymentProgress('Waiting for card input...');
 			setCancelablePayment(true);
 			const paymentMethodResult = await terminal.collectPaymentMethod(
@@ -130,11 +142,12 @@ export function useCollectPayment({ client, terminal }: UseCollectPaymentArgs) {
 		} finally {
 			setCancelablePayment(false);
 		}
-	}, [client, terminal, orderId]);
+	}, [client, terminal, orderId, moto]);
 
 	const handleCancelPayment = React.useCallback(async () => {
 		await terminal.cancelCollectPaymentMethod();
 		pendingPaymentIntentSecret.current = null;
+		pendingPaymentIntentMoto.current = null;
 		setCancelablePayment(false);
 		setShowPaymentOptions(true);
 	}, [terminal]);

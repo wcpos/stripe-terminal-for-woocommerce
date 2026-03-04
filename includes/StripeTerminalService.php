@@ -74,10 +74,11 @@ class StripeTerminalService {
 	 *
 	 * @param WC_Order $order  The WooCommerce order.
 	 * @param null|int $amount Optional amount override (in cents).
+	 * @param bool     $moto   Whether this is a MOTO (Mail Order/Telephone Order) payment.
 	 *
 	 * @return array|WP_Error The payment intent data or error.
 	 */
-	public function create_payment_intent( WC_Order $order, ?int $amount = null ) {
+	public function create_payment_intent( WC_Order $order, ?int $amount = null, bool $moto = false ) {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
@@ -99,7 +100,11 @@ class StripeTerminalService {
 				);
 			}
 			
-			$payment_method_types = 'cad' === $currency ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
+			if ( $moto ) {
+				$payment_method_types = array( 'card' );
+			} else {
+				$payment_method_types = 'cad' === $currency ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
+			}
 
 			if ( empty( $amount ) || empty( $currency ) ) {
 				return new WP_Error(
@@ -651,7 +656,14 @@ class StripeTerminalService {
 				$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 				$order->update_meta_data( '_stripe_terminal_payment_amount', $latest_charge->amount );
 				$order->update_meta_data( '_stripe_terminal_payment_currency', $latest_charge->currency );
-				$order->update_meta_data( '_stripe_terminal_payment_method', 'card_present' );
+				$is_moto        = isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true );
+				$payment_method = $is_moto ? 'card' : 'card_present';
+				if ( $is_moto ) {
+					$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+				} else {
+					$order->delete_meta_data( '_stripe_terminal_moto' );
+				}
+				$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 				$order->save();
 
 				// Add order note
@@ -801,7 +813,14 @@ class StripeTerminalService {
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $charge->amount );
 		$order->update_meta_data( '_stripe_terminal_payment_currency', $charge->currency );
-		$order->update_meta_data( '_stripe_terminal_payment_method', 'card_present' );
+		$is_moto        = isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true );
+		$payment_method = $is_moto ? 'card' : 'card_present';
+		if ( $is_moto ) {
+			$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+		} else {
+			$order->delete_meta_data( '_stripe_terminal_moto' );
+		}
+		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();
 
 		// Add order note

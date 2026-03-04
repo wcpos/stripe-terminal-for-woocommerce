@@ -79,6 +79,7 @@ class AjaxHandler {
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 			$amount    = isset( $_POST['amount'] ) ? absint( $_POST['amount'] ) : 0;
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
+			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( $_POST['moto'] ) && $this->is_moto_enabled();
 
 			if ( ! $order_id || ! $amount || ! $reader_id ) {
 				wp_send_json_error( 'Missing order ID, amount, or reader ID' );
@@ -115,7 +116,7 @@ class AjaxHandler {
 
 			// Step 1: Create payment intent using the service
 			Logger::log( 'Stripe Terminal AJAX - Creating payment intent for Order #' . $order_id . ' (Amount: ' . $amount . ')' );
-			$payment_intent = $this->stripe_service->create_payment_intent( $order, $amount );
+			$payment_intent = $this->stripe_service->create_payment_intent( $order, $amount, $moto );
 
 			if ( is_wp_error( $payment_intent ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent creation failed: ' . $payment_intent->get_error_message() );
@@ -127,8 +128,13 @@ class AjaxHandler {
 			$payment_intent_id = $payment_intent['id'];
 			Logger::log( 'Stripe Terminal AJAX - Payment intent created: ' . $payment_intent_id );
 
-			// Save payment intent ID to order metadata for later use
+			// Save payment metadata for later use
 			$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
+			if ( $moto ) {
+				$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+			} else {
+				$order->delete_meta_data( '_stripe_terminal_moto' );
+			}
 			$order->save();
 
 			// Add order note with payment intent ID
@@ -143,7 +149,8 @@ class AjaxHandler {
 
 			// Step 2: Process payment intent on the reader
 			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
-			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id );
+			$process_config = $moto ? array( 'moto' => true ) : array();
+			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent processing failed: ' . $reader_result->get_error_message() );
@@ -649,9 +656,13 @@ class AjaxHandler {
 				return;
 			}
 
+			// Use server-side MOTO state from order meta rather than trusting request input
+			$moto = 'yes' === $order->get_meta( '_stripe_terminal_moto' ) && $this->is_moto_enabled();
+
 			Logger::log( 'Stripe Terminal AJAX - Retrying payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
 
-			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id );
+			$process_config = $moto ? array( 'moto' => true ) : array();
+			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Retry failed: ' . $reader_result->get_error_message() );
@@ -717,5 +728,14 @@ class AjaxHandler {
 		return ! empty( $provided_order_key )  &&
 			   $provided_order_key === $order_key &&
 			   $order->needs_payment();
+	}
+
+	/**
+	 * Check if MOTO payments are enabled in gateway settings.
+	 */
+	private function is_moto_enabled(): bool {
+		$settings = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
+
+		return 'yes' === ( $settings['enable_moto'] ?? 'no' );
 	}
 }

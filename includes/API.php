@@ -201,6 +201,8 @@ class API extends Abstracts\APIController {
 
 			$params   = $request->get_json_params();
 			$order_id = $params['order_id'] ?? null;
+			$settings = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
+			$moto     = isset( $params['moto'] ) && true === $params['moto'] && 'yes' === ( $settings['enable_moto'] ?? 'no' );
 
 			if ( empty( $order_id ) ) {
 				return new WP_Error(
@@ -215,7 +217,11 @@ class API extends Abstracts\APIController {
 			$tax_amount           = CurrencyConverter::convert_to_stripe_amount( $order->get_total_tax(), $order->get_currency() );
 			$currency             = strtolower( $order->get_currency() );
 			$description          = \sprintf( 'Order #%s', $order_id );
-			$payment_method_types = 'cad' === $currency ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
+			if ( $moto ) {
+				$payment_method_types = array( 'card' );
+			} else {
+				$payment_method_types = 'cad' === $currency ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
+			}
 
 			if ( empty( $amount ) || empty( $currency ) ) {
 				return new WP_Error(
@@ -437,7 +443,14 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $payment_intent->amount );
 		$order->update_meta_data( '_stripe_terminal_payment_currency', $payment_intent->currency );
-		$order->update_meta_data( '_stripe_terminal_payment_method', 'card_present' );
+		$is_moto        = isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true );
+		$payment_method = $is_moto ? 'card' : 'card_present';
+		if ( $is_moto ) {
+			$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+		} else {
+			$order->delete_meta_data( '_stripe_terminal_moto' );
+		}
+		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();
 
 		// Add detailed order note
@@ -499,7 +512,14 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $charge->amount );
 		$order->update_meta_data( '_stripe_terminal_payment_currency', $charge->currency );
-		$order->update_meta_data( '_stripe_terminal_payment_method', 'card_present' );
+		$is_moto        = isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true );
+		$payment_method = $is_moto ? 'card' : 'card_present';
+		if ( $is_moto ) {
+			$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+		} else {
+			$order->delete_meta_data( '_stripe_terminal_moto' );
+		}
+		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();
 
 		// Add detailed order note

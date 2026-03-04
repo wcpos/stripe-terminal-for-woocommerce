@@ -6,6 +6,8 @@
 import './payment.css';
 
 class StripeTerminalPayment {
+  static MOTO_COMPATIBLE_DEVICES = ['stripe_s700', 'stripe_s710', 'bbpos_wisepos_e'];
+
   constructor() {
     this.isInitialized = false;
     this.currentPaymentIntent = null;
@@ -123,11 +125,13 @@ class StripeTerminalPayment {
 
   async createPaymentIntent(orderId, amount) {
     return new Promise((resolve, reject) => {
+      const isMoto = jQuery('.stripe-terminal-moto-checkbox').is(':checked');
       const ajaxData = {
         action: 'stripe_terminal_create_payment_intent',
         order_id: orderId,
         amount: amount,
-        reader_id: this.connectedReader.id
+        reader_id: this.connectedReader.id,
+        moto: isMoto ? 'true' : 'false'
       };
 
       // Add order key for guest users
@@ -354,7 +358,8 @@ class StripeTerminalPayment {
         action: 'stripe_terminal_retry_payment',
         order_id: orderId,
         reader_id: this.activePaymentReaderId,
-        order_key: this.config.orderKey
+        order_key: this.config.orderKey,
+        moto: jQuery('.stripe-terminal-moto-checkbox').is(':checked') ? 'true' : 'false'
       }
     })
     .done((response) => {
@@ -938,6 +943,11 @@ class StripeTerminalPayment {
     return `${Math.floor(diffInSeconds / 86400)} days ago`;
   }
 
+  isMotoCompatible(reader) {
+    if (!reader || !reader.device_type) return false;
+    return StripeTerminalPayment.MOTO_COMPATIBLE_DEVICES.includes(reader.device_type);
+  }
+
   // Reader management methods
   loadSavedReader() {
     const savedReaderId = localStorage.getItem('stripe_terminal_reader_id');
@@ -1042,6 +1052,15 @@ class StripeTerminalPayment {
         ${reader.serial_number ? `<p>Serial: ${reader.serial_number}</p>` : ''}
       `);
       
+      // Show/hide MOTO toggle based on reader compatibility
+      const motoToggle = jQuery('.stripe-terminal-moto-toggle');
+      if (motoToggle.length && this.isMotoCompatible(this.connectedReader)) {
+        motoToggle.show();
+      } else {
+        motoToggle.hide();
+        jQuery('.stripe-terminal-moto-checkbox').prop('checked', false);
+      }
+
       // Update button visibility
       this.updateButtonVisibility();
     } else {
@@ -1049,6 +1068,8 @@ class StripeTerminalPayment {
       readersSection.show();
       connectedSection.hide();
       paymentButtons.hide();
+      jQuery('.stripe-terminal-moto-toggle').hide();
+      jQuery('.stripe-terminal-moto-checkbox').prop('checked', false);
     }
   }
 
