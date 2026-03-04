@@ -19,10 +19,16 @@ class AjaxHandler {
 
 	/**
 	 * Constructor.
+	 *
+	 * @param StripeTerminalService|null $stripe_service Optional pre-built service (useful for testing).
 	 */
-	public function __construct() {
-		// Initialize the Stripe Terminal service
-		$this->init_stripe_service();
+	public function __construct( ?StripeTerminalService $stripe_service = null ) {
+		// Use injected service or initialize from settings.
+		if ( $stripe_service ) {
+			$this->stripe_service = $stripe_service;
+		} else {
+			$this->init_stripe_service();
+		}
 		
 		// Payment intent creation
 		add_action( 'wp_ajax_stripe_terminal_create_payment_intent', array( $this, 'create_payment_intent' ) );
@@ -297,8 +303,9 @@ class AjaxHandler {
 				return;
 			}
 
-			// Get reader status using the service
-			$result = $this->stripe_service->get_reader_status();
+			// Get reader status — optionally for a single reader.
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : null;
+			$result    = $this->stripe_service->get_reader_status( $reader_id );
 
 			if ( is_wp_error( $result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Get reader status failed: ' . $result->get_error_message() );
