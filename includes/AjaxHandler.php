@@ -79,6 +79,7 @@ class AjaxHandler {
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 			$amount    = isset( $_POST['amount'] ) ? absint( $_POST['amount'] ) : 0;
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
+			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( $_POST['moto'] );
 
 			if ( ! $order_id || ! $amount || ! $reader_id ) {
 				wp_send_json_error( 'Missing order ID, amount, or reader ID' );
@@ -115,7 +116,7 @@ class AjaxHandler {
 
 			// Step 1: Create payment intent using the service
 			Logger::log( 'Stripe Terminal AJAX - Creating payment intent for Order #' . $order_id . ' (Amount: ' . $amount . ')' );
-			$payment_intent = $this->stripe_service->create_payment_intent( $order, $amount );
+			$payment_intent = $this->stripe_service->create_payment_intent( $order, $amount, $moto );
 
 			if ( is_wp_error( $payment_intent ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent creation failed: ' . $payment_intent->get_error_message() );
@@ -131,6 +132,10 @@ class AjaxHandler {
 			$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
 			$order->save();
 
+			if ( $moto ) {
+				$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
+			}
+
 			// Add order note with payment intent ID
 			$order->add_order_note(
 				\sprintf(
@@ -143,7 +148,8 @@ class AjaxHandler {
 
 			// Step 2: Process payment intent on the reader
 			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
-			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id );
+			$process_config = $moto ? array( 'moto' => true ) : array();
+			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent processing failed: ' . $reader_result->get_error_message() );
@@ -621,6 +627,7 @@ class AjaxHandler {
 		try {
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
+			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( $_POST['moto'] );
 
 			if ( ! $order_id || ! $reader_id ) {
 				wp_send_json_error( 'Missing order ID or reader ID' );
@@ -651,7 +658,8 @@ class AjaxHandler {
 
 			Logger::log( 'Stripe Terminal AJAX - Retrying payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
 
-			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id );
+			$process_config = $moto ? array( 'moto' => true ) : array();
+			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Retry failed: ' . $reader_result->get_error_message() );
