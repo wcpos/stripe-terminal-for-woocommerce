@@ -142,5 +142,5 @@ export const stwcConfig: StwcConfig = {
 	client,
 	terminal,
 	orderId,
-	enableMoto: !!rawConfig.enableMoto,
+	enableMoto: rawConfig.enableMoto ?? false,
 };

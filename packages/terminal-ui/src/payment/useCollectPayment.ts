@@ -23,6 +23,7 @@ export function useCollectPayment({ client, terminal, moto = false }: UseCollect
 	const [cancelablePayment, setCancelablePayment] = React.useState(false);
 
 	const pendingPaymentIntentSecret = React.useRef<string | null>(null);
+	const pendingPaymentIntentMoto = React.useRef<boolean | null>(null);
 
 	const errorAlert = (error: ErrorType, fallbackMessage: string) => {
 		let errorMessage = fallbackMessage;
@@ -56,6 +57,15 @@ export function useCollectPayment({ client, terminal, moto = false }: UseCollect
 		setShowPaymentOptions(false);
 		setPaymentProgress('Initializing payment...');
 
+		// Invalidate cached intent if MOTO mode changed
+		if (
+			pendingPaymentIntentSecret.current &&
+			pendingPaymentIntentMoto.current !== null &&
+			pendingPaymentIntentMoto.current !== moto
+		) {
+			pendingPaymentIntentSecret.current = null;
+		}
+
 		if (!pendingPaymentIntentSecret.current) {
 			try {
 				const createIntentResponse = (await client.createPaymentIntent({
@@ -63,6 +73,7 @@ export function useCollectPayment({ client, terminal, moto = false }: UseCollect
 					moto,
 				})) as CreatePaymentIntentResponse;
 				pendingPaymentIntentSecret.current = createIntentResponse.client_secret;
+				pendingPaymentIntentMoto.current = moto;
 				setPaymentProgress('Payment intent created.');
 			} catch (error) {
 				errorAlert(error, 'Failed to create payment intent.');
@@ -136,6 +147,7 @@ export function useCollectPayment({ client, terminal, moto = false }: UseCollect
 	const handleCancelPayment = React.useCallback(async () => {
 		await terminal.cancelCollectPaymentMethod();
 		pendingPaymentIntentSecret.current = null;
+		pendingPaymentIntentMoto.current = null;
 		setCancelablePayment(false);
 		setShowPaymentOptions(true);
 	}, [terminal]);
