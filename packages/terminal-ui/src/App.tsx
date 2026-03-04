@@ -39,7 +39,7 @@ export const App = () => {
 		return reader.id === 'SIMULATOR' ? (
 			<SimulatorPayment client={client} terminal={terminal} />
 		) : (
-			<Payment client={client} terminal={terminal} />
+			<Payment client={client} terminal={terminal} reader={reader} />
 		);
 	};
 
