@@ -201,6 +201,7 @@ class API extends Abstracts\APIController {
 
 			$params   = $request->get_json_params();
 			$order_id = $params['order_id'] ?? null;
+			$moto     = isset( $params['moto'] ) && true === $params['moto'];
 
 			if ( empty( $order_id ) ) {
 				return new WP_Error(
@@ -215,7 +216,11 @@ class API extends Abstracts\APIController {
 			$tax_amount           = CurrencyConverter::convert_to_stripe_amount( $order->get_total_tax(), $order->get_currency() );
 			$currency             = strtolower( $order->get_currency() );
 			$description          = \sprintf( 'Order #%s', $order_id );
-			$payment_method_types = 'cad' === $currency ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
+			if ( $moto ) {
+				$payment_method_types = array( 'card' );
+			} else {
+				$payment_method_types = 'cad' === $currency ? array( 'card_present', 'interac_present' ) : array( 'card_present' );
+			}
 
 			if ( empty( $amount ) || empty( $currency ) ) {
 				return new WP_Error(
