@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.17 - 2026-03-04
+
+### Added
+
+- MOTO (Mail Order/Telephone Order) payment support — merchants can take phone orders by keying card details on compatible readers (S700, S710, WisePOS E)
+- Plugin setting to enable/disable MOTO payments under WooCommerce > Settings > Payments > Stripe Terminal
+- "Phone Order" toggle on the payment screen, shown only for MOTO-compatible readers
+- MOTO payment detection in webhooks with order metadata (`_stripe_terminal_moto`)
+- Reader pickup verification — detects when a reader doesn't respond within 15 seconds and shows an actionable error instead of silently timing out
+
+### Fixed
+
+- Readers that go unresponsive after the first payment are now detected within 15 seconds instead of timing out after 5 minutes
+- Pre-flight freshness gate blocks payments immediately when the reader hasn't been seen in 120+ seconds
+
 ## 0.0.16 - 2026-03-03
 
 ### Fixed
