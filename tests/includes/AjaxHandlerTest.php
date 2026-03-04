@@ -286,6 +286,23 @@ class AjaxHandlerTest extends TestCase {
 		);
 	}
 
+	public function test_get_reader_status_passes_reader_id_to_service(): void {
+		$_POST = array( 'reader_id' => 'tmr_test_123' );
+
+		$mock_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$mock_service->shouldReceive( 'get_reader_status' )
+			->with( 'tmr_test_123' )
+			->once()
+			->andReturn( array( 'id' => 'tmr_test_123', 'status' => 'online' ) );
+
+		$handler = new AjaxHandler( $mock_service );
+		$handler->get_reader_status();
+
+		// Mockery automatically verifies that get_reader_status was called
+		// with 'tmr_test_123' exactly once. If not, tearDown will throw.
+		$this->addToAssertionCount( 1 );
+	}
+
 	public function test_validate_service_fails_without_service(): void {
 		$error = $this->call_and_capture_error( 'validate_service' );
 		$this->assertSame(
