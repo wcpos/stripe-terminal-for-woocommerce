@@ -74,13 +74,10 @@ export function useCollectPayment({ client, terminal, moto = false }: UseCollect
 		if (!pendingPaymentIntentSecret.current) return;
 
 		try {
-			// In the base version, we do not configure the simulator at all:
 			setPaymentProgress('Waiting for card input...');
 			setCancelablePayment(true);
-			const collectConfig = moto ? { moto: true } : undefined;
 			const paymentMethodResult = await terminal.collectPaymentMethod(
-				pendingPaymentIntentSecret.current,
-				collectConfig
+				pendingPaymentIntentSecret.current
 			);
 			if ('error' in paymentMethodResult) {
 				Logger.logMessage(
