@@ -12,6 +12,8 @@
  * Requires at least: 5.2
  * Requires PHP:      7.4
  * Requires Plugins:  woocommerce
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;

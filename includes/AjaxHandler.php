@@ -1,4 +1,9 @@
 <?php
+/**
+ * Handles AJAX requests for Stripe Terminal payments.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal
+ */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
@@ -29,45 +34,45 @@ class AjaxHandler {
 		} else {
 			$this->init_stripe_service();
 		}
-		
-		// Payment intent creation
+
+		// Payment intent creation.
 		add_action( 'wp_ajax_stripe_terminal_create_payment_intent', array( $this, 'create_payment_intent' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_create_payment_intent', array( $this, 'create_payment_intent' ) );
 
-		// Payment confirmation
+		// Payment confirmation.
 		add_action( 'wp_ajax_stripe_terminal_confirm_payment', array( $this, 'confirm_payment' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_confirm_payment', array( $this, 'confirm_payment' ) );
 
-		// Payment cancellation
+		// Payment cancellation.
 		add_action( 'wp_ajax_stripe_terminal_cancel_payment', array( $this, 'cancel_payment' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_cancel_payment', array( $this, 'cancel_payment' ) );
 
-		// Reader connection status
+		// Reader connection status.
 		add_action( 'wp_ajax_stripe_terminal_get_reader_status', array( $this, 'get_reader_status' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_get_reader_status', array( $this, 'get_reader_status' ) );
 
-		// Service validation and reader listing
+		// Service validation and reader listing.
 		add_action( 'wp_ajax_stripe_terminal_validate_service', array( $this, 'validate_service' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_validate_service', array( $this, 'validate_service' ) );
 		add_action( 'wp_ajax_stripe_terminal_get_readers', array( $this, 'get_readers' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_get_readers', array( $this, 'get_readers' ) );
 
-		// Payment status check
+		// Payment status check.
 		add_action( 'wp_ajax_stripe_terminal_check_payment_status', array( $this, 'check_payment_status' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_check_payment_status', array( $this, 'check_payment_status' ) );
-		
+
 		add_action( 'wp_ajax_stripe_terminal_check_stripe_status', array( $this, 'check_stripe_status' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_check_stripe_status', array( $this, 'check_stripe_status' ) );
 
-		// Test helper - simulate payment
+		// Test helper - simulate payment.
 		add_action( 'wp_ajax_stripe_terminal_simulate_payment', array( $this, 'simulate_payment' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_simulate_payment', array( $this, 'simulate_payment' ) );
 
-		// Retry payment on reader
+		// Retry payment on reader.
 		add_action( 'wp_ajax_stripe_terminal_retry_payment', array( $this, 'retry_payment' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_retry_payment', array( $this, 'retry_payment' ) );
 
-		// Check payment status from Stripe
+		// Check payment status from Stripe.
 	}
 
 	/**
@@ -75,11 +80,17 @@ class AjaxHandler {
 	 */
 	public function create_payment_intent(): void {
 		try {
-			// Get and validate parameters
+			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+				wp_send_json_error( 'Invalid request' );
+
+				return;
+			}
+
+			// Get and validate parameters.
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 			$amount    = isset( $_POST['amount'] ) ? absint( $_POST['amount'] ) : 0;
-			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
-			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( $_POST['moto'] ) && $this->is_moto_enabled();
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
+			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['moto'] ) ) && $this->is_moto_enabled();
 
 			if ( ! $order_id || ! $amount || ! $reader_id ) {
 				wp_send_json_error( 'Missing order ID, amount, or reader ID' );
@@ -87,7 +98,7 @@ class AjaxHandler {
 				return;
 			}
 
-			// Get the order
+			// Get the order.
 			$order = wc_get_order( $order_id );
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
@@ -95,26 +106,21 @@ class AjaxHandler {
 				return;
 			}
 
-			// Debug order key validation
-			$provided_order_key = isset( $_POST['order_key'] ) ? sanitize_text_field( $_POST['order_key'] ) : '';
-			$order_key          = $order->get_order_key();
-			$needs_payment      = $order->needs_payment();
-
-			// Verify access using order key (works for both logged in and guest users)
+			// Verify access using order key (works for both logged in and guest users).
 			if ( ! $this->can_access_order( $order ) ) {
 				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
 
 				return;
 			}
 
-			// Check if service is initialized
+			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
 
 				return;
 			}
 
-			// Step 1: Create payment intent using the service
+			// Step 1: Create payment intent using the service.
 			Logger::log( 'Stripe Terminal AJAX - Creating payment intent for Order #' . $order_id . ' (Amount: ' . $amount . ')' );
 			$payment_intent = $this->stripe_service->create_payment_intent( $order, $amount, $moto );
 
@@ -128,7 +134,7 @@ class AjaxHandler {
 			$payment_intent_id = $payment_intent['id'];
 			Logger::log( 'Stripe Terminal AJAX - Payment intent created: ' . $payment_intent_id );
 
-			// Save payment metadata for later use
+			// Save payment metadata for later use.
 			$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
 			if ( $moto ) {
 				$order->update_meta_data( '_stripe_terminal_moto', 'yes' );
@@ -137,7 +143,7 @@ class AjaxHandler {
 			}
 			$order->save();
 
-			// Add order note with payment intent ID
+			// Add order note with payment intent ID.
 			$order->add_order_note(
 				\sprintf(
 					'Stripe Terminal: Payment intent created - ID: %s, Amount: %s %s',
@@ -147,7 +153,7 @@ class AjaxHandler {
 				)
 			);
 
-			// Step 2: Process payment intent on the reader
+			// Step 2: Process payment intent on the reader.
 			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
 			$process_config = $moto ? array( 'moto' => true ) : array();
 			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
@@ -161,7 +167,7 @@ class AjaxHandler {
 
 			Logger::log( 'Stripe Terminal AJAX - Payment intent processed successfully on reader ' . $reader_id );
 
-			// Add order note with reader processing info
+			// Add order note with reader processing info.
 			$order->add_order_note(
 				\sprintf(
 					'Stripe Terminal: Payment intent processed on reader %s - Status: %s',
@@ -170,11 +176,13 @@ class AjaxHandler {
 				)
 			);
 
-			// Return both payment intent and reader data
-			wp_send_json_success( array(
-				'payment_intent' => $payment_intent,
-				'reader'         => $reader_result,
-			) );
+			// Return both payment intent and reader data.
+			wp_send_json_success(
+				array(
+					'payment_intent' => $payment_intent,
+					'reader'         => $reader_result,
+				)
+			);
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in create_payment_intent: ' . $e->getMessage() );
 			wp_send_json_error( 'An error occurred while creating payment intent: ' . $e->getMessage() );
@@ -186,8 +194,14 @@ class AjaxHandler {
 	 */
 	public function confirm_payment(): void {
 		try {
-			// Get and validate parameters
-			$payment_intent_id = isset( $_POST['payment_intent_id'] ) ? sanitize_text_field( $_POST['payment_intent_id'] ) : '';
+			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+				wp_send_json_error( 'Invalid request' );
+
+				return;
+			}
+
+			// Get and validate parameters.
+			$payment_intent_id = isset( $_POST['payment_intent_id'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_intent_id'] ) ) : '';
 			$order_id          = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $payment_intent_id || ! $order_id ) {
@@ -196,7 +210,7 @@ class AjaxHandler {
 				return;
 			}
 
-			// Get the order
+			// Get the order.
 			$order = wc_get_order( $order_id );
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
@@ -204,21 +218,21 @@ class AjaxHandler {
 				return;
 			}
 
-			// Verify access using order key
+			// Verify access using order key.
 			if ( ! $this->can_access_order( $order ) ) {
 				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
 
 				return;
 			}
 
-			// Check if service is initialized
+			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
 
 				return;
 			}
 
-			// Confirm payment using the service
+			// Confirm payment using the service.
 			$result = $this->stripe_service->confirm_payment_intent( $payment_intent_id, $order );
 
 			if ( is_wp_error( $result ) ) {
@@ -240,10 +254,16 @@ class AjaxHandler {
 	 */
 	public function cancel_payment(): void {
 		try {
-			// Get and validate parameters
-			$payment_intent_id = isset( $_POST['payment_intent_id'] ) ? sanitize_text_field( $_POST['payment_intent_id'] ) : '';
+			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+				wp_send_json_error( 'Invalid request' );
+
+				return;
+			}
+
+			// Get and validate parameters.
+			$payment_intent_id = isset( $_POST['payment_intent_id'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_intent_id'] ) ) : '';
 			$order_id          = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
-			$reader_id         = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
+			$reader_id         = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
 
 			if ( ! $payment_intent_id || ! $order_id || ! $reader_id ) {
 				wp_send_json_error( 'Missing payment intent ID, order ID, or reader ID' );
@@ -251,7 +271,7 @@ class AjaxHandler {
 				return;
 			}
 
-			// Get the order
+			// Get the order.
 			$order = wc_get_order( $order_id );
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
@@ -259,14 +279,14 @@ class AjaxHandler {
 				return;
 			}
 
-			// Verify access using order key
+			// Verify access using order key.
 			if ( ! $this->can_access_order( $order ) ) {
 				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
 
 				return;
 			}
 
-			// Check if service is initialized
+			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
 
@@ -303,7 +323,13 @@ class AjaxHandler {
 	 */
 	public function get_reader_status(): void {
 		try {
-			// Check if service is initialized
+			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+				wp_send_json_error( 'Invalid request' );
+
+				return;
+			}
+
+			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
 
@@ -311,7 +337,7 @@ class AjaxHandler {
 			}
 
 			// Get reader status — optionally for a single reader.
-			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : null;
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : null;
 			$result    = $this->stripe_service->get_reader_status( $reader_id );
 
 			if ( is_wp_error( $result ) ) {
@@ -333,26 +359,28 @@ class AjaxHandler {
 	 */
 	public function validate_service(): void {
 		try {
-			// Check if service is initialized
+			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
 
 				return;
 			}
 
-			// Test the API key by trying to list locations
+			// Test the API key by trying to list locations.
 			$result = $this->stripe_service->list_locations();
-			
+
 			if ( is_wp_error( $result ) ) {
 				wp_send_json_error( 'API key validation failed: ' . $result->get_error_message() );
 
 				return;
 			}
 
-			wp_send_json_success( array(
-				'valid'   => true,
-				'message' => 'Service is ready',
-			) );
+			wp_send_json_success(
+				array(
+					'valid'   => true,
+					'message' => 'Service is ready',
+				)
+			);
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Service validation error: ' . $e->getMessage() );
 			wp_send_json_error( 'Service validation failed: ' . $e->getMessage() );
@@ -364,16 +392,16 @@ class AjaxHandler {
 	 */
 	public function get_readers(): void {
 		try {
-			// Check if service is initialized
+			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
 
 				return;
 			}
 
-			// Get readers from Stripe
+			// Get readers from Stripe.
 			$result = $this->stripe_service->get_reader_status();
-			
+
 			if ( is_wp_error( $result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Failed to get readers: ' . $result->get_error_message() );
 				wp_send_json_error( 'Failed to retrieve readers: ' . $result->get_error_message() );
@@ -383,10 +411,12 @@ class AjaxHandler {
 
 			$readers = $result['data'] ?? array();
 
-			wp_send_json_success( array(
-				'readers' => $readers,
-				'count'   => \count( $readers ),
-			) );
+			wp_send_json_success(
+				array(
+					'readers' => $readers,
+					'count'   => \count( $readers ),
+				)
+			);
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Get readers error: ' . $e->getMessage() );
 			wp_send_json_error( 'Failed to retrieve readers: ' . $e->getMessage() );
@@ -398,6 +428,12 @@ class AjaxHandler {
 	 */
 	public function check_payment_status(): void {
 		try {
+			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+				wp_send_json_error( 'Invalid request' );
+
+				return;
+			}
+
 			$order_id = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $order_id ) {
@@ -442,7 +478,7 @@ class AjaxHandler {
 						);
 					}
 
-					// If Stripe says succeeded but local metadata didn't catch it yet.
+						// If Stripe says succeeded but local metadata didn't catch it yet.
 					if ( 'succeeded' === $payment_intent_status ) {
 						$payment_successful = true;
 					}
@@ -460,20 +496,22 @@ class AjaxHandler {
 				}
 			}
 
-			wp_send_json_success( array(
-				'is_paid'               => $payment_successful,
-				'status'                => $status,
-				'order_id'              => $order_id,
-				'transaction_id'        => $order->get_transaction_id(),
-				'return_url'            => $return_url,
-				'payment_intent_status' => $payment_intent_status,
-				'last_payment_error'    => $last_payment_error,
-				'payment_metadata'      => array(
-					'payment_status'         => $payment_status,
-					'payment_intent_id'      => $payment_intent_id,
-					'has_successful_payment' => $has_successful_payment,
-				),
-			) );
+			wp_send_json_success(
+				array(
+					'is_paid'               => $payment_successful,
+					'status'                => $status,
+					'order_id'              => $order_id,
+					'transaction_id'        => $order->get_transaction_id(),
+					'return_url'            => $return_url,
+					'payment_intent_status' => $payment_intent_status,
+					'last_payment_error'    => $last_payment_error,
+					'payment_metadata'      => array(
+						'payment_status'         => $payment_status,
+						'payment_intent_id'      => $payment_intent_id,
+						'has_successful_payment' => $has_successful_payment,
+					),
+				)
+			);
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in check_payment_status: ' . $e->getMessage() );
 			wp_send_json_error( 'An error occurred while checking payment status: ' . $e->getMessage() );
@@ -485,7 +523,13 @@ class AjaxHandler {
 	 */
 	public function check_stripe_status(): void {
 		try {
-			// Get and validate parameters
+			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+				wp_send_json_error( 'Invalid request' );
+
+				return;
+			}
+
+			// Get and validate parameters.
 			$order_id = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $order_id ) {
@@ -494,7 +538,7 @@ class AjaxHandler {
 				return;
 			}
 
-			// Get the order
+			// Get the order.
 			$order = wc_get_order( $order_id );
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
@@ -502,14 +546,14 @@ class AjaxHandler {
 				return;
 			}
 
-			// Verify access using order key
+			// Verify access using order key.
 			if ( ! $this->can_access_order( $order ) ) {
 				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
 
 				return;
 			}
 
-			// Initialize Stripe service
+			// Initialize Stripe service.
 			$stripe_service = $this->init_stripe_service();
 			if ( is_wp_error( $stripe_service ) ) {
 				wp_send_json_error( 'Failed to initialize Stripe service: ' . $stripe_service->get_error_message() );
@@ -517,30 +561,32 @@ class AjaxHandler {
 				return;
 			}
 
-			// Check payment status from Stripe
+			// Check payment status from Stripe.
 			$result = $stripe_service->check_payment_status_from_stripe( $order );
-			
+
 			if ( is_wp_error( $result ) ) {
 				wp_send_json_error( 'Failed to check payment status: ' . $result->get_error_message() );
 
 				return;
 			}
 
-			// Determine if payment was found and successful
+			// Determine if payment was found and successful.
 			$payment_found      = ! empty( $result['charge'] );
 			$payment_successful = $payment_found && true === $result['charge']['paid'];
 
-			wp_send_json_success( array(
-				'payment_found'      => $payment_found,
-				'payment_successful' => $payment_successful,
-				'payment_status'     => $result['charge']['status'] ?? null,
-				'payment_intent'     => $result['payment_intent']   ?? null,
-				'charge'             => $result['charge']           ?? null,
-				'order_status'       => $result['order_status'],
-				'order_paid'         => $result['order_paid'],
-				'metadata_saved'     => $result['metadata_saved'] ?? false,
-				'return_url'         => $result['return_url']     ?? null,
-			) );
+			wp_send_json_success(
+				array(
+					'payment_found'      => $payment_found,
+					'payment_successful' => $payment_successful,
+					'payment_status'     => $result['charge']['status'] ?? null,
+					'payment_intent'     => $result['payment_intent'] ?? null,
+					'charge'             => $result['charge'] ?? null,
+					'order_status'       => $result['order_status'],
+					'order_paid'         => $result['order_paid'],
+					'metadata_saved'     => $result['metadata_saved'] ?? false,
+					'return_url'         => $result['return_url'] ?? null,
+				)
+			);
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in check_stripe_status: ' . $e->getMessage() );
 			wp_send_json_error( 'An error occurred while checking Stripe status: ' . $e->getMessage() );
@@ -552,8 +598,14 @@ class AjaxHandler {
 	 */
 	public function simulate_payment(): void {
 		try {
-			// Get and validate parameters
-			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
+			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+				wp_send_json_error( 'Invalid request' );
+
+				return;
+			}
+
+			// Get and validate parameters.
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $reader_id ) {
@@ -568,7 +620,7 @@ class AjaxHandler {
 				return;
 			}
 
-			// Get the order
+			// Get the order.
 			$order = wc_get_order( $order_id );
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
@@ -576,14 +628,14 @@ class AjaxHandler {
 				return;
 			}
 
-			// Verify access using order key
+			// Verify access using order key.
 			if ( ! $this->can_access_order( $order ) ) {
 				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
 
 				return;
 			}
 
-			// Initialize Stripe service
+			// Initialize Stripe service.
 			$this->init_stripe_service();
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized' );
@@ -591,7 +643,7 @@ class AjaxHandler {
 				return;
 			}
 
-			// Get the existing payment intent from order metadata
+			// Get the existing payment intent from order metadata.
 			$payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
 			if ( empty( $payment_intent_id ) ) {
 				wp_send_json_error( 'No payment intent found for this order. Please create a payment intent first.' );
@@ -601,20 +653,23 @@ class AjaxHandler {
 
 			Logger::log( 'Stripe Terminal AJAX - Simulating payment for existing payment intent: ' . $payment_intent_id );
 
-			// Get Stripe client and simulate payment method presentation on the existing payment intent
+			// Get Stripe client and simulate payment method presentation on the existing payment intent.
 			$stripe = $this->stripe_service->get_stripe_client();
+			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- Stripe SDK property name.
 			$reader = $stripe->testHelpers->terminal->readers->presentPaymentMethod(
 				$reader_id,
 				array()
 			);
 
-			wp_send_json_success( array(
-				'message'         => 'Payment simulation triggered successfully',
-				'reader_id'       => $reader_id,
-				'reader_status'   => $reader->status,
-				'action'          => $reader->action ?? null,
-				'payment_intent'  => $payment_intent_id,
-			) );
+			wp_send_json_success(
+				array(
+					'message'         => 'Payment simulation triggered successfully',
+					'reader_id'       => $reader_id,
+					'reader_status'   => $reader->status,
+					'action'          => $reader->action ?? null,
+					'payment_intent'  => $payment_intent_id,
+				)
+			);
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in simulate_payment: ' . $e->getMessage() );
 			wp_send_json_error( 'Failed to simulate payment: ' . $e->getMessage() );
@@ -626,8 +681,14 @@ class AjaxHandler {
 	 */
 	public function retry_payment(): void {
 		try {
+			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+				wp_send_json_error( 'Invalid request' );
+
+				return;
+			}
+
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
-			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( $_POST['reader_id'] ) : '';
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
 
 			if ( ! $order_id || ! $reader_id ) {
 				wp_send_json_error( 'Missing order ID or reader ID' );
@@ -656,7 +717,7 @@ class AjaxHandler {
 				return;
 			}
 
-			// Use server-side MOTO state from order meta rather than trusting request input
+			// Use server-side MOTO state from order meta rather than trusting request input.
 			$moto = 'yes' === $order->get_meta( '_stripe_terminal_moto' ) && $this->is_moto_enabled();
 
 			Logger::log( 'Stripe Terminal AJAX - Retrying payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
@@ -680,10 +741,12 @@ class AjaxHandler {
 				)
 			);
 
-			wp_send_json_success( array(
-				'payment_intent_id' => $payment_intent_id,
-				'reader'            => $reader_result,
-			) );
+			wp_send_json_success(
+				array(
+					'payment_intent_id' => $payment_intent_id,
+					'reader'            => $reader_result,
+				)
+			);
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in retry_payment: ' . $e->getMessage() );
 			wp_send_json_error( 'An error occurred while retrying payment: ' . $e->getMessage() );
@@ -697,12 +760,12 @@ class AjaxHandler {
 	 * @return StripeTerminalService|WP_Error The service instance or error.
 	 */
 	private function init_stripe_service() {
-		// Get the API key from the gateway settings
+		// Get the API key from the gateway settings.
 		$settings  = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
 		$test_mode = $settings['test_mode'] ?? 'no';
 		$api_key   = 'yes' === $test_mode
 			? $settings['test_secret_key'] ?? ''
-			: $settings['secret_key']      ?? '';
+			: $settings['secret_key'] ?? '';
 
 		if ( empty( $api_key ) ) {
 			Logger::log( 'Stripe Terminal AJAX - No API key found in settings' );
@@ -711,21 +774,24 @@ class AjaxHandler {
 		}
 
 		$this->stripe_service = new StripeTerminalService( $api_key );
-		
+
 		return $this->stripe_service;
 	}
 
 
 	/**
 	 * Check if the request can access the given order using order key validation.
+	 *
+	 * @param WC_Order $order Order being accessed.
 	 */
 	private function can_access_order( WC_Order $order ): bool {
-		// Always verify using order key - this works for both logged in and guest users
-		$provided_order_key = isset( $_POST['order_key'] ) ? sanitize_text_field( $_POST['order_key'] ) : '';
+		// Always verify using order key - this works for both logged in and guest users.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce is verified by calling AJAX handlers.
+		$provided_order_key = isset( $_POST['order_key'] ) ? sanitize_text_field( wp_unslash( $_POST['order_key'] ) ) : '';
 		$order_key          = $order->get_order_key();
-		
-		// Verify the order key matches and order needs payment
-		return ! empty( $provided_order_key )  &&
+
+		// Verify the order key matches and order needs payment.
+		return ! empty( $provided_order_key ) &&
 			   $provided_order_key === $order_key &&
 			   $order->needs_payment();
 	}

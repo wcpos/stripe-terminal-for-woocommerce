@@ -3,6 +3,8 @@
  * CurrencyConverter Utility Class.
  *
  * Handles currency conversion for Stripe integration.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal\Utils
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Utils;

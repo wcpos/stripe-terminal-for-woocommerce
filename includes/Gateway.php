@@ -2,10 +2,13 @@
 /**
  * Stripe Terminal gateway
  * Handles the gateway for Stripe Terminal.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
+use WC_Abstract_Order;
 use WC_Payment_Gateway;
 
 /**
@@ -15,16 +18,22 @@ class Gateway extends WC_Payment_Gateway {
 	use Abstracts\StripeErrorHandler; // Include the Stripe error handler trait.
 
 	/**
+	 * Whether test mode is enabled.
+	 *
 	 * @var bool Whether test mode is enabled.
 	 */
 	protected $test_mode;
 
 	/**
+	 * The API key to use.
+	 *
 	 * @var string The API key to use.
 	 */
 	protected $api_key;
 
 	/**
+	 * The Stripe Terminal service instance.
+	 *
 	 * @var StripeTerminalService The Stripe Terminal service instance.
 	 */
 	protected $stripe_service;
@@ -49,12 +58,12 @@ class Gateway extends WC_Payment_Gateway {
 		// Save settings hook.
 		add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
 		add_action( 'admin_init', array( $this, 'enforce_https_for_live_mode' ) );
-		
+
 		// Enqueue scripts on checkout pages.
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_payment_scripts' ) );
-		
-		// Initialize the Stripe service
-		$this->init_stripe_service();
+
+			// Initialize the Stripe service.
+			$this->init_stripe_service();
 	}
 
 	/**
@@ -205,24 +214,27 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-		// Check for Stripe Terminal payment metadata
+			// Check for Stripe Terminal payment metadata.
 		$payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
 		$charge_id         = $order->get_meta( '_stripe_terminal_charge_id' );
 		$payment_status    = $order->get_meta( '_stripe_terminal_payment_status' );
 
 		if ( $payment_intent_id && $charge_id && 'succeeded' === $payment_status ) {
-			// We have successful payment metadata, complete the order
-			$order->set_transaction_id( $charge_id );
-			$order->payment_complete( $charge_id );
-			
-			// Add order note
-			$order->add_order_note(
-				\sprintf(
-					__( 'Order processed via Stripe Terminal. Payment Intent: %s, Charge: %s', 'stripe-terminal-for-woocommerce' ),
-					$payment_intent_id,
-					$charge_id
-				)
-			);
+				// We have successful payment metadata, complete the order.
+				$order->set_transaction_id( $charge_id );
+				$order->payment_complete( $charge_id );
+
+				// Add order note.
+				/* translators: 1: Payment intent ID, 2: charge ID. */
+				$order_note = __( 'Order processed via Stripe Terminal. Payment Intent: %1$s, Charge: %2$s', 'stripe-terminal-for-woocommerce' );
+
+				$order->add_order_note(
+					\sprintf(
+						$order_note,
+						$payment_intent_id,
+						$charge_id
+					)
+				);
 
 			// Return thank-you page URL.
 			return array(
@@ -231,22 +243,25 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-		// No payment metadata found, check Stripe API directly
+			// No payment metadata found, check Stripe API directly.
 		if ( $this->stripe_service ) {
 			$status_result = $this->stripe_service->check_payment_status_from_stripe( $order );
-			
+
 			if ( ! is_wp_error( $status_result ) && isset( $status_result['charge'] ) && $status_result['charge']['paid'] ) {
-				// Found successful payment in Stripe, complete the order
+				// Found successful payment in Stripe, complete the order.
 				$charge_id         = $status_result['charge']['id'];
 				$payment_intent_id = $status_result['payment_intent']['id'];
-				
+
 				$order->set_transaction_id( $charge_id );
 				$order->payment_complete( $charge_id );
-				
-				// Add order note
+
+				// Add order note.
+				/* translators: 1: Payment intent ID, 2: charge ID. */
+				$order_note = __( 'Order processed via Stripe Terminal (API check). Payment Intent: %1$s, Charge: %2$s', 'stripe-terminal-for-woocommerce' );
+
 				$order->add_order_note(
 					\sprintf(
-						__( 'Order processed via Stripe Terminal (API check). Payment Intent: %s, Charge: %s', 'stripe-terminal-for-woocommerce' ),
+						$order_note,
 						$payment_intent_id,
 						$charge_id
 					)
@@ -260,8 +275,8 @@ class Gateway extends WC_Payment_Gateway {
 			}
 		}
 
-		// No payment found, show error
-		wc_add_notice( __( 'Payment error: No successful payment found for this order.', 'stripe-terminal-for-woocommerce' ), 'error' );
+			// No payment found, show error.
+			wc_add_notice( __( 'Payment error: No successful payment found for this order.', 'stripe-terminal-for-woocommerce' ), 'error' );
 
 		return array(
 			'result' => 'failure',
@@ -274,12 +289,13 @@ class Gateway extends WC_Payment_Gateway {
 	public function payment_fields(): void {
 		global $wp;
 
-		$description = apply_filters( 'woocommerce_gateway_description', $this->get_option( 'description' ), $this->id );
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WooCommerce core hook.
+			$description = apply_filters( 'woocommerce_gateway_description', $this->get_option( 'description' ), $this->id );
 		if ( $description ) {
 			echo '<p>' . wp_kses_post( $description ) . '</p>';
 		}
 
-		// Show loading state initially - readers will be loaded via AJAX
+			// Show loading state initially - readers will be loaded via AJAX.
 		echo '<div class="stripe-terminal-loading">';
 		echo '<p>' . esc_html__( 'Loading Stripe Terminal...', 'stripe-terminal-for-woocommerce' ) . '</p>';
 		echo '</div>';
@@ -289,25 +305,25 @@ class Gateway extends WC_Payment_Gateway {
 			// Extract the order ID from the URL.
 			$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
 			$order    = wc_get_order( $order_id );
-			$amount   = $order ? $order->get_total() * 100 : 0; // Convert to cents
+				$amount   = $order ? $order->get_total() * 100 : 0; // Convert to cents.
 		} else {
 			// Default behavior for the main checkout page.
 			$order_id = null;
-			$amount   = WC()->cart ? WC()->cart->get_total( 'raw' ) * 100 : 0; // Convert to cents
+			$amount   = WC()->cart ? WC()->cart->get_total( 'raw' ) * 100 : 0; // Convert to cents.
 		}
 
-		// Payment interface with reader management (hidden initially, shown after AJAX load)
-		echo '<div class="stripe-terminal-payment-section" style="display: none;">';
+			// Payment interface with reader management (hidden initially, shown after AJAX load).
+			echo '<div class="stripe-terminal-payment-section" style="display: none;">';
 
-		// Readers list (hidden by default)
-		echo '<div class="stripe-terminal-readers-section" style="display: none;">';
-		echo '<h4>' . esc_html__( 'Available Readers', 'stripe-terminal-for-woocommerce' ) . '</h4>';
-		echo '<div class="stripe-terminal-readers-list">';
-		// Readers will be populated via AJAX
-		echo '</div>';
-		echo '</div>';
+			// Readers list (hidden by default).
+			echo '<div class="stripe-terminal-readers-section" style="display: none;">';
+			echo '<h4>' . esc_html__( 'Available Readers', 'stripe-terminal-for-woocommerce' ) . '</h4>';
+			echo '<div class="stripe-terminal-readers-list">';
+			// Readers will be populated via AJAX.
+			echo '</div>';
+			echo '</div>';
 
-		// Connected reader info (hidden by default)
+			// Connected reader info (hidden by default).
 		echo '<div class="stripe-terminal-connected-reader" style="display: none;">';
 		echo '<div class="stripe-terminal-connected-header">';
 		echo '<h4>' . esc_html__( 'Connected Reader', 'stripe-terminal-for-woocommerce' ) . '</h4>';
@@ -316,7 +332,7 @@ class Gateway extends WC_Payment_Gateway {
 		echo '<div class="stripe-terminal-reader-details"></div>';
 		echo '</div>';
 
-		// MOTO toggle (visibility controlled by JS based on reader compatibility)
+			// MOTO toggle (visibility controlled by JS based on reader compatibility).
 		if ( 'yes' === $this->get_option( 'enable_moto' ) ) {
 			echo '<div class="stripe-terminal-moto-toggle" style="display: none;">';
 			echo '<label class="stripe-terminal-moto-label">';
@@ -329,12 +345,12 @@ class Gateway extends WC_Payment_Gateway {
 			echo '</div>';
 		}
 
-		// Payment buttons (hidden until reader is connected)
+			// Payment buttons (hidden until reader is connected).
 		echo '<div class="stripe-terminal-payment-buttons" style="display: none;">';
 		echo '<button type="button" class="stripe-terminal-pay-button" data-order-id="' . esc_attr( $order_id ) . '" data-amount="' . esc_attr( $amount ) . '">';
 		echo esc_html__( 'Pay with Terminal', 'stripe-terminal-for-woocommerce' );
 		echo '</button>';
-		
+
 		echo '<button type="button" class="stripe-terminal-cancel-button" style="display: none;">';
 		echo esc_html__( 'Cancel Payment', 'stripe-terminal-for-woocommerce' );
 		echo '</button>';
@@ -346,14 +362,14 @@ class Gateway extends WC_Payment_Gateway {
 		echo '<button type="button" class="stripe-terminal-simulate-button" data-order-id="' . esc_attr( $order_id ) . '" style="display: none;">';
 		echo esc_html__( 'Simulate Payment', 'stripe-terminal-for-woocommerce' );
 		echo '</button>';
-		
+
 		echo '<button type="button" class="stripe-terminal-check-status-button" data-order-id="' . esc_attr( $order_id ) . '">';
 		echo esc_html__( 'Check Payment Status', 'stripe-terminal-for-woocommerce' );
 		echo '</button>';
-		
+
 		echo '</div>';
 
-		// Logging area (moved to bottom)
+			// Logging area (moved to bottom).
 		echo '<div class="stripe-terminal-logging-section">';
 		echo '<div class="stripe-terminal-logging-header">';
 		echo '<h4>' . esc_html__( 'Logs', 'stripe-terminal-for-woocommerce' ) . '</h4>';
@@ -367,7 +383,6 @@ class Gateway extends WC_Payment_Gateway {
 		echo '</div>';
 		echo '</div>';
 
-
 		echo '</div>';
 
 		// Fallback message for users without JavaScript enabled.
@@ -378,14 +393,14 @@ class Gateway extends WC_Payment_Gateway {
 	 * Enqueue payment scripts on checkout pages.
 	 */
 	public function enqueue_payment_scripts(): void {
-		// Only load on checkout pages or when our gateway is selected
+			// Only load on checkout pages or when our gateway is selected.
 		if ( ! is_checkout() && ! is_checkout_pay_page() ) {
 			return;
 		}
 
 		global $wp;
 
-		// Enqueue the payment CSS
+			// Enqueue the payment CSS.
 		wp_enqueue_style(
 			'stripe-terminal-payment',
 			STWC_PLUGIN_URL . 'assets/css/payment.css',
@@ -393,7 +408,7 @@ class Gateway extends WC_Payment_Gateway {
 			STWC_VERSION
 		);
 
-		// Enqueue the payment script
+			// Enqueue the payment script.
 		wp_enqueue_script(
 			'stripe-terminal-payment',
 			STWC_PLUGIN_URL . 'assets/js/payment.js',
@@ -402,7 +417,7 @@ class Gateway extends WC_Payment_Gateway {
 			true
 		);
 
-		// Check if we're on the order-pay page to get order ID and key
+			// Check if we're on the order-pay page to get order ID and key.
 		$order_id  = null;
 		$order_key = null;
 		if ( is_checkout_pay_page() ) {
@@ -413,12 +428,13 @@ class Gateway extends WC_Payment_Gateway {
 			}
 		}
 
-		// Localize script data for payment interface
+			// Localize script data for payment interface.
 		wp_localize_script(
 			'stripe-terminal-payment',
 			'stripeTerminalData',
 			array(
 				'ajaxUrl'  => admin_url( 'admin-ajax.php' ),
+				'nonce'    => wp_create_nonce( 'stripe_terminal_nonce' ),
 				'orderId'  => $order_id,
 				'orderKey' => $order_key,
 				'enableMoto' => 'yes' === $this->get_option( 'enable_moto' ),
@@ -522,10 +538,14 @@ class Gateway extends WC_Payment_Gateway {
 
 			return '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
 					( $exists
-							? __( 'Stripe webhook active.', 'stripe-terminal-for-woocommerce' )
-							: \sprintf( __( 'Stripe webhook successfully created: %s', 'stripe-terminal-for-woocommerce' ), esc_html( $webhook_url ) )
-					) .
-					'</span>';
+								? __( 'Stripe webhook active.', 'stripe-terminal-for-woocommerce' )
+								: \sprintf(
+									/* translators: %s: Stripe webhook URL. */
+									__( 'Stripe webhook successfully created: %s', 'stripe-terminal-for-woocommerce' ),
+									esc_html( $webhook_url )
+								)
+						) .
+						'</span>';
 		} catch ( \Exception $e ) {
 			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
 					__( 'Error setting Stripe webhook: ', 'stripe-terminal-for-woocommerce' ) .
@@ -542,11 +562,10 @@ class Gateway extends WC_Payment_Gateway {
 	 *
 	 * @return string The custom order received URL.
 	 */
-	public function order_received_url( string $order_received_url, \WC_Abstract_Order $order ): string {
+	public function order_received_url( string $order_received_url, WC_Abstract_Order $order ): string {
 		global $wp;
 
-
-		// check is pos
+		// Check whether this is a POS request.
 		if ( ! woocommerce_pos_request() || ! isset( $wp->query_vars['order-pay'] ) ) {
 			return $order_received_url;
 		}
@@ -557,7 +576,6 @@ class Gateway extends WC_Payment_Gateway {
 			),
 			get_home_url( null, '/wcpos-checkout/order-received/' . $order->get_id() )
 		);
-
 
 		return $redirect;
 	}
@@ -587,7 +605,7 @@ class Gateway extends WC_Payment_Gateway {
 			return false;
 		}
 
-		// Test the API key by trying to list locations
+			// Test the API key by trying to list locations.
 		try {
 			$result = $this->stripe_service->list_locations();
 
@@ -610,7 +628,7 @@ class Gateway extends WC_Payment_Gateway {
 		}
 
 		$result = $this->stripe_service->get_reader_status();
-		
+
 		if ( is_wp_error( $result ) ) {
 			Logger::log( 'Stripe Terminal Gateway - Failed to get readers: ' . $result->get_error_message() );
 
@@ -626,24 +644,24 @@ class Gateway extends WC_Payment_Gateway {
 	 * @param array $reader The reader data from Stripe.
 	 */
 	private function render_reader_card( array $reader ): void {
-		$reader_id     = $reader['id']            ?? '';
-		$label         = $reader['label']         ?? $reader_id;
-		$device_type   = $reader['device_type']   ?? 'unknown';
-		$status        = $reader['status']        ?? 'unknown';
+		$reader_id     = $reader['id'] ?? '';
+		$label         = $reader['label'] ?? $reader_id;
+		$device_type   = $reader['device_type'] ?? 'unknown';
+		$status        = $reader['status'] ?? 'unknown';
 		$serial_number = $reader['serial_number'] ?? '';
-		$last_seen     = $reader['last_seen_at']  ?? null;
+		$last_seen     = $reader['last_seen_at'] ?? null;
 
-		// Format last seen time
+			// Format last seen time.
 		$last_seen_text = '';
 		if ( $last_seen ) {
 			$last_seen_text = \sprintf(
-				// translators: %s: Human readable time
+					/* translators: %s: Human readable time. */
 				__( 'Last seen: %s', 'stripe-terminal-for-woocommerce' ),
 				human_time_diff( $last_seen )
 			);
 		}
 
-		// Status indicator
+			// Status indicator.
 		$status_class = 'offline';
 		$status_text  = __( 'Offline', 'stripe-terminal-for-woocommerce' );
 		if ( 'online' === $status ) {
@@ -656,7 +674,7 @@ class Gateway extends WC_Payment_Gateway {
 		echo '<h5 class="stripe-terminal-reader-label">' . esc_html( $label ) . '</h5>';
 		echo '<span class="stripe-terminal-reader-status ' . esc_attr( $status_class ) . '">' . esc_html( $status_text ) . '</span>';
 		echo '</div>';
-		
+
 		echo '<div class="stripe-terminal-reader-details">';
 		echo '<p><strong>' . esc_html__( 'Device:', 'stripe-terminal-for-woocommerce' ) . '</strong> ' . esc_html( $device_type ) . '</p>';
 		if ( $serial_number ) {
@@ -681,9 +699,12 @@ class Gateway extends WC_Payment_Gateway {
 		echo '</div>';
 	}
 
-	/**
-	 * @param mixed $mode
-	 */
+		/**
+		 * Check the configured key status for the requested mode.
+		 *
+		 * @param mixed $mode Key mode to inspect, typically live or test.
+		 * @return string
+		 */
 	private function check_key_status( $mode = 'live' ) {
 		$api_key = $this->get_option( 'live' === $mode ? 'secret_key' : 'test_secret_key' );
 
@@ -767,12 +788,13 @@ class Gateway extends WC_Payment_Gateway {
 
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
-			// Fetch locations.
-			$locations = \Stripe\Terminal\Location::all();
+				// Fetch locations.
+				$locations = \Stripe\Terminal\Location::all();
 
 			if ( empty( $locations->data ) ) {
 				return array(
 					\sprintf(
+						/* translators: %s: Stripe documentation URL for setting up locations. */
 						__( 'No Stripe Terminal locations found. Please <a href="%s" target="_blank">set up locations</a> in your Stripe Dashboard.', 'stripe-terminal-for-woocommerce' ),
 						'https://docs.stripe.com/terminal/fleet/register-readers'
 					),
@@ -794,17 +816,22 @@ class Gateway extends WC_Payment_Gateway {
 					$address['country']
 				);
 
-				$readers_info = empty( $readers->data )
-					? __( 'No readers associated with this location.', 'stripe-terminal-for-woocommerce' )
-					: \sprintf( __( '%d reader(s) available.', 'stripe-terminal-for-woocommerce' ), \count( $readers->data ) );
+					$readers_info = empty( $readers->data )
+						? __( 'No readers associated with this location.', 'stripe-terminal-for-woocommerce' )
+						: \sprintf(
+							/* translators: %d: Number of readers available for the location. */
+							__( '%d reader(s) available.', 'stripe-terminal-for-woocommerce' ),
+							\count( $readers->data )
+						);
 
-				$location_list[] = \sprintf(
-					__( '<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s', 'stripe-terminal-for-woocommerce' ),
-					esc_html( $location->display_name ),
-					esc_html( $location->id ),
-					esc_html( $formatted_address ),
-					esc_html( $readers_info )
-				);
+					$location_list[] = \sprintf(
+						/* translators: 1: Location display name, 2: location ID, 3: formatted address, 4: readers summary. */
+						__( '<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s', 'stripe-terminal-for-woocommerce' ),
+						esc_html( $location->display_name ),
+						esc_html( $location->id ),
+						esc_html( $formatted_address ),
+						esc_html( $readers_info )
+					);
 			}
 
 			return $location_list;

@@ -1,6 +1,8 @@
 <?php
 /**
  * Logger for the Stripe Terminal integration.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
@@ -12,9 +14,26 @@ namespace WCPOS\WooCommercePOS\StripeTerminal;
  */
 class Logger {
 	public const WC_LOG_FILENAME = 'stripe-terminal-for-woocommerce';
+
+	/**
+	 * WooCommerce logger instance.
+	 *
+	 * @var null|\WC_Logger
+	 */
 	public static $logger;
+
+	/**
+	 * Active log level.
+	 *
+	 * @var null|string
+	 */
 	public static $log_level;
 
+	/**
+	 * Set the active log level.
+	 *
+	 * @param string $level Log level string.
+	 */
 	public static function set_log_level( $level ): void {
 		self::$log_level = $level;
 	}
@@ -22,7 +41,7 @@ class Logger {
 	/**
 	 * Utilize WC logger class.
 	 *
-	 * @param mixed $message
+	 * @param mixed $message Message to log.
 	 */
 	public static function log( $message ): void {
 		if ( ! class_exists( 'WC_Logger' ) ) {

@@ -61,17 +61,21 @@ class AjaxHandlerTest extends TestCase {
 					// finds an API key — the service stays null.
 					return array();
 				},
-				'absint'              => function ( $val ) {
-					return abs( (int) $val );
-				},
-				'sanitize_text_field' => function ( $str ) {
-					return $str;
-				},
-				'__'                  => function ( $text ) {
-					return $text;
-				},
-			)
-		);
+					'absint'              => function ( $val ) {
+						return abs( (int) $val );
+					},
+					'check_ajax_referer'  => true,
+					'sanitize_text_field' => function ( $str ) {
+						return $str;
+					},
+					'__'                  => function ( $text ) {
+						return $text;
+					},
+					'wp_unslash'          => function ( $value ) {
+						return $value;
+					},
+				)
+			);
 
 		// Throw a sentinel Error (not Exception) so we can capture the
 		// argument and escape the handler method without the catch block

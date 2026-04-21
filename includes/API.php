@@ -2,6 +2,8 @@
 /**
  * Stripe Terminal API
  * Handles the API for Stripe Terminal.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
@@ -162,9 +164,9 @@ class API extends Abstracts\APIController {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 			$params            = $request->get_json_params();
-			$label             = $params['label']            ?? null;
+			$label             = $params['label'] ?? null;
 			$registration_code = $params['registrationCode'] ?? null;
-			$location          = $params['location']         ?? null;
+			$location          = $params['location'] ?? null;
 
 			if ( empty( $label ) || empty( $registration_code ) || empty( $location ) ) {
 				return new WP_Error(
@@ -260,7 +262,7 @@ class API extends Abstracts\APIController {
 
 			$params            = $request->get_json_params();
 			$payment_method_id = $params['payment_method_id'] ?? null;
-			$customer_id       = $params['customer_id']       ?? null;
+			$customer_id       = $params['customer_id'] ?? null;
 
 			if ( empty( $payment_method_id ) || empty( $customer_id ) ) {
 				return new WP_Error(
@@ -289,7 +291,7 @@ class API extends Abstracts\APIController {
 	public function capture_payment_intent( WP_REST_Request $request ) {
 		try {
 			$params         = $request->get_json_params();
-			$order_id       = $params['order_id']       ?? null;
+			$order_id       = $params['order_id'] ?? null;
 			$payment_intent = $params['payment_intent'] ?? null;
 
 			if ( empty( $order_id ) || empty( $payment_intent ) ) {
@@ -403,6 +405,8 @@ class API extends Abstracts\APIController {
 	 * Retrieve the Stripe API key from WooCommerce settings.
 	 *
 	 * @return string The Stripe API key, or an error.
+	 *
+	 * @throws Exception When the Stripe API key is not configured.
 	 */
 	private function get_stripe_api_key() {
 		try {
@@ -438,7 +442,7 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
-		// Save payment metadata instead of completing the order immediately
+		// Save payment metadata instead of completing the order immediately.
 		$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $payment_intent->amount );
@@ -453,10 +457,13 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();
 
-		// Add detailed order note
+		// Add detailed order note.
+		/* translators: 1: Payment intent ID, 2: payment amount, 3: payment currency, 4: payment status. */
+		$order_note = __( 'Stripe Terminal: Payment Intent succeeded - ID: %1$s, Amount: %2$s %3$s, Status: %4$s. Order ready for processing.', 'stripe-terminal-for-woocommerce' );
+
 		$order->add_order_note(
 			\sprintf(
-				__( 'Stripe Terminal: Payment Intent succeeded - ID: %s, Amount: %s %s, Status: %s. Order ready for processing.', 'stripe-terminal-for-woocommerce' ),
+				$order_note,
 				$payment_intent->id,
 				number_format( $payment_intent->amount / 100, 2 ),
 				strtoupper( $payment_intent->currency ),
@@ -474,7 +481,7 @@ class API extends Abstracts\APIController {
 	 * @param object $charge The charge object.
 	 */
 	private function update_order_with_charge( $charge ): void {
-		// Get the payment intent from the charge to find the order
+		// Get the payment intent from the charge to find the order.
 		$payment_intent_id = $charge->payment_intent ?? null;
 		if ( ! $payment_intent_id ) {
 			Logger::log( 'Charge webhook: No payment_intent found in charge', 'warning' );
@@ -482,7 +489,7 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
-		// Retrieve the payment intent to get order metadata
+		// Retrieve the payment intent to get order metadata.
 		try {
 			\Stripe\Stripe::setApiKey( Settings::get_secret_key() );
 			$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
@@ -506,7 +513,7 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
-		// Save payment metadata instead of completing the order immediately
+		// Save payment metadata instead of completing the order immediately.
 		$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
 		$order->update_meta_data( '_stripe_terminal_charge_id', $charge->id );
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
@@ -522,10 +529,13 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();
 
-		// Add detailed order note
+		// Add detailed order note.
+		/* translators: 1: Payment intent ID, 2: charge ID, 3: payment amount, 4: payment currency, 5: payment status. */
+		$order_note = __( 'Stripe Terminal: Charge succeeded - Payment Intent: %1$s, Charge: %2$s, Amount: %3$s %4$s, Status: %5$s. Order ready for processing.', 'stripe-terminal-for-woocommerce' );
+
 		$order->add_order_note(
 			\sprintf(
-				__( 'Stripe Terminal: Charge succeeded - Payment Intent: %s, Charge: %s, Amount: %s %s, Status: %s. Order ready for processing.', 'stripe-terminal-for-woocommerce' ),
+				$order_note,
 				$payment_intent_id,
 				$charge->id,
 				number_format( $charge->amount / 100, 2 ),

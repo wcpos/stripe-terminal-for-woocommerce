@@ -1,6 +1,8 @@
 <?php
 /**
  * Provides shared Stripe error-handling functionality.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal\Abstracts
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Abstracts;
@@ -97,8 +99,11 @@ trait StripeErrorHandler {
 
 			// For admin notices, return a string.
 			if ( 'admin' === $context ) {
+				/* translators: 1: Stripe error code, 2: Stripe error message. */
+				$admin_message = __( 'Stripe error (%1$s): %2$s', 'stripe-terminal-for-woocommerce' );
+
 				return \sprintf(
-					__( 'Stripe error (%1$s): %2$s', 'stripe-terminal-for-woocommerce' ),
+					$admin_message,
 					esc_html( $error_data['stripe_code'] ?? 'unknown' ),
 					esc_html( $e->getMessage() )
 				);

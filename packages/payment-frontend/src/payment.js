@@ -128,6 +128,7 @@ class StripeTerminalPayment {
       const isMoto = jQuery('.stripe-terminal-moto-checkbox').is(':checked');
       const ajaxData = {
         action: 'stripe_terminal_create_payment_intent',
+        nonce: this.nonce,
         order_id: orderId,
         amount: amount,
         reader_id: this.connectedReader.id,
@@ -172,6 +173,7 @@ class StripeTerminalPayment {
     return new Promise((resolve, reject) => {
       const ajaxData = {
         action: 'stripe_terminal_confirm_payment',
+        nonce: this.nonce,
         payment_intent_id: paymentIntentId,
         order_id: orderId
       };
@@ -214,6 +216,7 @@ class StripeTerminalPayment {
     return new Promise((resolve, reject) => {
       const ajaxData = {
         action: 'stripe_terminal_cancel_payment',
+        nonce: this.nonce,
         payment_intent_id: paymentIntentId,
         order_id: orderId,
         reader_id: this.activePaymentReaderId || (this.connectedReader ? this.connectedReader.id : '')
@@ -271,6 +274,7 @@ class StripeTerminalPayment {
           type: 'POST',
           data: {
             action: 'stripe_terminal_check_payment_status',
+            nonce: this.nonce,
             order_id: orderId,
             order_key: this.config.orderKey
           }
@@ -356,6 +360,7 @@ class StripeTerminalPayment {
       type: 'POST',
       data: {
         action: 'stripe_terminal_retry_payment',
+        nonce: this.nonce,
         order_id: orderId,
         reader_id: this.activePaymentReaderId,
         order_key: this.config.orderKey,
@@ -540,6 +545,7 @@ class StripeTerminalPayment {
       type: 'POST',
       data: {
         action: 'stripe_terminal_simulate_payment',
+        nonce: this.nonce,
         reader_id: this.connectedReader.id,
         order_id: orderId,
         order_key: this.config.orderKey
@@ -586,6 +592,7 @@ class StripeTerminalPayment {
       type: 'POST',
       data: {
         action: 'stripe_terminal_check_stripe_status',
+        nonce: this.nonce,
         order_id: orderId,
         order_key: this.config.orderKey
       }
@@ -795,7 +802,8 @@ class StripeTerminalPayment {
         url: this.ajaxUrl,
         type: 'POST',
         data: {
-          action: 'stripe_terminal_validate_service'
+          action: 'stripe_terminal_validate_service',
+          nonce: this.nonce
         }
       });
       
@@ -812,7 +820,8 @@ class StripeTerminalPayment {
         url: this.ajaxUrl,
         type: 'POST',
         data: {
-          action: 'stripe_terminal_get_readers'
+          action: 'stripe_terminal_get_readers',
+          nonce: this.nonce
         }
       });
       
