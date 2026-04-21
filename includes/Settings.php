@@ -1,6 +1,8 @@
 <?php
 /**
  * Settings for the Stripe Terminal integration.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;

@@ -1,4 +1,9 @@
 <?php
+/**
+ * Stripe Terminal service layer.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal
+ */
 
 namespace WCPOS\WooCommercePOS\StripeTerminal;
 
@@ -86,20 +91,21 @@ class StripeTerminalService {
 			$amount               = $amount ?? CurrencyConverter::convert_to_stripe_amount( $order->get_total(), $order->get_currency() );
 			$currency             = strtolower( $order->get_currency() );
 			$description          = \sprintf( 'Order #%s', $order_id );
-			
-			// Check if currency is supported by Stripe Terminal
+
+				// Check if currency is supported by Stripe Terminal.
 			$supported_currencies = $this->get_supported_currencies();
 			if ( ! \in_array( $currency, $supported_currencies, true ) ) {
 				return new WP_Error(
 					'unsupported_currency',
-					\sprintf( 'Currency %s is not supported by Stripe Terminal. Supported currencies: %s',
+					\sprintf(
+						'Currency %s is not supported by Stripe Terminal. Supported currencies: %s',
 						strtoupper( $currency ),
 						implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
 					),
 					array( 'status' => 400 )
 				);
 			}
-			
+
 			if ( $moto ) {
 				$payment_method_types = array( 'card' );
 			} else {
@@ -332,15 +338,15 @@ class StripeTerminalService {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
 			$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
-			
+
 			if ( 'succeeded' === $payment_intent->status ) {
-				// Payment already succeeded, update the order
+					// Payment already succeeded, update the order.
 				$this->update_order_from_payment_intent( $order, $payment_intent );
 
 				return $payment_intent->toArray();
 			}
 
-			// If payment intent is still in progress, return current status
+				// If payment intent is still in progress, return current status.
 			return $payment_intent->toArray();
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'confirm_payment_intent_error' );
@@ -360,7 +366,7 @@ class StripeTerminalService {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
 			$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
-			
+
 			if ( 'requires_payment_method' === $payment_intent->status || 'requires_confirmation' === $payment_intent->status ) {
 				$payment_intent->cancel();
 			}
@@ -527,7 +533,7 @@ class StripeTerminalService {
 
 				return $reader->toArray();
 			}
-			// Get all readers
+				// Get all readers.
 			$readers = \Stripe\Terminal\Reader::all();
 
 			return $readers->toArray();
@@ -548,7 +554,7 @@ class StripeTerminalService {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
-			// Verify webhook signature
+				// Verify webhook signature.
 			$webhook_secret = $this->get_webhook_secret();
 			if ( ! $webhook_secret ) {
 				return new WP_Error(
@@ -564,7 +570,7 @@ class StripeTerminalService {
 				$webhook_secret
 			);
 
-			// Handle the event
+				// Handle the event.
 			switch ( $event->type ) {
 				case 'payment_intent.succeeded':
 					return $this->handle_payment_intent_succeeded( $event->data->object );
@@ -595,29 +601,31 @@ class StripeTerminalService {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
 			$order_id = $order->get_id();
-			
-			// First, try to get payment intent from order transaction ID
-			$transaction_id = $order->get_transaction_id();
+
+				// First, try to get payment intent from order transaction ID.
+				$transaction_id = $order->get_transaction_id();
 			if ( $transaction_id ) {
 				try {
-					// Check if it's a payment intent ID
+					// Check if it's a payment intent ID.
 					if ( 0 === strpos( $transaction_id, 'pi_' ) ) {
 						$payment_intent = \Stripe\PaymentIntent::retrieve( $transaction_id );
 					} else {
-						// It might be a charge ID, get the payment intent from the charge
+						// It might be a charge ID, get the payment intent from the charge.
 						$charge         = \Stripe\Charge::retrieve( $transaction_id );
 						$payment_intent = \Stripe\PaymentIntent::retrieve( $charge->payment_intent );
 					}
 				} catch ( \Stripe\Exception\InvalidRequestException $e ) {
-					// Transaction ID not found in Stripe, continue with search
+					Logger::log( 'Stripe Terminal manual status check: transaction ID not found in Stripe, falling back to metadata search.' );
 				}
 			}
 
-			// If we don't have a payment intent yet, search for it by order metadata
+				// If we don't have a payment intent yet, search for it by order metadata.
 			if ( ! isset( $payment_intent ) ) {
-				$payment_intents = \Stripe\PaymentIntent::all( array(
-					'limit' => 100,
-				) );
+				$payment_intents = \Stripe\PaymentIntent::all(
+					array(
+						'limit' => 100,
+					)
+				);
 
 				foreach ( $payment_intents->data as $pi ) {
 					if ( isset( $pi->metadata->order_id ) && $pi->metadata->order_id == $order_id ) {
@@ -636,21 +644,23 @@ class StripeTerminalService {
 				);
 			}
 
-			// Get the latest charge for this payment intent
-			$charges = \Stripe\Charge::all( array(
-				'payment_intent' => $payment_intent->id,
-				'limit'          => 1,
-			) );
+				// Get the latest charge for this payment intent.
+			$charges = \Stripe\Charge::all(
+				array(
+					'payment_intent' => $payment_intent->id,
+					'limit'          => 1,
+				)
+			);
 
 			$latest_charge = null;
 			if ( ! empty( $charges->data ) ) {
 				$latest_charge = $charges->data[0];
 			}
 
-			// If we found a successful charge but the order isn't paid yet, save metadata
-			$metadata_saved = false;
+				// If we found a successful charge but the order isn't paid yet, save metadata.
+				$metadata_saved = false;
 			if ( $latest_charge && $latest_charge->paid && ! $order->is_paid() ) {
-				// Save payment metadata instead of completing the order
+				// Save payment metadata instead of completing the order.
 				$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 				$order->update_meta_data( '_stripe_terminal_charge_id', $latest_charge->id );
 				$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
@@ -666,10 +676,13 @@ class StripeTerminalService {
 				$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 				$order->save();
 
-				// Add order note
+				// Add order note.
+				/* translators: 1: Payment intent ID, 2: charge ID. */
+				$order_note = __( 'Stripe Terminal payment detected via manual check. Payment Intent: %1$s, Charge: %2$s. Order ready for processing.', 'stripe-terminal-for-woocommerce' );
+
 				$order->add_order_note(
 					\sprintf(
-						__( 'Stripe Terminal payment detected via manual check. Payment Intent: %s, Charge: %s. Order ready for processing.', 'stripe-terminal-for-woocommerce' ),
+						$order_note,
 						$payment_intent->id,
 						$latest_charge->id
 					)
@@ -678,15 +691,15 @@ class StripeTerminalService {
 				$metadata_saved = true;
 			}
 
-			// Get the return URL if payment is successful
-			$return_url = null;
+				// Get the return URL if payment is successful.
+				$return_url = null;
 			if ( $order->is_paid() ) {
-				// We need to get the gateway instance to call order_received_url
+				// We need to get the gateway instance to call order_received_url.
 				$gateway = WC()->payment_gateways()->payment_gateways()['stripe_terminal_for_woocommerce'] ?? null;
 				if ( $gateway ) {
-					// Get the default return URL first
+					// Get the default return URL first.
 					$default_url = $gateway->get_return_url( $order );
-					// Then apply our custom POS logic
+					// Then apply our custom POS logic.
 					$return_url = $gateway->order_received_url( $default_url, $order );
 				}
 			}
@@ -727,7 +740,7 @@ class StripeTerminalService {
 	 */
 	private function handle_payment_intent_succeeded( \Stripe\PaymentIntent $payment_intent ) {
 		$order_id = $payment_intent->metadata->order_id ?? null;
-		
+
 		if ( ! $order_id ) {
 			return new WP_Error(
 				'missing_order_id',
@@ -745,10 +758,10 @@ class StripeTerminalService {
 			);
 		}
 
-		// Update order from payment intent
-		$this->update_order_from_payment_intent( $order, $payment_intent );
+			// Update order from payment intent.
+			$this->update_order_from_payment_intent( $order, $payment_intent );
 
-		// Complete the payment
+			// Complete the payment.
 		$order->payment_complete( $payment_intent->id );
 
 		return array(
@@ -766,9 +779,9 @@ class StripeTerminalService {
 	 * @return array|WP_Error The result or error.
 	 */
 	private function handle_charge_succeeded( \Stripe\Charge $charge ) {
-		// Get the payment intent from the charge
+			// Get the payment intent from the charge.
 		$payment_intent_id = $charge->payment_intent;
-		
+
 		if ( ! $payment_intent_id ) {
 			return new WP_Error(
 				'missing_payment_intent',
@@ -777,10 +790,10 @@ class StripeTerminalService {
 			);
 		}
 
-		// Retrieve the payment intent to get order metadata
+			// Retrieve the payment intent to get order metadata.
 		$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
 		$order_id       = $payment_intent->metadata->order_id ?? null;
-		
+
 		if ( ! $order_id ) {
 			return new WP_Error(
 				'missing_order_id',
@@ -798,7 +811,7 @@ class StripeTerminalService {
 			);
 		}
 
-		// Double-check that the order needs payment
+			// Double-check that the order needs payment.
 		if ( $order->is_paid() ) {
 			return array(
 				'success'  => true,
@@ -807,8 +820,8 @@ class StripeTerminalService {
 			);
 		}
 
-		// Save payment metadata instead of completing the order
-		$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
+			// Save payment metadata instead of completing the order.
+			$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 		$order->update_meta_data( '_stripe_terminal_charge_id', $charge->id );
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $charge->amount );
@@ -823,14 +836,17 @@ class StripeTerminalService {
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		$order->save();
 
-		// Add order note
-		$order->add_order_note(
-			\sprintf(
-				__( 'Stripe Terminal payment detected via webhook. Payment Intent: %s, Charge: %s. Order ready for processing.', 'stripe-terminal-for-woocommerce' ),
-				$payment_intent->id,
-				$charge->id
-			)
-		);
+			// Add order note.
+			/* translators: 1: Payment intent ID, 2: charge ID. */
+			$order_note = __( 'Stripe Terminal payment detected via webhook. Payment Intent: %1$s, Charge: %2$s. Order ready for processing.', 'stripe-terminal-for-woocommerce' );
+
+			$order->add_order_note(
+				\sprintf(
+					$order_note,
+					$payment_intent->id,
+					$charge->id
+				)
+			);
 
 		return array(
 			'success'   => true,
@@ -849,7 +865,7 @@ class StripeTerminalService {
 	 */
 	private function handle_payment_intent_failed( \Stripe\PaymentIntent $payment_intent ) {
 		$order_id = $payment_intent->metadata->order_id ?? null;
-		
+
 		if ( ! $order_id ) {
 			return new WP_Error(
 				'missing_order_id',
@@ -867,8 +883,8 @@ class StripeTerminalService {
 			);
 		}
 
-		// Update order status to failed
-		$order->update_status( 'failed', __( 'Payment failed via Stripe Terminal.', 'stripe-terminal-for-woocommerce' ) );
+			// Update order status to failed.
+			$order->update_status( 'failed', __( 'Payment failed via Stripe Terminal.', 'stripe-terminal-for-woocommerce' ) );
 
 		return array(
 			'success'  => true,
@@ -885,10 +901,10 @@ class StripeTerminalService {
 	private function get_webhook_secret() {
 		$settings  = get_option( 'woocommerce_stripe_terminal_for_woocommerce_settings', array() );
 		$test_mode = $settings['test_mode'] ?? 'no';
-		
+
 		return 'yes' === $test_mode
 			? $settings['test_webhook_secret'] ?? null
-			: $settings['webhook_secret']      ?? null;
+			: $settings['webhook_secret'] ?? null;
 	}
 
 	/**
@@ -897,17 +913,17 @@ class StripeTerminalService {
 	 * @return array Array of supported currency codes.
 	 */
 	private function get_supported_currencies(): array {
-		// Get account information to determine region
+			// Get account information to determine region.
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 			$account = \Stripe\Account::retrieve();
-			$country = $account->country ?? 'US'; // Default to US if not available
+			$country = $account->country ?? 'US'; // Default to US if not available.
 		} catch ( Exception $e ) {
-			// If we can't get account info, default to US
+			// If we can't get account info, default to US.
 			$country = 'US';
 		}
 
-		// Return supported currencies based on country
+			// Return supported currencies based on country.
 		switch ( $country ) {
 			case 'US':
 				return array( 'usd' );
@@ -1017,7 +1033,7 @@ class StripeTerminalService {
 				return array( 'shp' );
 			case 'EUR':
 			default:
-				// For European countries and others, support EUR and common currencies
+					// For European countries and others, support EUR and common currencies.
 				return array( 'eur', 'gbp', 'chf', 'nok', 'sek', 'dkk', 'pln', 'czk', 'huf', 'ron', 'bgn', 'hrk', 'rsd', 'isk' );
 		}
 	}
