@@ -5,6 +5,7 @@
  * Version:     0.0.17
  * Author:      kilbot
  * Author URI:  https://kilbot.com/
+ * Update URI:  https://github.com/wcpos/stripe-terminal-for-woocommerce
  * License:     GPL v2 or later
  * Text Domain: stripe-terminal-for-woocommerce.
  *
