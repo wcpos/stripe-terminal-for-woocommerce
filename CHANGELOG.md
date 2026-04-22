@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.19 - 2026-04-22
+
+### Changed
+
+- Bump the plugin version to `0.0.19` for the next release
+
 ## 0.0.18 - 2026-04-21
 
 ### Changed
