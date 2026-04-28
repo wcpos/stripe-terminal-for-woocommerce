@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.20 - 2026-04-28
+
+### Fixed
+
+- Recalculate Stripe Terminal PaymentIntent amounts from the current order total so POS checkout retries after cart edits do not send stale totals to the reader
+
 ## 0.0.19 - 2026-04-22
 
 ### Changed

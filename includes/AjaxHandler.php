@@ -88,12 +88,11 @@ class AjaxHandler {
 
 			// Get and validate parameters.
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
-			$amount    = isset( $_POST['amount'] ) ? absint( $_POST['amount'] ) : 0;
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
 			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['moto'] ) ) && $this->is_moto_enabled();
 
-			if ( ! $order_id || ! $amount || ! $reader_id ) {
-				wp_send_json_error( 'Missing order ID, amount, or reader ID' );
+			if ( ! $order_id || ! $reader_id ) {
+				wp_send_json_error( 'Missing order ID or reader ID' );
 
 				return;
 			}
@@ -112,6 +111,8 @@ class AjaxHandler {
 
 				return;
 			}
+
+			$amount = Utils\CurrencyConverter::convert_to_stripe_amount( $order->get_total(), $order->get_currency() );
 
 			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
