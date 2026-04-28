@@ -87,13 +87,12 @@ class AjaxHandler {
 			}
 
 			// Get and validate parameters.
-			$order_id      = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
-			$posted_amount = isset( $_POST['amount'] ) ? absint( $_POST['amount'] ) : 0;
-			$reader_id     = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
-			$moto          = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['moto'] ) ) && $this->is_moto_enabled();
+			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
+			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['moto'] ) ) && $this->is_moto_enabled();
 
-			if ( ! $order_id || ! $posted_amount || ! $reader_id ) {
-				wp_send_json_error( 'Missing order ID, amount, or reader ID' );
+			if ( ! $order_id || ! $reader_id ) {
+				wp_send_json_error( 'Missing order ID or reader ID' );
 
 				return;
 			}

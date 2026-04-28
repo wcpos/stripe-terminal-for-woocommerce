@@ -141,17 +141,54 @@ class AjaxHandlerTest extends TestCase {
 		);
 
 		$error = $this->call_and_capture_error( 'create_payment_intent' );
-		$this->assertSame( 'Missing order ID, amount, or reader ID', $error );
+		$this->assertSame( 'Missing order ID or reader ID', $error );
 	}
 
-	public function test_create_payment_intent_rejects_missing_amount(): void {
+	public function test_create_payment_intent_allows_missing_posted_amount(): void {
 		$_POST = array(
 			'order_id'  => '42',
 			'reader_id' => 'tmr_abc123',
+			'order_key' => 'wc_order_current',
 		);
 
-		$error = $this->call_and_capture_error( 'create_payment_intent' );
-		$this->assertSame( 'Missing order ID, amount, or reader ID', $error );
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( true );
+		$order->shouldReceive( 'get_total' )->andReturn( '30.00' );
+		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+		$order->shouldReceive( 'update_meta_data' )->with( '_stripe_terminal_payment_intent_id', 'pi_current_total' )->once();
+		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
+		$order->shouldReceive( 'save' )->once();
+		$order->shouldReceive( 'add_order_note' )->twice();
+
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+
+		$mock_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$mock_service->shouldReceive( 'create_payment_intent' )
+			->with( $order, 3000, false )
+			->once()
+			->andReturn( array( 'id' => 'pi_current_total' ) );
+		$mock_service->shouldReceive( 'process_payment_intent' )
+			->with( 'tmr_abc123', 'pi_current_total', array() )
+			->once()
+			->andReturn( array( 'action' => array( 'status' => 'in_progress' ) ) );
+
+		Functions\when( 'wp_send_json_success' )->alias(
+			function ( $data = null ) {
+				throw new JsonSuccessSentinel( $data );
+			}
+		);
+
+		$handler = new AjaxHandler( $mock_service );
+
+		try {
+			$handler->create_payment_intent();
+			$this->fail( 'Expected wp_send_json_success to be called' );
+		} catch ( JsonSuccessSentinel $e ) {
+			$this->assertSame( 'pi_current_total', $e->data['payment_intent']['id'] );
+		} catch ( JsonErrorSentinel $e ) {
+			$this->fail( 'Unexpected AJAX error: ' . $e->data );
+		}
 	}
 
 	public function test_create_payment_intent_rejects_missing_reader_id(): void {
@@ -161,14 +198,14 @@ class AjaxHandlerTest extends TestCase {
 		);
 
 		$error = $this->call_and_capture_error( 'create_payment_intent' );
-		$this->assertSame( 'Missing order ID, amount, or reader ID', $error );
+		$this->assertSame( 'Missing order ID or reader ID', $error );
 	}
 
 	public function test_create_payment_intent_rejects_all_missing_params(): void {
 		$_POST = array();
 
 		$error = $this->call_and_capture_error( 'create_payment_intent' );
-		$this->assertSame( 'Missing order ID, amount, or reader ID', $error );
+		$this->assertSame( 'Missing order ID or reader ID', $error );
 	}
 
 	// -------------------------------------------------------------------
