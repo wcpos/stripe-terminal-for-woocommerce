@@ -310,8 +310,11 @@ class Gateway extends WC_Payment_Gateway {
 
 			if (
 				! is_wp_error( $status_result ) &&
-				isset( $status_result['charge'], $status_result['payment_intent'] ) &&
-				$status_result['charge']['paid'] &&
+				isset(
+					$status_result['charge']['id'],
+					$status_result['payment_intent']['id']
+				) &&
+				true === ( $status_result['charge']['paid'] ?? false ) &&
 				'succeeded' === ( $status_result['payment_intent']['status'] ?? null )
 			) {
 				// Found successful payment in Stripe, complete the order.
@@ -839,9 +842,10 @@ class Gateway extends WC_Payment_Gateway {
 			return __( 'Your Stripe live secret API key.', 'stripe-terminal-for-woocommerce' );
 		}
 
-		$status = $this->validate_api_key( $api_key, $mode );
+		$validation = $this->validate_api_key_result( $api_key, $mode );
+		$status     = $validation['message'];
 
-		if ( 0 === strpos( $api_key, 'rk_' ) ) {
+		if ( ! $validation['valid'] || $validation['restricted'] ) {
 			return $status;
 		}
 
@@ -857,26 +861,52 @@ class Gateway extends WC_Payment_Gateway {
 	 * @return string Returns success message, or an error message.
 	 */
 	private function validate_api_key( $api_key, $mode = 'live' ) {
+		$validation = $this->validate_api_key_result( $api_key, $mode );
+
+		return $validation['message'];
+	}
+
+	/**
+	 * Validate the Stripe API key and expose machine-readable status.
+	 *
+	 * @param string $api_key The Stripe API key to validate.
+	 * @param string $mode    The mode of the key (live/test).
+	 *
+	 * @return array{valid:bool,restricted:bool,message:string} Validation result.
+	 */
+	private function validate_api_key_result( $api_key, $mode = 'live' ): array {
 		// Check the API key prefix based on the mode.
 		$is_test_key = 0 === strpos( $api_key, 'sk_test_' ) || 0 === strpos( $api_key, 'rk_test_' );
 		$is_live_key = 0 === strpos( $api_key, 'sk_live_' ) || 0 === strpos( $api_key, 'rk_live_' );
 
 		if ( 'test' === $mode && ! $is_test_key ) {
-			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-			__( 'Invalid test API key. Test keys must start with sk_test_ or rk_test_.', 'stripe-terminal-for-woocommerce' ) .
-			'</span>';
+			return array(
+				'valid'      => false,
+				'restricted' => false,
+				'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+				__( 'Invalid test API key. Test keys must start with sk_test_ or rk_test_.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>',
+			);
 		}
 
 		if ( 'live' === $mode && ! $is_live_key ) {
-			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-			__( 'Invalid live API key. Live keys must start with sk_live_ or rk_live_.', 'stripe-terminal-for-woocommerce' ) .
-			'</span>';
+			return array(
+				'valid'      => false,
+				'restricted' => false,
+				'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+				__( 'Invalid live API key. Live keys must start with sk_live_ or rk_live_.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>',
+			);
 		}
 
 		if ( 0 === strpos( $api_key, 'rk_' ) ) {
-			return '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
-			__( 'Restricted Stripe API key format is valid. Ensure the key has Terminal and PaymentIntent permissions.', 'stripe-terminal-for-woocommerce' ) .
-			'</span>';
+			return array(
+				'valid'      => true,
+				'restricted' => true,
+				'message'    => '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
+				__( 'Restricted Stripe API key format is valid. Ensure the key has Terminal and PaymentIntent permissions.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>',
+			);
 		}
 
 		try {
@@ -886,24 +916,40 @@ class Gateway extends WC_Payment_Gateway {
 			$account = \Stripe\Account::retrieve();
 
 			if ( 'test' === $mode && ! $account->charges_enabled ) {
-				return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-				__( 'Test key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
-				'</span>';
+				return array(
+					'valid'      => false,
+					'restricted' => false,
+					'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+					__( 'Test key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
+					'</span>',
+				);
 			}
 
 			if ( 'live' === $mode && ! $account->charges_enabled ) {
-				return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-				__( 'Live key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
-				'</span>';
+				return array(
+					'valid'      => false,
+					'restricted' => false,
+					'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+					__( 'Live key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
+					'</span>',
+				);
 			}
 
-			return '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
-			__( 'Stripe API key is valid.', 'stripe-terminal-for-woocommerce' ) .
-			'</span>';
+			return array(
+				'valid'      => true,
+				'restricted' => false,
+				'message'    => '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
+				__( 'Stripe API key is valid.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>',
+			);
 		} catch ( \Stripe\Exception\ApiErrorException $e ) {
-			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-			$this->handle_stripe_exception( $e, 'admin' ) .
-			'</span>';
+			return array(
+				'valid'      => false,
+				'restricted' => false,
+				'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+				$this->handle_stripe_exception( $e, 'admin' ) .
+				'</span>',
+			);
 		}
 	}
 
