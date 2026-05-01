@@ -53,6 +53,7 @@ class StripeLiveIntegrationTest extends TestCase {
 		Monkey\setUp();
 		try {
 			$_POST = array(
+				'nonce'     => 'invalid_nonce',
 				'order_id'  => '42',
 				'amount'    => '1234',
 				'reader_id' => 'tmr_test_reader',
@@ -86,7 +87,7 @@ class StripeLiveIntegrationTest extends TestCase {
 				$handler->create_payment_intent();
 				$this->fail( 'Expected invalid nonce to return a JSON error.' );
 			} catch ( StripeLiveJsonErrorSentinel $error ) {
-				$this->assertSame( 'Invalid request', $error->data );
+				$this->assertSame( 'Security token expired or invalid. Please refresh or reopen the POS checkout and try again.', $error->data );
 			}
 		} finally {
 			$_POST = $original_post;

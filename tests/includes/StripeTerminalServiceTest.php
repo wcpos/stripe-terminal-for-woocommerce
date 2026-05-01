@@ -1013,6 +1013,73 @@ class StripeTerminalServiceTest extends TestCase {
 	}
 
 	/**
+	 * Test process_payment_intent clears an in-progress action for a different intent before retrying.
+	 */
+	public function test_process_payment_intent_clears_different_in_progress_action_before_processing(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$reader_with_action = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$reader_with_action->shouldReceive( 'toArray' )
+			->andReturn(
+				array(
+					'id'           => 'tmr_fake_reader',
+					'last_seen_at' => time() - 30,
+					'action'       => array(
+						'status'                 => 'in_progress',
+						'process_payment_intent' => array(
+							'payment_intent' => 'pi_old_intent',
+						),
+					),
+				)
+			);
+
+		$reader_after_cancel = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$reader_after_cancel->shouldReceive( 'toArray' )
+			->andReturn( array( 'id' => 'tmr_fake_reader', 'status' => 'online', 'action' => null ) );
+
+		$processed_reader = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$processed_reader->shouldReceive( 'toArray' )
+			->andReturn(
+				array(
+					'id'     => 'tmr_fake_reader',
+					'action' => array(
+						'status'                 => 'in_progress',
+						'process_payment_intent' => array(
+							'payment_intent' => 'pi_new_intent',
+						),
+					),
+				)
+			);
+
+		$readers_mock = Mockery::mock();
+		$readers_mock->shouldReceive( 'retrieve' )->with( 'tmr_fake_reader' )->once()->andReturn( $reader_with_action );
+		$readers_mock->shouldReceive( 'cancelAction' )->with( 'tmr_fake_reader' )->once()->andReturn( $reader_after_cancel );
+		$readers_mock->shouldReceive( 'processPaymentIntent' )
+			->with(
+				'tmr_fake_reader',
+				array(
+					'payment_intent' => 'pi_new_intent',
+					'process_config' => array( 'enable_customer_cancellation' => true ),
+				)
+			)
+			->once()
+			->andReturn( $processed_reader );
+
+		$terminal_mock          = Mockery::mock();
+		$terminal_mock->readers = $readers_mock;
+
+		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe_mock->terminal = $terminal_mock;
+
+		$service->set_stripe_client( $stripe_mock );
+
+		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_new_intent' );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 'pi_new_intent', $result['action']['process_payment_intent']['payment_intent'] );
+	}
+
+	/**
 	 * Test process_payment_intent proceeds when reader last_seen_at is recent.
 	 *
 	 * The method should pass the freshness check but will still fail on the

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.22 - 2026-05-01
+
+### Fixed
+
+- Clear stale in-progress reader actions for previous payment intents before sending a new payment to the terminal
+
 ## 0.0.21 - 2026-05-01
 
 ### Fixed
