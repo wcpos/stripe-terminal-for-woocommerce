@@ -24,6 +24,29 @@ class StripeLiveIntegrationTest extends TestCase {
 	 */
 	private $secret_key;
 
+	/**
+	 * @var string|false
+	 */
+	private $previous_secret_key_env = false;
+
+	/**
+	 * @var bool
+	 */
+	private $previous_secret_key_superglobal_exists = false;
+
+	/**
+	 * @var string|null
+	 */
+	private $previous_secret_key_superglobal;
+
+	protected function setUp(): void {
+		parent::setUp();
+
+		$this->previous_secret_key_env                = getenv( 'STWC_STRIPE_TEST_SECRET_KEY' );
+		$this->previous_secret_key_superglobal_exists = array_key_exists( 'STWC_STRIPE_TEST_SECRET_KEY', $_ENV );
+		$this->previous_secret_key_superglobal        = $this->previous_secret_key_superglobal_exists ? $_ENV['STWC_STRIPE_TEST_SECRET_KEY'] : null;
+	}
+
 	public function test_invalid_ajax_nonce_returns_invalid_request_before_payment_validation(): void {
 		$original_post = $_POST;
 
@@ -114,6 +137,24 @@ class StripeLiveIntegrationTest extends TestCase {
 
 		$this->assertStringStartsWith( 'sk_test_', $this->secret_key, 'Stripe integration tests must use a test-mode secret key.' );
 		\Stripe\Stripe::setApiKey( $this->secret_key );
+	}
+
+	protected function tearDown(): void {
+		\Stripe\Stripe::setApiKey( '' );
+
+		if ( false === $this->previous_secret_key_env ) {
+			putenv( 'STWC_STRIPE_TEST_SECRET_KEY' );
+		} else {
+			putenv( 'STWC_STRIPE_TEST_SECRET_KEY=' . $this->previous_secret_key_env );
+		}
+
+		if ( $this->previous_secret_key_superglobal_exists ) {
+			$_ENV['STWC_STRIPE_TEST_SECRET_KEY'] = $this->previous_secret_key_superglobal;
+		} else {
+			unset( $_ENV['STWC_STRIPE_TEST_SECRET_KEY'] );
+		}
+
+		parent::tearDown();
 	}
 
 	private function load_local_env_file(): void {
