@@ -425,6 +425,7 @@ class Gateway extends WC_Payment_Gateway {
 			$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
 			if ( $order_id ) {
 				$order     = wc_get_order( $order_id );
+				$order     = $order instanceof WC_Abstract_Order ? $order : null;
 				$order_key = $order ? $order->get_order_key() : null;
 			}
 		}
@@ -482,6 +483,10 @@ class Gateway extends WC_Payment_Gateway {
 	 * @return string
 	 */
 	private function create_ajax_nonce( ?WC_Abstract_Order $order = null ): string {
+		if ( ! \function_exists( 'woocommerce_pos_request' ) || ! woocommerce_pos_request() ) {
+			return wp_create_nonce( 'stripe_terminal_nonce' );
+		}
+
 		$pos_user_id = $order ? absint( $order->get_meta( '_pos_user', true ) ) : 0;
 
 		if ( ! $pos_user_id ) {

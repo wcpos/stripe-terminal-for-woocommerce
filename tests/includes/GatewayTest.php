@@ -77,15 +77,16 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			Functions\stubs(
 				array(
-					'is_checkout'          => false,
-					'is_checkout_pay_page' => true,
-					'wp_enqueue_style'     => true,
-					'wp_enqueue_script'    => true,
-					'admin_url'            => 'https://example.test/wp-admin/admin-ajax.php',
-					'__'                   => function ( $text ) {
+					'is_checkout'              => false,
+					'is_checkout_pay_page'     => true,
+					'woocommerce_pos_request'  => true,
+					'wp_enqueue_style'         => true,
+					'wp_enqueue_script'        => true,
+					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
+					'__'                       => function ( $text ) {
 						return $text;
 					},
-					'absint'               => function ( $value ) {
+					'absint'                   => function ( $value ) {
 						return abs( (int) $value );
 					},
 				)
@@ -122,11 +123,108 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( array( 2, 99 ), $switched_users );
 		}
 
-		public function test_order_received_url_returns_default_when_pos_helper_is_unavailable(): void {
+		public function test_enqueue_payment_scripts_uses_default_nonce_when_order_is_missing(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
 			$GLOBALS['wp'] = (object) array(
 				'query_vars' => array( 'order-pay' => 42 ),
+			);
+
+			$localized_data = null;
+
+			Functions\stubs(
+				array(
+					'is_checkout'              => false,
+					'is_checkout_pay_page'     => true,
+					'woocommerce_pos_request'  => true,
+					'wp_enqueue_style'         => true,
+					'wp_enqueue_script'        => true,
+					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
+					'wp_create_nonce'          => 'default-nonce',
+					'__'                       => function ( $text ) {
+						return $text;
+					},
+					'absint'                   => function ( $value ) {
+						return abs( (int) $value );
+					},
+				)
+			);
+
+			Functions\when( 'wc_get_order' )->justReturn( false );
+			Functions\when( 'wp_localize_script' )->alias(
+				function ( $handle, $object_name, $data ) use ( &$localized_data ) {
+					$localized_data = $data;
+
+					return true;
+				}
+			);
+
+			$gateway->enqueue_payment_scripts();
+
+			$this->assertSame( 'default-nonce', $localized_data['nonce'] );
+			$this->assertNull( $localized_data['orderKey'] );
+		}
+
+		public function test_enqueue_payment_scripts_uses_default_nonce_outside_pos_requests(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+
+			$GLOBALS['wp'] = (object) array(
+				'query_vars' => array( 'order-pay' => 42 ),
+			);
+
+			$order = \Mockery::mock( \WC_Abstract_Order::class );
+			$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_key' );
+
+			$localized_data = null;
+
+			Functions\stubs(
+				array(
+					'is_checkout'              => false,
+					'is_checkout_pay_page'     => true,
+					'woocommerce_pos_request'  => false,
+					'wp_enqueue_style'         => true,
+					'wp_enqueue_script'        => true,
+					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
+					'wp_create_nonce'          => 'default-nonce',
+					'__'                       => function ( $text ) {
+						return $text;
+					},
+					'absint'                   => function ( $value ) {
+						return abs( (int) $value );
+					},
+				)
+			);
+
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( 'wp_set_current_user' )->alias(
+				function () {
+					TestCase::fail( 'Default nonce generation should not switch users outside POS requests.' );
+				}
+			);
+			Functions\when( 'wp_localize_script' )->alias(
+				function ( $handle, $object_name, $data ) use ( &$localized_data ) {
+					$localized_data = $data;
+
+					return true;
+				}
+			);
+
+			$gateway->enqueue_payment_scripts();
+
+			$this->assertSame( 'default-nonce', $localized_data['nonce'] );
+		}
+
+		public function test_order_received_url_returns_default_outside_pos_requests(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+
+			$GLOBALS['wp'] = (object) array(
+				'query_vars' => array( 'order-pay' => 42 ),
+			);
+
+			Functions\stubs(
+				array(
+					'woocommerce_pos_request' => false,
+				)
 			);
 
 			$this->assertSame(
