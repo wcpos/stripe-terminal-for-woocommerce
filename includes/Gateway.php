@@ -205,11 +205,38 @@ class Gateway extends WC_Payment_Gateway {
 	 * @return string
 	 */
 	public function generate_secret_key_html( $key, $data ) {
-		$field_key = $this->get_field_key( $key );
-		$value     = $this->get_option( $key );
+		$field_key   = $this->get_field_key( $key );
+		$value       = $this->get_option( $key );
 		$placeholder = empty( $value ) ? '' : __( '•••••••••••••••• (saved; leave blank to keep)', 'stripe-terminal-for-woocommerce' );
+		$data        = wp_parse_args(
+			$data,
+			array(
+				'title'             => '',
+				'class'             => '',
+				'css'               => '',
+				'custom_attributes' => array(),
+				'desc_tip'          => false,
+				'description'       => '',
+			)
+		);
 
-		return '<input class="input-text regular-input" type="password" name="' . esc_attr( $field_key ) . '" id="' . esc_attr( $field_key ) . '" value="" placeholder="' . esc_attr( $placeholder ) . '" autocomplete="off" />';
+		ob_start();
+		?>
+		<tr valign="top">
+			<th scope="row" class="titledesc">
+				<label for="<?php echo esc_attr( $field_key ); ?>"><?php echo wp_kses_post( $data['title'] ); ?> <?php echo wp_kses_post( $this->get_tooltip_html( $data ) ); ?></label>
+			</th>
+			<td class="forminp">
+				<fieldset>
+					<legend class="screen-reader-text"><span><?php echo wp_kses_post( $data['title'] ); ?></span></legend>
+					<input class="input-text regular-input <?php echo esc_attr( $data['class'] ); ?>" type="password" name="<?php echo esc_attr( $field_key ); ?>" id="<?php echo esc_attr( $field_key ); ?>" style="<?php echo esc_attr( $data['css'] ); ?>" value="" placeholder="<?php echo esc_attr( $placeholder ); ?>" autocomplete="off" <?php echo wp_kses_post( $this->get_custom_attribute_html( $data ) ); ?> />
+					<?php echo wp_kses_post( $this->get_description_html( $data ) ); ?>
+				</fieldset>
+			</td>
+		</tr>
+		<?php
+
+		return ob_get_clean();
 	}
 
 	/**
