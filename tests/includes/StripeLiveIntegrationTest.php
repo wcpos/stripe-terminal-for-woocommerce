@@ -25,6 +25,8 @@ class StripeLiveIntegrationTest extends TestCase {
 	private $secret_key;
 
 	public function test_invalid_ajax_nonce_returns_invalid_request_before_payment_validation(): void {
+		$original_post = $_POST;
+
 		Monkey\setUp();
 		try {
 			$_POST = array(
@@ -64,7 +66,7 @@ class StripeLiveIntegrationTest extends TestCase {
 				$this->assertSame( 'Invalid request', $error->data );
 			}
 		} finally {
-			$_POST = array();
+			$_POST = $original_post;
 			Monkey\tearDown();
 		}
 	}
