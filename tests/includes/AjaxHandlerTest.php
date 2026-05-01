@@ -121,7 +121,11 @@ class AjaxHandlerTest extends TestCase {
 	 * @param string $method The AjaxHandler method to call.
 	 * @return mixed The data argument passed to wp_send_json_error.
 	 */
-	private function call_and_capture_error( string $method ) {
+	private function call_and_capture_error( string $method, bool $add_nonce = true ) {
+		if ( $add_nonce ) {
+			$_POST = array_merge( array( 'nonce' => 'test_nonce' ), $_POST );
+		}
+
 		try {
 			$this->handler->$method();
 			$this->fail( 'Expected wp_send_json_error to be called' );
@@ -133,6 +137,22 @@ class AjaxHandlerTest extends TestCase {
 	// -------------------------------------------------------------------
 	// create_payment_intent — missing parameters
 	// -------------------------------------------------------------------
+
+	public function test_create_payment_intent_reports_missing_nonce(): void {
+		$error = $this->call_and_capture_error( 'create_payment_intent', false );
+		$this->assertSame( 'Security token missing. Please refresh or reopen the POS checkout and try again.', $error );
+	}
+
+	public function test_create_payment_intent_reports_invalid_nonce(): void {
+		Functions\when( 'check_ajax_referer' )->justReturn( false );
+
+		$_POST = array(
+			'nonce' => 'invalid_nonce',
+		);
+
+		$error = $this->call_and_capture_error( 'create_payment_intent' );
+		$this->assertSame( 'Security token expired or invalid. Please refresh or reopen the POS checkout and try again.', $error );
+	}
 
 	public function test_create_payment_intent_rejects_missing_order_id(): void {
 		$_POST = array(
@@ -146,6 +166,7 @@ class AjaxHandlerTest extends TestCase {
 
 	public function test_create_payment_intent_allows_missing_posted_amount(): void {
 		$_POST = array(
+			'nonce'     => 'test_nonce',
 			'order_id'  => '42',
 			'reader_id' => 'tmr_abc123',
 			'order_key' => 'wc_order_current',
@@ -227,6 +248,7 @@ class AjaxHandlerTest extends TestCase {
 
 	public function test_create_payment_intent_uses_current_order_total_instead_of_stale_posted_amount(): void {
 		$_POST = array(
+			'nonce'     => 'test_nonce',
 			'order_id'  => '42',
 			'amount'    => '2500', // Stale amount from the first checkout attempt.
 			'reader_id' => 'tmr_abc123',
@@ -389,7 +411,10 @@ class AjaxHandlerTest extends TestCase {
 	}
 
 	public function test_get_reader_status_passes_reader_id_to_service(): void {
-		$_POST = array( 'reader_id' => 'tmr_test_123' );
+		$_POST = array(
+			'nonce'     => 'test_nonce',
+			'reader_id' => 'tmr_test_123',
+		);
 
 		$mock_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
 		$mock_service->shouldReceive( 'get_reader_status' )

@@ -80,16 +80,16 @@ class AjaxHandler {
 	 */
 	public function create_payment_intent(): void {
 		try {
-			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
-				wp_send_json_error( 'Invalid request' );
-
+			if ( ! $this->verify_ajax_nonce() ) {
 				return;
 			}
 
 			// Get and validate parameters.
+			// phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce is verified by verify_ajax_nonce() above, which provides specific missing/invalid messages.
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
 			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['moto'] ) ) && $this->is_moto_enabled();
+			// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 			if ( ! $order_id || ! $reader_id ) {
 				wp_send_json_error( 'Missing order ID or reader ID' );
@@ -779,6 +779,33 @@ class AjaxHandler {
 		return $this->stripe_service;
 	}
 
+
+
+	/**
+	 * Verify the Stripe Terminal AJAX nonce and report actionable failures.
+	 */
+	private function verify_ajax_nonce(): bool {
+		$nonce = '';
+		if ( isset( $_POST['nonce'] ) ) {
+			$nonce = sanitize_text_field( wp_unslash( $_POST['nonce'] ) );
+		} elseif ( isset( $_GET['nonce'] ) ) {
+			$nonce = sanitize_text_field( wp_unslash( $_GET['nonce'] ) );
+		}
+
+		if ( '' === $nonce ) {
+			wp_send_json_error( 'Security token missing. Please refresh or reopen the POS checkout and try again.' );
+
+			return false;
+		}
+
+		if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
+			wp_send_json_error( 'Security token expired or invalid. Please refresh or reopen the POS checkout and try again.' );
+
+			return false;
+		}
+
+		return true;
+	}
 
 	/**
 	 * Check if the request can access the given order using order key validation.

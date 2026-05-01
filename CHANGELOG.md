@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.21 - 2026-05-01
+
+### Fixed
+
+- Generate Stripe Terminal AJAX nonces for the POS cashier on POS order-pay requests so terminal payments are no longer rejected before reaching Stripe
+- Replace generic nonce failures with actionable missing/expired security token messages
+
 ## 0.0.20 - 2026-04-28
 
 ### Fixed

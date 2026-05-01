@@ -420,10 +420,12 @@ class Gateway extends WC_Payment_Gateway {
 			// Check if we're on the order-pay page to get order ID and key.
 		$order_id  = null;
 		$order_key = null;
+		$order     = null;
 		if ( is_checkout_pay_page() ) {
 			$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
 			if ( $order_id ) {
 				$order     = wc_get_order( $order_id );
+				$order     = $order instanceof WC_Abstract_Order ? $order : null;
 				$order_key = $order ? $order->get_order_key() : null;
 			}
 		}
@@ -434,7 +436,7 @@ class Gateway extends WC_Payment_Gateway {
 			'stripeTerminalData',
 			array(
 				'ajaxUrl'  => admin_url( 'admin-ajax.php' ),
-				'nonce'    => wp_create_nonce( 'stripe_terminal_nonce' ),
+				'nonce'    => $this->create_ajax_nonce( $order ),
 				'orderId'  => $order_id,
 				'orderKey' => $order_key,
 				'enableMoto' => 'yes' === $this->get_option( 'enable_moto' ),
@@ -467,6 +469,39 @@ class Gateway extends WC_Payment_Gateway {
 				),
 			)
 		);
+	}
+
+	/**
+	 * Create the AJAX nonce for the user that will submit the request.
+	 *
+	 * WooCommerce POS renders order-pay templates after switching the current
+	 * WordPress user to the order customer. The subsequent admin-ajax.php request
+	 * is submitted by the logged-in POS cashier, so the nonce must be created for
+	 * that cashier session or check_ajax_referer() rejects the payment request.
+	 *
+	 * @param WC_Abstract_Order|null $order Order currently being paid.
+	 * @return string
+	 */
+	private function create_ajax_nonce( ?WC_Abstract_Order $order = null ): string {
+		if ( ! \function_exists( 'woocommerce_pos_request' ) || ! woocommerce_pos_request() ) {
+			return wp_create_nonce( 'stripe_terminal_nonce' );
+		}
+
+		$pos_user_id = $order ? absint( $order->get_meta( '_pos_user', true ) ) : 0;
+
+		if ( ! $pos_user_id ) {
+			return wp_create_nonce( 'stripe_terminal_nonce' );
+		}
+
+		$original_user_id = get_current_user_id();
+
+		try {
+			wp_set_current_user( $pos_user_id );
+
+			return wp_create_nonce( 'stripe_terminal_nonce' );
+		} finally {
+			wp_set_current_user( $original_user_id );
+		}
 	}
 
 	/**
@@ -566,7 +601,7 @@ class Gateway extends WC_Payment_Gateway {
 		global $wp;
 
 		// Check whether this is a POS request.
-		if ( ! woocommerce_pos_request() || ! isset( $wp->query_vars['order-pay'] ) ) {
+		if ( ! \function_exists( 'woocommerce_pos_request' ) || ! woocommerce_pos_request() || ! isset( $wp->query_vars['order-pay'] ) ) {
 			return $order_received_url;
 		}
 
