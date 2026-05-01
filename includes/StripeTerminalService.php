@@ -274,6 +274,16 @@ class StripeTerminalService {
 
 		// If action is for a different payment intent...
 		if ( $action_pi && $action_pi !== $payment_intent_id ) {
+			// Don't cancel if the action is actively in progress.
+			if ( 'in_progress' === $action_status ) {
+				Logger::log( 'clear_stale_reader_action: Reader is processing a different payment intent.' );
+				return new WP_Error(
+					'reader_busy',
+					'Reader is currently processing a different payment.',
+					array( 'status' => 409 )
+				);
+			}
+
 			Logger::log( 'clear_stale_reader_action: Cancelling stale action for different payment intent.' );
 			$cancel_result = $this->cancel_reader_action( $reader_id );
 			if ( is_wp_error( $cancel_result ) ) {
