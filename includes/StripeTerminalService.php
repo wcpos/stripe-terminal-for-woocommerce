@@ -279,8 +279,13 @@ class StripeTerminalService {
 				Logger::log( 'clear_stale_reader_action: Reader is processing a different payment intent.' );
 				return new WP_Error(
 					'reader_busy',
-					'Reader is currently processing a different payment.',
-					array( 'status' => 409 )
+					'This terminal is already processing another payment. Complete or cancel that payment before starting a new one.',
+					array(
+						'status'                    => 409,
+						'reader_id'                 => $reader_id,
+						'current_payment_intent_id' => $action_pi,
+						'can_force_cancel'          => true,
+					)
 				);
 			}
 
@@ -657,9 +662,9 @@ class StripeTerminalService {
 				$latest_charge = $charges->data[0];
 			}
 
-				// If we found a successful charge but the order isn't paid yet, save metadata.
+				// If we found a fully succeeded PaymentIntent and charge but the order isn't paid yet, save metadata.
 				$metadata_saved = false;
-			if ( $latest_charge && $latest_charge->paid && ! $order->is_paid() ) {
+			if ( $latest_charge && $latest_charge->paid && 'succeeded' === $payment_intent->status && ! $order->is_paid() ) {
 				// Save payment metadata instead of completing the order.
 				$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 				$order->update_meta_data( '_stripe_terminal_charge_id', $latest_charge->id );

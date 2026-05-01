@@ -57,6 +57,7 @@ class StripeLiveIntegrationTest extends TestCase {
 				'order_id'  => '42',
 				'amount'    => '1234',
 				'reader_id' => 'tmr_test_reader',
+				'order_key' => 'wc_order_test',
 			);
 
 			Functions\stubs(
@@ -74,6 +75,9 @@ class StripeLiveIntegrationTest extends TestCase {
 					},
 				)
 			);
+			$order = \Mockery::mock( 'WC_Order' );
+			$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_test' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
 			Functions\when( 'check_ajax_referer' )->justReturn( false );
 			Functions\when( 'wp_send_json_error' )->alias(
 				function ( $data = null ) {
@@ -91,6 +95,7 @@ class StripeLiveIntegrationTest extends TestCase {
 			}
 		} finally {
 			$_POST = $original_post;
+			\Mockery::close();
 			Monkey\tearDown();
 		}
 	}

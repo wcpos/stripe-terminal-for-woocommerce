@@ -23,6 +23,8 @@ class StripeTerminalPayment {
     this.config = window.stripeTerminalData || {};
     this.ajaxUrl = this.config.ajaxUrl || window.ajaxurl || '/wp-admin/admin-ajax.php';
     this.nonce = this.config.nonce || '';
+    this.paymentToken = this.config.paymentToken || '';
+    this.paymentTokenExpires = this.config.paymentTokenExpires || '';
     this.strings = this.config.strings || {};
     this.readers = this.config.readers || [];
     
@@ -56,6 +58,7 @@ class StripeTerminalPayment {
     // Logging events
     jQuery(document).on('click', '.stripe-terminal-toggle-log', this.handleToggleLog.bind(this));
     jQuery(document).on('click', '.stripe-terminal-clear-log', this.handleClearLog.bind(this));
+    jQuery(document).on('click', '.stripe-terminal-force-clear-button', this.handleForceClearReader.bind(this));
     
   }
 
@@ -116,11 +119,101 @@ class StripeTerminalPayment {
       
     } catch (error) {
       console.error('Payment error:', error);
-      this.showError((this.strings.paymentFailed || 'Payment failed') + ': ' + error.message);
+      this.handlePaymentError(error, orderId, button);
       this.readerLastSeenAt = null;
       this.activePaymentReaderId = null;
       button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
     }
+  }
+
+  addPaymentRequestData(ajaxData) {
+    if (this.config.orderKey) {
+      ajaxData.order_key = this.config.orderKey;
+    }
+    if (this.paymentToken) {
+      ajaxData.payment_token = this.paymentToken;
+      ajaxData.payment_token_expires = this.paymentTokenExpires;
+    }
+    return ajaxData;
+  }
+
+  createAjaxError(data, fallback) {
+    if (data && typeof data === 'object') {
+      const error = new Error(data.message || fallback);
+      error.data = data;
+      return error;
+    }
+    return new Error(data || fallback);
+  }
+
+  handlePaymentError(error, orderId, button) {
+    if (error.data && error.data.code === 'reader_busy' && error.data.can_force_cancel) {
+      this.showReaderBusyRecovery(error.data, orderId);
+      return;
+    }
+
+    this.showError((this.strings.paymentFailed || 'Payment failed') + ': ' + error.message);
+  }
+
+  showReaderBusyRecovery(data, orderId) {
+    this.showError(data.message || 'This terminal is already processing another payment.');
+    const messageDiv = jQuery('.stripe-terminal-error');
+    messageDiv.find('.stripe-terminal-force-clear-button').remove();
+    messageDiv.append(
+      jQuery('<button type="button" class="stripe-terminal-force-clear-button">Force clear terminal</button>')
+        .data('reader-id', data.reader_id || (this.connectedReader ? this.connectedReader.id : ''))
+        .data('payment-intent-id', data.current_payment_intent_id || '')
+        .data('order-id', orderId)
+    );
+  }
+
+  handleForceClearReader(event) {
+    event.preventDefault();
+    const button = jQuery(event.target);
+    const readerId = button.data('reader-id');
+    const expectedPaymentIntentId = button.data('payment-intent-id');
+    const orderId = button.data('order-id') || this.config.orderId;
+
+    if (!readerId || !expectedPaymentIntentId || !orderId) {
+      this.showError('Missing reader recovery data. Reopen the checkout and try again.');
+      return;
+    }
+
+    if (!window.confirm('Force clear this terminal? This may cancel a payment currently in progress on another register.')) {
+      return;
+    }
+
+    button.prop('disabled', true).text('Clearing...');
+    jQuery.ajax({
+      url: this.ajaxUrl,
+      type: 'POST',
+      data: this.addPaymentRequestData({
+        action: 'stripe_terminal_force_cancel_reader_action',
+        nonce: this.nonce,
+        order_id: orderId,
+        reader_id: readerId,
+        expected_payment_intent_id: expectedPaymentIntentId
+      })
+    }).done((response) => {
+      if (response.success) {
+        this.currentPaymentIntent = null;
+        this.activePaymentReaderId = null;
+        this.readerLastSeenAt = null;
+        this.isDeclined = false;
+        this.showMessage(response.data.message || 'Terminal cleared. Click Pay with Terminal again.');
+        this.addToLog(response.data.message || 'Terminal cleared. Click Pay with Terminal again.', 'info');
+        jQuery('.stripe-terminal-force-clear-button').remove();
+        jQuery('.stripe-terminal-pay-button').prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
+        this.updateButtonVisibility();
+      } else {
+        const error = this.createAjaxError(response.data, 'Failed to clear terminal');
+        this.showError(error.message);
+        button.prop('disabled', false).text('Force clear terminal');
+      }
+    }).fail((xhr, status, error) => {
+      this.showError('Failed to clear terminal: ' + error);
+      button.prop('disabled', false).text('Force clear terminal');
+    });
   }
 
   async createPaymentIntent(orderId, amount) {
@@ -135,10 +228,7 @@ class StripeTerminalPayment {
         moto: isMoto ? 'true' : 'false'
       };
 
-      // Add order key for guest users
-      if (this.config.orderKey) {
-        ajaxData.order_key = this.config.orderKey;
-      }
+      this.addPaymentRequestData(ajaxData);
 
       jQuery.ajax({
         url: this.ajaxUrl,
@@ -148,7 +238,7 @@ class StripeTerminalPayment {
           if (response.success) {
             resolve(response.data);
           } else {
-            reject(new Error(response.data || 'Failed to create payment intent'));
+            reject(this.createAjaxError(response.data, 'Failed to create payment intent'));
           }
         },
         error: (xhr, status, error) => {
@@ -178,10 +268,7 @@ class StripeTerminalPayment {
         order_id: orderId
       };
 
-      // Add order key for guest users
-      if (this.config.orderKey) {
-        ajaxData.order_key = this.config.orderKey;
-      }
+      this.addPaymentRequestData(ajaxData);
 
       jQuery.ajax({
         url: this.ajaxUrl,
@@ -191,7 +278,7 @@ class StripeTerminalPayment {
           if (response.success) {
             resolve(response.data);
           } else {
-            reject(new Error(response.data || 'Failed to confirm payment'));
+            reject(this.createAjaxError(response.data, 'Failed to confirm payment'));
           }
         },
         error: (xhr, status, error) => {
@@ -222,10 +309,7 @@ class StripeTerminalPayment {
         reader_id: this.activePaymentReaderId || (this.connectedReader ? this.connectedReader.id : '')
       };
 
-      // Add order key for guest users
-      if (this.config.orderKey) {
-        ajaxData.order_key = this.config.orderKey;
-      }
+      this.addPaymentRequestData(ajaxData);
 
       jQuery.ajax({
         url: this.ajaxUrl,
@@ -235,7 +319,7 @@ class StripeTerminalPayment {
           if (response.success) {
             resolve(response.data);
           } else {
-            reject(new Error(response.data || 'Failed to cancel payment'));
+            reject(this.createAjaxError(response.data, 'Failed to cancel payment'));
           }
         },
         error: (xhr, status, error) => {
@@ -272,12 +356,11 @@ class StripeTerminalPayment {
         const response = await jQuery.ajax({
           url: this.ajaxUrl,
           type: 'POST',
-          data: {
+          data: this.addPaymentRequestData({
             action: 'stripe_terminal_check_payment_status',
             nonce: this.nonce,
-            order_id: orderId,
-            order_key: this.config.orderKey
-          }
+            order_id: orderId
+          })
         });
 
         if (response.success) {
@@ -358,14 +441,13 @@ class StripeTerminalPayment {
     jQuery.ajax({
       url: this.ajaxUrl,
       type: 'POST',
-      data: {
+      data: this.addPaymentRequestData({
         action: 'stripe_terminal_retry_payment',
         nonce: this.nonce,
         order_id: orderId,
         reader_id: this.activePaymentReaderId,
-        order_key: this.config.orderKey,
         moto: jQuery('.stripe-terminal-moto-checkbox').is(':checked') ? 'true' : 'false'
-      }
+      })
     })
     .done((response) => {
       if (response.success) {
@@ -381,7 +463,7 @@ class StripeTerminalPayment {
 
         this.pollPaymentStatus(this.currentPaymentIntent.id, orderId, payButton);
       } else {
-        this.showError('Retry failed: ' + (response.data || 'Unknown error'));
+        this.handlePaymentError(this.createAjaxError(response.data, 'Retry failed'), orderId, payButton);
         this.isDeclined = true;
         this.updateButtonVisibility();
       }
@@ -543,13 +625,12 @@ class StripeTerminalPayment {
     jQuery.ajax({
       url: this.ajaxUrl,
       type: 'POST',
-      data: {
+      data: this.addPaymentRequestData({
         action: 'stripe_terminal_simulate_payment',
         nonce: this.nonce,
         reader_id: this.connectedReader.id,
-        order_id: orderId,
-        order_key: this.config.orderKey
-      }
+        order_id: orderId
+      })
     })
     .done((response) => {
       if (response.success) {
@@ -590,12 +671,11 @@ class StripeTerminalPayment {
     jQuery.ajax({
       url: this.ajaxUrl,
       type: 'POST',
-      data: {
+      data: this.addPaymentRequestData({
         action: 'stripe_terminal_check_stripe_status',
         nonce: this.nonce,
-        order_id: orderId,
-        order_key: this.config.orderKey
-      }
+        order_id: orderId
+      })
     })
     .done((response) => {
       if (response.success) {

@@ -69,6 +69,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			$order = \Mockery::mock( \WC_Abstract_Order::class );
 			$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_key' );
+			$order->shouldReceive( 'get_id' )->andReturn( 42 );
 			$order->shouldReceive( 'get_meta' )->with( '_pos_user', true )->andReturn( '2' );
 
 			$current_user_id = 99;
@@ -104,6 +105,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					$current_user_id = $user_id;
 				}
 			);
+			Functions\when( 'wp_salt' )->justReturn( 'unit-test-salt' );
 			Functions\when( 'wp_create_nonce' )->alias(
 				function ( $action ) use ( &$current_user_id ) {
 					return 'nonce-for-' . $action . '-user-' . $current_user_id;
@@ -141,6 +143,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					'wp_enqueue_script'        => true,
 					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
 					'wp_create_nonce'          => 'default-nonce',
+					'wp_salt'                  => 'unit-test-salt',
 					'__'                       => function ( $text ) {
 						return $text;
 					},
@@ -174,6 +177,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			$order = \Mockery::mock( \WC_Abstract_Order::class );
 			$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_key' );
+			$order->shouldReceive( 'get_id' )->andReturn( 42 );
 
 			$localized_data = null;
 
@@ -186,6 +190,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					'wp_enqueue_script'        => true,
 					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
 					'wp_create_nonce'          => 'default-nonce',
+					'wp_salt'                  => 'unit-test-salt',
 					'__'                       => function ( $text ) {
 						return $text;
 					},
