@@ -72,6 +72,10 @@ class AjaxHandler {
 		add_action( 'wp_ajax_stripe_terminal_retry_payment', array( $this, 'retry_payment' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_retry_payment', array( $this, 'retry_payment' ) );
 
+		// Explicit recovery for stale/abandoned reader actions.
+		add_action( 'wp_ajax_stripe_terminal_force_cancel_reader_action', array( $this, 'force_cancel_reader_action' ) );
+		add_action( 'wp_ajax_nopriv_stripe_terminal_force_cancel_reader_action', array( $this, 'force_cancel_reader_action' ) );
+
 		// Check payment status from Stripe.
 	}
 
@@ -80,13 +84,11 @@ class AjaxHandler {
 	 */
 	public function create_payment_intent(): void {
 		try {
-			if ( ! $this->verify_ajax_nonce() ) {
-				return;
-			}
-
 			// Get and validate parameters.
 			// phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce is verified by verify_ajax_nonce() above, which provides specific missing/invalid messages.
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
 			$moto      = isset( $_POST['moto'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['moto'] ) ) && $this->is_moto_enabled();
 			// phpcs:enable WordPress.Security.NonceVerification.Missing
@@ -102,6 +104,10 @@ class AjaxHandler {
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
 
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
 				return;
 			}
 
@@ -161,7 +167,7 @@ class AjaxHandler {
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent processing failed: ' . $reader_result->get_error_message() );
-				wp_send_json_error( 'Failed to process payment on reader: ' . $reader_result->get_error_message() );
+				$this->send_reader_processing_error( 'Failed to process payment on reader: ', $reader_result );
 
 				return;
 			}
@@ -195,14 +201,10 @@ class AjaxHandler {
 	 */
 	public function confirm_payment(): void {
 		try {
-			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
-				wp_send_json_error( 'Invalid request' );
-
-				return;
-			}
-
 			// Get and validate parameters.
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$payment_intent_id = isset( $_POST['payment_intent_id'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_intent_id'] ) ) : '';
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$order_id          = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $payment_intent_id || ! $order_id ) {
@@ -216,6 +218,10 @@ class AjaxHandler {
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
 
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
 				return;
 			}
 
@@ -255,15 +261,12 @@ class AjaxHandler {
 	 */
 	public function cancel_payment(): void {
 		try {
-			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
-				wp_send_json_error( 'Invalid request' );
-
-				return;
-			}
-
 			// Get and validate parameters.
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$payment_intent_id = isset( $_POST['payment_intent_id'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_intent_id'] ) ) : '';
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$order_id          = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$reader_id         = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
 
 			if ( ! $payment_intent_id || ! $order_id || ! $reader_id ) {
@@ -277,6 +280,10 @@ class AjaxHandler {
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
 
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
 				return;
 			}
 
@@ -324,12 +331,6 @@ class AjaxHandler {
 	 */
 	public function get_reader_status(): void {
 		try {
-			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
-				wp_send_json_error( 'Invalid request' );
-
-				return;
-			}
-
 			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
@@ -338,8 +339,33 @@ class AjaxHandler {
 			}
 
 			// Get reader status — optionally for a single reader.
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified below before reader lookup.
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : null;
-			$result    = $this->stripe_service->get_reader_status( $reader_id );
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified below before reader lookup.
+			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+
+			if ( $order_id ) {
+				$order = wc_get_order( $order_id );
+				if ( ! $order ) {
+					wp_send_json_error( 'Order not found' );
+
+					return;
+				}
+
+				if ( ! $this->verify_order_ajax_request( $order ) ) {
+					return;
+				}
+
+				if ( ! $this->can_access_order( $order ) ) {
+					wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+
+					return;
+				}
+			} elseif ( ! $this->verify_ajax_nonce() ) {
+				return;
+			}
+
+			$result = $this->stripe_service->get_reader_status( $reader_id );
 
 			if ( is_wp_error( $result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Get reader status failed: ' . $result->get_error_message() );
@@ -429,12 +455,7 @@ class AjaxHandler {
 	 */
 	public function check_payment_status(): void {
 		try {
-			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
-				wp_send_json_error( 'Invalid request' );
-
-				return;
-			}
-
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$order_id = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $order_id ) {
@@ -445,6 +466,10 @@ class AjaxHandler {
 			$order = wc_get_order( $order_id );
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
 				return;
 			}
 
@@ -460,16 +485,18 @@ class AjaxHandler {
 			$payment_intent_id      = $order->get_meta( '_stripe_terminal_payment_intent_id' );
 			$has_successful_payment = ( 'succeeded' === $payment_status && ! empty( $payment_intent_id ) );
 			$payment_successful     = $is_paid || $has_successful_payment;
+			$stripe_checked         = false;
 
 			// If payment hasn't succeeded locally and we have an intent ID, check Stripe directly.
 			$payment_intent_status = null;
 			$last_payment_error    = null;
 
-			if ( ! $payment_successful && ! empty( $payment_intent_id ) && $this->stripe_service ) {
+			if ( ! empty( $payment_intent_id ) && $this->stripe_service ) {
 				try {
 					\Stripe\Stripe::setApiKey( $this->stripe_service->get_api_key() );
 					$stripe_intent         = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
 					$payment_intent_status = $stripe_intent->status;
+					$stripe_checked        = true;
 
 					if ( $stripe_intent->last_payment_error ) {
 						$last_payment_error = array(
@@ -486,6 +513,10 @@ class AjaxHandler {
 				} catch ( \Exception $e ) {
 					Logger::log( 'Stripe Terminal AJAX - Failed to retrieve payment intent: ' . $e->getMessage() );
 				}
+			}
+
+			if ( $stripe_checked && ! $is_paid && 'succeeded' !== $payment_intent_status ) {
+				$payment_successful = false;
 			}
 
 			$return_url = null;
@@ -524,13 +555,8 @@ class AjaxHandler {
 	 */
 	public function check_stripe_status(): void {
 		try {
-			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
-				wp_send_json_error( 'Invalid request' );
-
-				return;
-			}
-
 			// Get and validate parameters.
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$order_id = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $order_id ) {
@@ -544,6 +570,10 @@ class AjaxHandler {
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
 
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
 				return;
 			}
 
@@ -573,7 +603,9 @@ class AjaxHandler {
 
 			// Determine if payment was found and successful.
 			$payment_found      = ! empty( $result['charge'] );
-			$payment_successful = $payment_found && true === $result['charge']['paid'];
+			$payment_successful = $payment_found
+				&& true === $result['charge']['paid']
+				&& 'succeeded' === ( $result['payment_intent']['status'] ?? null );
 
 			wp_send_json_success(
 				array(
@@ -599,14 +631,10 @@ class AjaxHandler {
 	 */
 	public function simulate_payment(): void {
 		try {
-			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
-				wp_send_json_error( 'Invalid request' );
-
-				return;
-			}
-
 			// Get and validate parameters.
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
 
 			if ( ! $reader_id ) {
@@ -626,6 +654,10 @@ class AjaxHandler {
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
 
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
 				return;
 			}
 
@@ -682,13 +714,9 @@ class AjaxHandler {
 	 */
 	public function retry_payment(): void {
 		try {
-			if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
-				wp_send_json_error( 'Invalid request' );
-
-				return;
-			}
-
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
 
 			if ( ! $order_id || ! $reader_id ) {
@@ -699,6 +727,10 @@ class AjaxHandler {
 			$order = wc_get_order( $order_id );
 			if ( ! $order ) {
 				wp_send_json_error( 'Order not found' );
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
 				return;
 			}
 
@@ -728,7 +760,7 @@ class AjaxHandler {
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Retry failed: ' . $reader_result->get_error_message() );
-				wp_send_json_error( 'Failed to retry payment on reader: ' . $reader_result->get_error_message() );
+				$this->send_reader_processing_error( 'Failed to retry payment on reader: ', $reader_result );
 				return;
 			}
 
@@ -751,6 +783,81 @@ class AjaxHandler {
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in retry_payment: ' . $e->getMessage() );
 			wp_send_json_error( 'An error occurred while retrying payment: ' . $e->getMessage() );
+		}
+	}
+
+	/**
+	 * Force-cancel a reader action after explicit operator confirmation.
+	 */
+	public function force_cancel_reader_action(): void {
+		try {
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
+			$order_id                   = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
+			$reader_id                  = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
+			$expected_payment_intent_id = isset( $_POST['expected_payment_intent_id'] ) ? sanitize_text_field( wp_unslash( $_POST['expected_payment_intent_id'] ) ) : '';
+
+			if ( ! $order_id || ! $reader_id || ! $expected_payment_intent_id ) {
+				wp_send_json_error( 'Missing order ID, reader ID, or expected payment intent ID' );
+				return;
+			}
+
+			$order = wc_get_order( $order_id );
+			if ( ! $order ) {
+				wp_send_json_error( 'Order not found' );
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
+				return;
+			}
+
+			if ( ! $this->can_access_order( $order ) ) {
+				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+				return;
+			}
+
+			if ( ! $this->stripe_service ) {
+				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
+				return;
+			}
+
+			$reader = $this->stripe_service->get_reader( $reader_id );
+			if ( is_wp_error( $reader ) ) {
+				wp_send_json_error( 'Failed to retrieve reader: ' . $reader->get_error_message() );
+				return;
+			}
+
+			$current_payment_intent_id = $reader['action']['process_payment_intent']['payment_intent'] ?? '';
+			$action_status             = $reader['action']['status'] ?? '';
+
+			if ( 'in_progress' !== $action_status || $current_payment_intent_id !== $expected_payment_intent_id ) {
+				wp_send_json_error(
+					array(
+						'code'    => 'reader_action_changed',
+						'message' => 'The terminal action changed before it could be cleared. Please refresh the reader state and try again.',
+					)
+				);
+				return;
+			}
+
+			$result = $this->stripe_service->cancel_reader_action( $reader_id );
+			if ( is_wp_error( $result ) ) {
+				wp_send_json_error( 'Failed to clear reader action: ' . $result->get_error_message() );
+				return;
+			}
+
+			wp_send_json_success(
+				array(
+					'message'   => 'Terminal cleared. Click Pay with Terminal again.',
+					'reader_id' => $reader_id,
+					'reader'    => $result,
+				)
+			);
+		} catch ( Exception $e ) {
+			Logger::log( 'Stripe Terminal AJAX - Exception in force_cancel_reader_action: ' . $e->getMessage() );
+			wp_send_json_error( 'An error occurred while clearing the terminal: ' . $e->getMessage() );
 		}
 	}
 
@@ -782,6 +889,32 @@ class AjaxHandler {
 
 
 	/**
+	 * Send reader processing errors, preserving structured recovery metadata.
+	 *
+	 * @param string   $prefix Error message prefix.
+	 * @param WP_Error $error  Reader processing error.
+	 */
+	private function send_reader_processing_error( string $prefix, WP_Error $error ): void {
+		$error_data = $error->get_error_data();
+
+		if ( 'reader_busy' === $error->get_error_code() && \is_array( $error_data ) ) {
+			wp_send_json_error(
+				array(
+					'code'                      => 'reader_busy',
+					'message'                   => $prefix . $error->get_error_message(),
+					'reader_id'                 => $error_data['reader_id'] ?? null,
+					'current_payment_intent_id' => $error_data['current_payment_intent_id'] ?? null,
+					'can_force_cancel'          => ! empty( $error_data['can_force_cancel'] ),
+				)
+			);
+
+			return;
+		}
+
+		wp_send_json_error( $prefix . $error->get_error_message() );
+	}
+
+	/**
 	 * Verify the Stripe Terminal AJAX nonce and report actionable failures.
 	 */
 	private function verify_ajax_nonce(): bool {
@@ -800,6 +933,46 @@ class AjaxHandler {
 
 		if ( false === check_ajax_referer( 'stripe_terminal_nonce', 'nonce', false ) ) {
 			wp_send_json_error( 'Security token expired or invalid. Please refresh or reopen the POS checkout and try again.' );
+
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Verify an order-scoped Stripe Terminal AJAX request.
+	 *
+	 * POS desktop and mobile apps can authenticate with JWT rather than the same
+	 * WordPress cookie session that created a nonce. A signed order token proves
+	 * this request originated from the server-rendered order-pay flow without
+	 * coupling payment actions to a specific WordPress auth layer.
+	 *
+	 * @param WC_Order $order Order being accessed.
+	 */
+	private function verify_order_ajax_request( WC_Order $order ): bool {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
+		$payment_token = isset( $_POST['payment_token'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_token'] ) ) : '';
+
+		if ( '' === $payment_token ) {
+			return $this->verify_ajax_nonce();
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
+		$expires            = isset( $_POST['payment_token_expires'] ) ? absint( $_POST['payment_token_expires'] ) : 0;
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
+		$provided_order_key = isset( $_POST['order_key'] ) ? sanitize_text_field( wp_unslash( $_POST['order_key'] ) ) : '';
+
+		if (
+			! PaymentRequestToken::validate(
+				(int) $order->get_id(),
+				$provided_order_key,
+				$payment_token,
+				$expires
+			) ||
+			$provided_order_key !== $order->get_order_key()
+		) {
+			wp_send_json_error( 'Payment session expired or invalid. Please reopen the POS checkout and try again.' );
 
 			return false;
 		}

@@ -139,6 +139,16 @@ class AjaxHandlerTest extends TestCase {
 	// -------------------------------------------------------------------
 
 	public function test_create_payment_intent_reports_missing_nonce(): void {
+		$_POST = array(
+			'order_id'  => '42',
+			'reader_id' => 'tmr_abc123',
+			'order_key' => 'wc_order_current',
+		);
+
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+
 		$error = $this->call_and_capture_error( 'create_payment_intent', false );
 		$this->assertSame( 'Security token missing. Please refresh or reopen the POS checkout and try again.', $error );
 	}
@@ -147,8 +157,15 @@ class AjaxHandlerTest extends TestCase {
 		Functions\when( 'check_ajax_referer' )->justReturn( false );
 
 		$_POST = array(
-			'nonce' => 'invalid_nonce',
+			'nonce'     => 'invalid_nonce',
+			'order_id'  => '42',
+			'reader_id' => 'tmr_abc123',
+			'order_key' => 'wc_order_current',
 		);
+
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
 
 		$error = $this->call_and_capture_error( 'create_payment_intent' );
 		$this->assertSame( 'Security token expired or invalid. Please refresh or reopen the POS checkout and try again.', $error );
@@ -484,4 +501,103 @@ class AjaxHandlerTest extends TestCase {
 		$error = $this->call_and_capture_error( 'cancel_payment' );
 		$this->assertSame( 'Order not found', $error );
 	}
+
+	public function test_create_payment_intent_accepts_valid_signed_payment_token_when_nonce_is_invalid(): void {
+		Functions\when( 'wp_salt' )->justReturn( 'unit-test-salt' );
+		Functions\when( 'check_ajax_referer' )->justReturn( false );
+
+		$token = \WCPOS\WooCommercePOS\StripeTerminal\PaymentRequestToken::create( 42, 'wc_order_current', time() + 3600 );
+
+		$_POST = array(
+			'nonce'                 => 'invalid_nonce',
+			'order_id'              => '42',
+			'reader_id'             => 'tmr_abc123',
+			'order_key'             => 'wc_order_current',
+			'payment_token'         => $token['token'],
+			'payment_token_expires' => (string) $token['expires'],
+		);
+
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( true );
+		$order->shouldReceive( 'get_total' )->andReturn( '30.00' );
+		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+		$order->shouldReceive( 'update_meta_data' )->with( '_stripe_terminal_payment_intent_id', 'pi_token_ok' )->once();
+		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
+		$order->shouldReceive( 'save' )->once();
+		$order->shouldReceive( 'add_order_note' )->twice();
+
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+
+		$mock_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$mock_service->shouldReceive( 'create_payment_intent' )
+			->with( $order, 3000, false )
+			->once()
+			->andReturn( array( 'id' => 'pi_token_ok' ) );
+		$mock_service->shouldReceive( 'process_payment_intent' )
+			->with( 'tmr_abc123', 'pi_token_ok', array() )
+			->once()
+			->andReturn( array( 'action' => array( 'status' => 'in_progress' ) ) );
+
+		Functions\when( 'wp_send_json_success' )->alias(
+			function ( $data = null ) {
+				throw new JsonSuccessSentinel( $data );
+			}
+		);
+
+		$handler = new AjaxHandler( $mock_service );
+
+		try {
+			$handler->create_payment_intent();
+			$this->fail( 'Expected wp_send_json_success to be called' );
+		} catch ( JsonSuccessSentinel $e ) {
+			$this->assertSame( 'pi_token_ok', $e->data['payment_intent']['id'] );
+		} catch ( JsonErrorSentinel $e ) {
+			$this->fail( 'Unexpected AJAX error: ' . ( is_scalar( $e->data ) ? $e->data : json_encode( $e->data ) ) );
+		}
+	}
+
+	public function test_force_cancel_reader_action_refuses_to_cancel_if_reader_action_changed(): void {
+		$_POST = array(
+			'nonce'                      => 'test_nonce',
+			'order_id'                   => '42',
+			'reader_id'                  => 'tmr_abc123',
+			'order_key'                  => 'wc_order_current',
+			'expected_payment_intent_id' => 'pi_expected',
+		);
+
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( true );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+
+		$mock_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$mock_service->shouldReceive( 'get_reader' )
+			->with( 'tmr_abc123' )
+			->once()
+			->andReturn(
+				array(
+					'action' => array(
+						'status'                 => 'in_progress',
+						'process_payment_intent' => array( 'payment_intent' => 'pi_different' ),
+					),
+				)
+			);
+		$mock_service->shouldReceive( 'cancel_reader_action' )->never();
+
+		$handler = new AjaxHandler( $mock_service );
+		$error   = null;
+
+		try {
+			$handler->force_cancel_reader_action();
+			$this->fail( 'Expected wp_send_json_error to be called' );
+		} catch ( JsonErrorSentinel $e ) {
+			$error = $e->data;
+		}
+
+		$this->assertIsArray( $error );
+		$this->assertSame( 'reader_action_changed', $error['code'] );
+	}
+
 }

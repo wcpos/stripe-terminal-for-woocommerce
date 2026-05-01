@@ -1013,6 +1013,47 @@ class StripeTerminalServiceTest extends TestCase {
 	}
 
 	/**
+	 * Test process_payment_intent preserves an in-progress action for a different intent.
+	 */
+	public function test_process_payment_intent_returns_busy_for_different_in_progress_action(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$reader_with_action = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$reader_with_action->shouldReceive( 'toArray' )
+			->andReturn(
+				array(
+					'id'           => 'tmr_fake_reader',
+					'last_seen_at' => time() - 30,
+					'action'       => array(
+						'status'                 => 'in_progress',
+						'process_payment_intent' => array(
+							'payment_intent' => 'pi_old_intent',
+						),
+					),
+				)
+			);
+
+		$readers_mock = Mockery::mock();
+		$readers_mock->shouldReceive( 'retrieve' )->with( 'tmr_fake_reader' )->once()->andReturn( $reader_with_action );
+		$readers_mock->shouldNotReceive( 'cancelAction' );
+		$readers_mock->shouldNotReceive( 'processPaymentIntent' );
+
+		$terminal_mock          = Mockery::mock();
+		$terminal_mock->readers = $readers_mock;
+
+		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe_mock->terminal = $terminal_mock;
+
+		$service->set_stripe_client( $stripe_mock );
+
+		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_new_intent' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'reader_busy', $result->get_error_code() );
+		$this->assertSame( 409, $result->get_error_data()['status'] );
+	}
+
+	/**
 	 * Test process_payment_intent proceeds when reader last_seen_at is recent.
 	 *
 	 * The method should pass the freshness check but will still fail on the

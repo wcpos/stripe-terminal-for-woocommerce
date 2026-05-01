@@ -96,20 +96,22 @@ class Gateway extends WC_Payment_Gateway {
 			),
 			'secret_key' => array(
 				'title'             => __( 'Live Secret Key', 'stripe-terminal-for-woocommerce' ),
-				'type'              => 'text',
+				'type'              => 'secret_key',
 				'description'       => '',
 				'default'           => '',
 				'custom_attributes' => array(
 					'id' => 'secret_key',
+					'autocomplete' => 'off',
 				),
 			),
 			'test_secret_key' => array(
 				'title'             => __( 'Test Secret Key', 'stripe-terminal-for-woocommerce' ),
-				'type'              => 'text',
+				'type'              => 'secret_key',
 				'description'       => '',
 				'default'           => '',
 				'custom_attributes' => array(
 					'id' => 'test_secret_key',
+					'autocomplete' => 'off',
 				),
 			),
 			'test_mode' => array(
@@ -196,6 +198,65 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Generate a masked secret key settings field.
+	 *
+	 * @param string $key  Field key.
+	 * @param array  $data Field data.
+	 * @return string
+	 */
+	public function generate_secret_key_html( $key, $data ) {
+		$field_key   = $this->get_field_key( $key );
+		$value       = $this->get_option( $key );
+		$placeholder = empty( $value ) ? '' : __( '•••••••••••••••• (saved; leave blank to keep)', 'stripe-terminal-for-woocommerce' );
+		$data        = wp_parse_args(
+			$data,
+			array(
+				'title'             => '',
+				'class'             => '',
+				'css'               => '',
+				'custom_attributes' => array(),
+				'desc_tip'          => false,
+				'description'       => '',
+			)
+		);
+
+		ob_start();
+		?>
+		<tr valign="top">
+			<th scope="row" class="titledesc">
+				<label for="<?php echo esc_attr( $field_key ); ?>"><?php echo wp_kses_post( $data['title'] ); ?> <?php echo wp_kses_post( $this->get_tooltip_html( $data ) ); ?></label>
+			</th>
+			<td class="forminp">
+				<fieldset>
+					<legend class="screen-reader-text"><span><?php echo wp_kses_post( $data['title'] ); ?></span></legend>
+					<input class="input-text regular-input <?php echo esc_attr( $data['class'] ); ?>" type="password" name="<?php echo esc_attr( $field_key ); ?>" id="<?php echo esc_attr( $field_key ); ?>" style="<?php echo esc_attr( $data['css'] ); ?>" value="" placeholder="<?php echo esc_attr( $placeholder ); ?>" autocomplete="off" <?php echo wp_kses_post( $this->get_custom_attribute_html( $data ) ); ?> />
+					<?php echo wp_kses_post( $this->get_description_html( $data ) ); ?>
+				</fieldset>
+			</td>
+		</tr>
+		<?php
+
+		return ob_get_clean();
+	}
+
+	/**
+	 * Preserve saved secret keys when masked fields are left blank.
+	 *
+	 * @return bool
+	 */
+	public function process_admin_options() {
+		foreach ( array( 'secret_key', 'test_secret_key' ) as $key ) {
+			$field_key = $this->get_field_key( $key );
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- WooCommerce settings save verifies the admin form nonce; the value is sanitized before comparison.
+			if ( isset( $_POST[ $field_key ] ) && '' === wc_clean( wp_unslash( $_POST[ $field_key ] ) ) ) {
+				$_POST[ $field_key ] = $this->get_option( $key );
+			}
+		}
+
+		return parent::process_admin_options();
+	}
+
+	/**
 	 * Process the payment.
 	 *
 	 * @param int $order_id Order ID.
@@ -247,7 +308,15 @@ class Gateway extends WC_Payment_Gateway {
 		if ( $this->stripe_service ) {
 			$status_result = $this->stripe_service->check_payment_status_from_stripe( $order );
 
-			if ( ! is_wp_error( $status_result ) && isset( $status_result['charge'] ) && $status_result['charge']['paid'] ) {
+			if (
+				! is_wp_error( $status_result ) &&
+				isset(
+					$status_result['charge']['id'],
+					$status_result['payment_intent']['id']
+				) &&
+				true === ( $status_result['charge']['paid'] ?? false ) &&
+				'succeeded' === ( $status_result['payment_intent']['status'] ?? null )
+			) {
 				// Found successful payment in Stripe, complete the order.
 				$charge_id         = $status_result['charge']['id'];
 				$payment_intent_id = $status_result['payment_intent']['id'];
@@ -430,13 +499,17 @@ class Gateway extends WC_Payment_Gateway {
 			}
 		}
 
+		$payment_request_token = $this->create_payment_request_token( $order );
+
 			// Localize script data for payment interface.
 		wp_localize_script(
 			'stripe-terminal-payment',
 			'stripeTerminalData',
 			array(
-				'ajaxUrl'  => admin_url( 'admin-ajax.php' ),
-				'nonce'    => $this->create_ajax_nonce( $order ),
+				'ajaxUrl'             => admin_url( 'admin-ajax.php' ),
+				'nonce'               => $this->create_ajax_nonce( $order ),
+				'paymentToken'        => $payment_request_token['token'],
+				'paymentTokenExpires' => $payment_request_token['expires'],
 				'orderId'  => $order_id,
 				'orderKey' => $order_key,
 				'enableMoto' => 'yes' === $this->get_option( 'enable_moto' ),
@@ -469,6 +542,24 @@ class Gateway extends WC_Payment_Gateway {
 				),
 			)
 		);
+	}
+
+
+	/**
+	 * Create a signed order-scoped payment request token.
+	 *
+	 * @param WC_Abstract_Order|null $order Order currently being paid.
+	 * @return array{token:string,expires:int|null}
+	 */
+	private function create_payment_request_token( ?WC_Abstract_Order $order = null ): array {
+		if ( ! $order ) {
+			return array(
+				'token'   => '',
+				'expires' => null,
+			);
+		}
+
+		return PaymentRequestToken::create( (int) $order->get_id(), $order->get_order_key() );
 	}
 
 	/**
@@ -751,7 +842,14 @@ class Gateway extends WC_Payment_Gateway {
 			return __( 'Your Stripe live secret API key.', 'stripe-terminal-for-woocommerce' );
 		}
 
-		return $this->validate_api_key( $api_key, $mode ) . '<br>' . $this->validate_and_set_webhook( $api_key, $mode );
+		$validation = $this->validate_api_key_result( $api_key, $mode );
+		$status     = $validation['message'];
+
+		if ( ! $validation['valid'] || $validation['restricted'] ) {
+			return $status;
+		}
+
+		return $status . '<br>' . $this->validate_and_set_webhook( $api_key, $mode );
 	}
 
 	/**
@@ -763,20 +861,52 @@ class Gateway extends WC_Payment_Gateway {
 	 * @return string Returns success message, or an error message.
 	 */
 	private function validate_api_key( $api_key, $mode = 'live' ) {
+		$validation = $this->validate_api_key_result( $api_key, $mode );
+
+		return $validation['message'];
+	}
+
+	/**
+	 * Validate the Stripe API key and expose machine-readable status.
+	 *
+	 * @param string $api_key The Stripe API key to validate.
+	 * @param string $mode    The mode of the key (live/test).
+	 *
+	 * @return array{valid:bool,restricted:bool,message:string} Validation result.
+	 */
+	private function validate_api_key_result( $api_key, $mode = 'live' ): array {
 		// Check the API key prefix based on the mode.
-		$is_test_key = str_starts_with( $api_key, 'sk_test_' );
-		$is_live_key = str_starts_with( $api_key, 'sk_live_' );
+		$is_test_key = 0 === strpos( $api_key, 'sk_test_' ) || 0 === strpos( $api_key, 'rk_test_' );
+		$is_live_key = 0 === strpos( $api_key, 'sk_live_' ) || 0 === strpos( $api_key, 'rk_live_' );
 
 		if ( 'test' === $mode && ! $is_test_key ) {
-			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-			__( 'Invalid test API key. Test keys must start with sk_test_.', 'stripe-terminal-for-woocommerce' ) .
-			'</span>';
+			return array(
+				'valid'      => false,
+				'restricted' => false,
+				'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+				__( 'Invalid test API key. Test keys must start with sk_test_ or rk_test_.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>',
+			);
 		}
 
 		if ( 'live' === $mode && ! $is_live_key ) {
-			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-			__( 'Invalid live API key. Live keys must start with sk_live_.', 'stripe-terminal-for-woocommerce' ) .
-			'</span>';
+			return array(
+				'valid'      => false,
+				'restricted' => false,
+				'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+				__( 'Invalid live API key. Live keys must start with sk_live_ or rk_live_.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>',
+			);
+		}
+
+		if ( 0 === strpos( $api_key, 'rk_' ) ) {
+			return array(
+				'valid'      => true,
+				'restricted' => true,
+				'message'    => '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
+				__( 'Restricted Stripe API key format is valid. Ensure the key has Terminal and PaymentIntent permissions.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>',
+			);
 		}
 
 		try {
@@ -786,24 +916,40 @@ class Gateway extends WC_Payment_Gateway {
 			$account = \Stripe\Account::retrieve();
 
 			if ( 'test' === $mode && ! $account->charges_enabled ) {
-				return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-				__( 'Test key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
-				'</span>';
+				return array(
+					'valid'      => false,
+					'restricted' => false,
+					'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+					__( 'Test key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
+					'</span>',
+				);
 			}
 
 			if ( 'live' === $mode && ! $account->charges_enabled ) {
-				return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-				__( 'Live key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
-				'</span>';
+				return array(
+					'valid'      => false,
+					'restricted' => false,
+					'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+					__( 'Live key provided, but charges are not enabled for the account.', 'stripe-terminal-for-woocommerce' ) .
+					'</span>',
+				);
 			}
 
-			return '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
-			__( 'Stripe API key is valid.', 'stripe-terminal-for-woocommerce' ) .
-			'</span>';
+			return array(
+				'valid'      => true,
+				'restricted' => false,
+				'message'    => '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
+				__( 'Stripe API key is valid.', 'stripe-terminal-for-woocommerce' ) .
+				'</span>',
+			);
 		} catch ( \Stripe\Exception\ApiErrorException $e ) {
-			return '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
-			$this->handle_stripe_exception( $e, 'admin' ) .
-			'</span>';
+			return array(
+				'valid'      => false,
+				'restricted' => false,
+				'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+				$this->handle_stripe_exception( $e, 'admin' ) .
+				'</span>',
+			);
 		}
 	}
 

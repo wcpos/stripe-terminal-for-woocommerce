@@ -35,6 +35,11 @@ namespace {
 			}
 		}
 	}
+
+	if ( ! class_exists( 'WC_Order' ) ) {
+		class WC_Order extends WC_Abstract_Order {}
+	}
+
 }
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
@@ -43,6 +48,21 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 	use Brain\Monkey\Functions;
 	use PHPUnit\Framework\TestCase;
 	use WCPOS\WooCommercePOS\StripeTerminal\Gateway;
+
+	class GatewayValidationTestDouble extends Gateway {
+		public $options = array();
+		public $webhook_called = false;
+
+		public function get_option( $key ) {
+			return $this->options[ $key ] ?? null;
+		}
+
+		public function validate_and_set_webhook( $api_key, $mode = 'live' ) {
+			$this->webhook_called = true;
+
+			return 'webhook-called';
+		}
+	}
 
 	/**
 	 * @covers \WCPOS\WooCommercePOS\StripeTerminal\Gateway
@@ -69,6 +89,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			$order = \Mockery::mock( \WC_Abstract_Order::class );
 			$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_key' );
+			$order->shouldReceive( 'get_id' )->andReturn( 42 );
 			$order->shouldReceive( 'get_meta' )->with( '_pos_user', true )->andReturn( '2' );
 
 			$current_user_id = 99;
@@ -104,6 +125,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					$current_user_id = $user_id;
 				}
 			);
+			Functions\when( 'wp_salt' )->justReturn( 'unit-test-salt' );
 			Functions\when( 'wp_create_nonce' )->alias(
 				function ( $action ) use ( &$current_user_id ) {
 					return 'nonce-for-' . $action . '-user-' . $current_user_id;
@@ -141,6 +163,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					'wp_enqueue_script'        => true,
 					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
 					'wp_create_nonce'          => 'default-nonce',
+					'wp_salt'                  => 'unit-test-salt',
 					'__'                       => function ( $text ) {
 						return $text;
 					},
@@ -174,6 +197,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			$order = \Mockery::mock( \WC_Abstract_Order::class );
 			$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_key' );
+			$order->shouldReceive( 'get_id' )->andReturn( 42 );
 
 			$localized_data = null;
 
@@ -186,6 +210,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					'wp_enqueue_script'        => true,
 					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
 					'wp_create_nonce'          => 'default-nonce',
+					'wp_salt'                  => 'unit-test-salt',
 					'__'                       => function ( $text ) {
 						return $text;
 					},
@@ -232,5 +257,107 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				$gateway->order_received_url( 'http://example.test/order-received/42', new \WC_Abstract_Order() )
 			);
 		}
+
+		public function test_check_key_status_does_not_set_webhook_for_invalid_key(): void {
+			$gateway = ( new \ReflectionClass( GatewayValidationTestDouble::class ) )->newInstanceWithoutConstructor();
+			$gateway->options = array(
+				'secret_key' => 'sk_test_wrong_mode',
+			);
+
+			Functions\stubs(
+				array(
+					'__' => function ( $text ) {
+						return $text;
+					},
+				)
+			);
+
+			$method = new \ReflectionMethod( Gateway::class, 'check_key_status' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$method->setAccessible( true );
+			}
+			$status = $method->invoke( $gateway, 'live' );
+
+			$this->assertStringContainsString( 'Invalid live API key', $status );
+			$this->assertFalse( $gateway->webhook_called );
+		}
+
+		public function test_check_key_status_does_not_set_webhook_for_restricted_key(): void {
+			$gateway = ( new \ReflectionClass( GatewayValidationTestDouble::class ) )->newInstanceWithoutConstructor();
+			$gateway->options = array(
+				'secret_key' => 'rk_live_restricted',
+			);
+
+			Functions\stubs(
+				array(
+					'__' => function ( $text ) {
+						return $text;
+					},
+				)
+			);
+
+			$method = new \ReflectionMethod( Gateway::class, 'check_key_status' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$method->setAccessible( true );
+			}
+			$status = $method->invoke( $gateway, 'live' );
+
+			$this->assertStringContainsString( 'Restricted Stripe API key format is valid', $status );
+			$this->assertFalse( $gateway->webhook_called );
+		}
+
+
+		public function test_process_payment_requires_strict_paid_true_from_stripe_api_check(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( false );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( '' );
+			$order->shouldReceive( 'set_transaction_id' )->never();
+			$order->shouldReceive( 'payment_complete' )->never();
+
+			$stripe_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$stripe_service->shouldReceive( 'check_payment_status_from_stripe' )
+				->with( $order )
+				->once()
+				->andReturn(
+					array(
+						'charge'         => array(
+							'id'   => 'ch_test',
+							'paid' => 1,
+						),
+						'payment_intent' => array(
+							'id'     => 'pi_test',
+							'status' => 'succeeded',
+						),
+					)
+				);
+
+			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( $gateway, $stripe_service );
+
+			Functions\stubs(
+				array(
+					'__'          => function ( $text ) {
+						return $text;
+					},
+				)
+			);
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( 'wc_add_notice' )->alias(
+				function ( $message, $type ) {
+					TestCase::assertSame( 'error', $type );
+					TestCase::assertStringContainsString( 'No successful payment found', $message );
+				}
+			);
+
+			$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
+		}
+
 	}
 }

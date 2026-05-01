@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.22 - 2026-05-01
+
+### Fixed
+
+- Clear stale in-progress reader actions for previous payment intents before sending a new payment to the terminal
+- Add explicit force-clear recovery for stale Terminal reader actions with expected PaymentIntent verification
+- Add signed POS payment tokens so desktop/JWT checkout flows do not depend on WordPress cookie nonces
+- Allow Stripe restricted API key prefixes and mask saved API keys in settings
+- Prevent declined or non-succeeded Terminal PaymentIntents from reporting order payment success
+
 ## 0.0.21 - 2026-05-01
 
 ### Fixed
