@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.24 - 2026-05-14
+
+### Fixed
+
+- Allow desktop POS terminal payment requests to authenticate with the WooCommerce order key when no WordPress admin nonce session is available
+- Include order-scoped authentication data when verifying reader pickup status so desktop POS polling does not depend on WP Admin cookies
+
 ## 0.0.23 - 2026-05-14
 
 ### Fixed
