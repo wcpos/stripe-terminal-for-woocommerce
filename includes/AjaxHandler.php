@@ -953,15 +953,22 @@ class AjaxHandler {
 	private function verify_order_ajax_request( WC_Order $order ): bool {
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 		$payment_token = isset( $_POST['payment_token'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_token'] ) ) : '';
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce, signed order token, or POS order key before side effects.
+		$provided_order_key = isset( $_POST['order_key'] ) ? sanitize_text_field( wp_unslash( $_POST['order_key'] ) ) : '';
 
 		if ( '' === $payment_token ) {
+			if (
+				'' !== $provided_order_key
+				&& $provided_order_key === $order->get_order_key()
+			) {
+				return true;
+			}
+
 			return $this->verify_ajax_nonce();
 		}
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
 		$expires            = isset( $_POST['payment_token_expires'] ) ? absint( $_POST['payment_token_expires'] ) : 0;
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
-		$provided_order_key = isset( $_POST['order_key'] ) ? sanitize_text_field( wp_unslash( $_POST['order_key'] ) ) : '';
 
 		if (
 			! PaymentRequestToken::validate(

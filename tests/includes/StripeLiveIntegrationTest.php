@@ -57,7 +57,6 @@ class StripeLiveIntegrationTest extends TestCase {
 				'order_id'  => '42',
 				'amount'    => '1234',
 				'reader_id' => 'tmr_test_reader',
-				'order_key' => 'wc_order_test',
 			);
 
 			Functions\stubs(
