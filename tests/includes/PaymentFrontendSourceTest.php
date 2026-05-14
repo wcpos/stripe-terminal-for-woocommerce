@@ -24,6 +24,10 @@ class PaymentFrontendSourceTest extends TestCase {
 	}
 
 	private function assert_reader_pickup_verification_keeps_polling( string $file, string $source ): void {
+		if ( ! $this->node_is_available() ) {
+			$this->markTestSkipped( 'Node.js is required for PaymentFrontendSourceTest.' );
+		}
+
 		$script = str_replace(
 			array( '__PAYMENT_FRONTEND_SOURCE__', '__PAYMENT_FRONTEND_FILE__' ),
 			array( json_encode( $source ), json_encode( $file ) ),
@@ -50,6 +54,26 @@ class PaymentFrontendSourceTest extends TestCase {
 		$status = proc_close( $process );
 
 		$this->assertSame( 0, $status, trim( $output . "\n" . $error ) ?: $file );
+	}
+
+	private function node_is_available(): bool {
+		$process = proc_open(
+			array( 'node', '--version' ),
+			array(
+				1 => array( 'pipe', 'w' ),
+				2 => array( 'pipe', 'w' ),
+			),
+			$pipes
+		);
+
+		if ( ! is_resource( $process ) ) {
+			return false;
+		}
+
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		return 0 === proc_close( $process );
 	}
 
 	private function reader_pickup_verification_script(): string {
