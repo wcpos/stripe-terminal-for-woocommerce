@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.23 - 2026-05-14
+
+### Fixed
+
+- Stop treating stale Stripe Terminal `last_seen_at` timestamps as a hard failure before dispatching payments to a reader
+- Keep POS payment polling active when reader pickup verification is inconclusive so valid in-progress payments are not cancelled prematurely
+
 ## 0.0.22 - 2026-05-01
 
 ### Fixed

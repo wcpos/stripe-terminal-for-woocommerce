@@ -976,10 +976,13 @@ class StripeTerminalServiceTest extends TestCase {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Test process_payment_intent returns reader_stale error when reader
-	 * last_seen_at is older than 120 seconds.
+	 * Test process_payment_intent still dispatches when reader last_seen_at is old.
+	 *
+	 * Stripe can report an older last_seen_at for idle smart readers even though
+	 * they can still receive server-driven processPaymentIntent commands. Blocking
+	 * on this timestamp strands usable readers until merchants restart them.
 	 */
-	public function test_process_payment_intent_returns_reader_stale_when_last_seen_old(): void {
+	public function test_process_payment_intent_attempts_dispatch_when_last_seen_old(): void {
 		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
 
 		// Build mock: readers->retrieve() returns reader with stale last_seen_at.
@@ -997,6 +1000,11 @@ class StripeTerminalServiceTest extends TestCase {
 		$readers_mock->shouldReceive( 'retrieve' )
 			->with( 'tmr_fake_reader' )
 			->andReturn( $reader_mock );
+		$readers_mock->shouldReceive( 'processPaymentIntent' )
+			->once()
+			->andThrow(
+				\Stripe\Exception\AuthenticationException::factory( 'Invalid API Key' )
+			);
 
 		$terminal_mock          = Mockery::mock();
 		$terminal_mock->readers = $readers_mock;
@@ -1009,7 +1017,7 @@ class StripeTerminalServiceTest extends TestCase {
 		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_fake_intent' );
 
 		$this->assertInstanceOf( WP_Error::class, $result );
-		$this->assertSame( 'reader_stale', $result->get_error_code() );
+		$this->assertNotSame( 'reader_stale', $result->get_error_code() );
 	}
 
 	/**
