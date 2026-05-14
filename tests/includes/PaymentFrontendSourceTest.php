@@ -82,13 +82,15 @@ const assert = require('node:assert/strict'), vm = require('node:vm'), filename 
 const calls = { ajax: null, cancelPayment: 0, resetReader: 0, showError: 0, stopPolling: 0 }, logs = [];
 function jQuery() { return { ready() {} }; } jQuery.ajax = async (request) => (calls.ajax = request.data, { success: true, data: { last_seen_at: 100 } });
 const executableSource = source.replace(/^\s*import\s+['"].*payment\.css['"];\s*/m, '').replace(/export\s+default\s+StripeTerminalPayment;\s*$/, 'module.exports = StripeTerminalPayment;');
-const sandbox = { console: { error() {}, log() {}, warn() {} }, document: {}, exports: {}, jQuery, localStorage: { getItem() { return null; }, removeItem() {}, setItem() {} }, module: { exports: {} }, window: { ajaxurl: '/wp-admin/admin-ajax.php', stripeTerminalData: { ajaxUrl: '/wp-admin/admin-ajax.php', nonce: 'nonce' } } };
+const sandbox = { console: { error() {}, log() {}, warn() {} }, document: {}, exports: {}, jQuery, localStorage: { getItem() { return null; }, removeItem() {}, setItem() {} }, module: { exports: {} }, window: { ajaxurl: '/wp-admin/admin-ajax.php', stripeTerminalData: { ajaxUrl: '/wp-admin/admin-ajax.php', nonce: '', orderKey: 'wc_order_current', paymentToken: 'signed-token', paymentTokenExpires: 1234567890 } } };
 sandbox.global = sandbox.globalThis = sandbox; vm.runInNewContext(executableSource, sandbox, { filename });
 const PaymentFrontend = sandbox.module.exports.default || sandbox.module.exports;
 assert.equal(typeof PaymentFrontend, 'function', `${filename}: expected payment frontend export`); PaymentFrontend.prototype.init = function init() {};
 const payment = new PaymentFrontend(); Object.assign(payment, { currentPaymentIntent: { id: 'pi_123' }, activePaymentReaderId: 'tmr_123', readerLastSeenAt: 100, readerVerifyTimeout: { active: true }, pollingInterval: { active: true }, pollingTimeout: { active: true }, addToLog: (message, level) => logs.push([message, level]), cancelPayment: async () => calls.cancelPayment += 1, resetReader: () => calls.resetReader += 1, showError: () => calls.showError += 1, stopPolling: () => { calls.stopPolling += 1; payment.pollingInterval = null; payment.pollingTimeout = null; } });
 (async () => {
   await payment.verifyReaderPickup('123', {}); assert.equal(calls.ajax.action, 'stripe_terminal_get_reader_status', `${filename}: reader status was not checked`);
+  assert.equal(calls.ajax.order_key, 'wc_order_current', `${filename}: reader verification should include order key auth`);
+  assert.equal(calls.ajax.payment_token, 'signed-token', `${filename}: reader verification should include payment token auth`);
   for (const [method, count] of Object.entries({ cancelPayment: calls.cancelPayment, resetReader: calls.resetReader, showError: calls.showError, stopPolling: calls.stopPolling })) {
     assert.equal(count, 0, `${filename}: ${method} must not run for unchanged last_seen_at`);
   }

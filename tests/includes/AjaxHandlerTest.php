@@ -142,11 +142,9 @@ class AjaxHandlerTest extends TestCase {
 		$_POST = array(
 			'order_id'  => '42',
 			'reader_id' => 'tmr_abc123',
-			'order_key' => 'wc_order_current',
 		);
 
 		$order = \Mockery::mock( 'WC_Order' );
-		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
 		Functions\when( 'wc_get_order' )->justReturn( $order );
 
 		$error = $this->call_and_capture_error( 'create_payment_intent', false );
@@ -160,11 +158,9 @@ class AjaxHandlerTest extends TestCase {
 			'nonce'     => 'invalid_nonce',
 			'order_id'  => '42',
 			'reader_id' => 'tmr_abc123',
-			'order_key' => 'wc_order_current',
 		);
 
 		$order = \Mockery::mock( 'WC_Order' );
-		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
 		Functions\when( 'wc_get_order' )->justReturn( $order );
 
 		$error = $this->call_and_capture_error( 'create_payment_intent' );
@@ -553,6 +549,60 @@ class AjaxHandlerTest extends TestCase {
 			$this->fail( 'Expected wp_send_json_success to be called' );
 		} catch ( JsonSuccessSentinel $e ) {
 			$this->assertSame( 'pi_token_ok', $e->data['payment_intent']['id'] );
+		} catch ( JsonErrorSentinel $e ) {
+			$this->fail( 'Unexpected AJAX error: ' . ( is_scalar( $e->data ) ? $e->data : json_encode( $e->data ) ) );
+		}
+	}
+
+	public function test_create_payment_intent_accepts_order_key_without_nonce_or_logged_in_user(): void {
+		Functions\when( 'check_ajax_referer' )->alias(
+			function () {
+				TestCase::fail( 'Order-key authenticated requests should not require a WordPress nonce.' );
+			}
+		);
+
+		$_POST = array(
+			'order_id'  => '42',
+			'reader_id' => 'tmr_abc123',
+			'order_key' => 'wc_order_current',
+		);
+
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( true );
+		$order->shouldReceive( 'get_total' )->andReturn( '30.00' );
+		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+		$order->shouldReceive( 'update_meta_data' )->with( '_stripe_terminal_payment_intent_id', 'pi_pos_key_ok' )->once();
+		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
+		$order->shouldReceive( 'save' )->once();
+		$order->shouldReceive( 'add_order_note' )->twice();
+
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+
+		$mock_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$mock_service->shouldReceive( 'create_payment_intent' )
+			->with( $order, 3000, false )
+			->once()
+			->andReturn( array( 'id' => 'pi_pos_key_ok' ) );
+		$mock_service->shouldReceive( 'process_payment_intent' )
+			->with( 'tmr_abc123', 'pi_pos_key_ok', array() )
+			->once()
+			->andReturn( array( 'action' => array( 'status' => 'in_progress' ) ) );
+
+		Functions\when( 'wp_send_json_success' )->alias(
+			function ( $data = null ) {
+				throw new JsonSuccessSentinel( $data );
+			}
+		);
+
+		$handler = new AjaxHandler( $mock_service );
+
+		try {
+			$handler->create_payment_intent();
+			$this->fail( 'Expected wp_send_json_success to be called' );
+		} catch ( JsonSuccessSentinel $e ) {
+			$this->assertSame( 'pi_pos_key_ok', $e->data['payment_intent']['id'] );
 		} catch ( JsonErrorSentinel $e ) {
 			$this->fail( 'Unexpected AJAX error: ' . ( is_scalar( $e->data ) ? $e->data : json_encode( $e->data ) ) );
 		}

@@ -23,6 +23,7 @@ class StripeTerminalPayment {
     this.config = window.stripeTerminalData || {};
     this.ajaxUrl = this.config.ajaxUrl || window.ajaxurl || '/wp-admin/admin-ajax.php';
     this.nonce = this.config.nonce || '';
+    this.orderKey = this.config.orderKey || this.getOrderKeyFromUrl();
     this.paymentToken = this.config.paymentToken || '';
     this.paymentTokenExpires = this.config.paymentTokenExpires || '';
     this.strings = this.config.strings || {};
@@ -127,14 +128,22 @@ class StripeTerminalPayment {
   }
 
   addPaymentRequestData(ajaxData) {
-    if (this.config.orderKey) {
-      ajaxData.order_key = this.config.orderKey;
+    if (this.orderKey) {
+      ajaxData.order_key = this.orderKey;
     }
     if (this.paymentToken) {
       ajaxData.payment_token = this.paymentToken;
       ajaxData.payment_token_expires = this.paymentTokenExpires;
     }
     return ajaxData;
+  }
+
+  getOrderKeyFromUrl() {
+    try {
+      return new URLSearchParams(window.location.search).get('key') || '';
+    } catch (error) {
+      return '';
+    }
   }
 
   createAjaxError(data, fallback) {
@@ -521,11 +530,12 @@ class StripeTerminalPayment {
       const response = await jQuery.ajax({
         url: this.ajaxUrl,
         type: 'POST',
-        data: {
+        data: this.addPaymentRequestData({
           action: 'stripe_terminal_get_reader_status',
           reader_id: this.activePaymentReaderId,
+          order_id: orderId,
           nonce: this.nonce
-        }
+        })
       });
 
       if (!response.success) {
