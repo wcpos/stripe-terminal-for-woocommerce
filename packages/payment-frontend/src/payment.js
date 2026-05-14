@@ -541,29 +541,14 @@ class StripeTerminalPayment {
         return;
       }
 
-      // If last_seen_at hasn't advanced, the reader likely didn't pick up the command.
+      // If last_seen_at hasn't advanced, treat the check as inconclusive.
+      // Some smart readers keep a stale timestamp while still accepting the
+      // server-driven processPaymentIntent command, so cancelling here can
+      // abort a valid payment. Continue polling Stripe for the authoritative
+      // payment status instead.
       if (currentLastSeen <= this.readerLastSeenAt) {
-        console.warn('Reader pickup verification failed: last_seen_at has not advanced');
-        this.addToLog('Reader did not respond to payment command', 'warning');
-
-        // Stop polling and cancel the payment.
-        this.stopPolling();
-
-        if (this.currentPaymentIntent && this.currentPaymentIntent.id) {
-          try {
-            await this.cancelPayment(this.currentPaymentIntent.id, orderId);
-          } catch (cancelError) {
-            console.error('Error cancelling after reader verification failure:', cancelError);
-          }
-        }
-
-        this.showError('Reader didn\'t respond to the payment command. It may need to be restarted.');
-        this.currentPaymentIntent = null;
-        this.activePaymentReaderId = null;
-        this.readerLastSeenAt = null;
-        this.isDeclined = false;
-        button.prop('disabled', false).text(this.strings.payWithTerminal || 'Pay with Terminal');
-        this.updateButtonVisibility();
+        console.warn('Reader pickup verification inconclusive: last_seen_at has not advanced');
+        this.addToLog('Reader pickup verification inconclusive; continuing payment status polling', 'warning');
       } else {
         this.addToLog('Reader pickup verified — reader is responding', 'info');
       }

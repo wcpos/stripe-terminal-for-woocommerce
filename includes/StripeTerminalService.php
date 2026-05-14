@@ -217,11 +217,12 @@ class StripeTerminalService {
 	}
 
 	/**
-	 * Check reader freshness and clear any stale actions before processing.
+	 * Clear stale reader actions before processing.
 	 *
-	 * Blocks if the reader hasn't been seen within 120 seconds (likely disconnected).
 	 * A stale action is one that has failed, or is for a different payment
-	 * intent and is no longer in progress.
+	 * intent and is no longer in progress. Reader freshness timestamps are
+	 * diagnostic-only because idle smart readers can still accept commands even
+	 * when last_seen_at has not advanced recently.
 	 *
 	 * @param string $reader_id         The reader ID.
 	 * @param string $payment_intent_id The payment intent ID we intend to process.
@@ -236,15 +237,12 @@ class StripeTerminalService {
 			return null;
 		}
 
-		// Check reader freshness — if not seen recently, it's likely disconnected.
+		// last_seen_at is diagnostic only. Do not block dispatch solely because
+		// it is old: Stripe smart readers can have stale timestamps while idle,
+		// and processPaymentIntent is the authoritative liveness check.
 		$last_seen = $reader['last_seen_at'] ?? null;
 		if ( $last_seen && ( time() - $last_seen ) > 120 ) {
-			Logger::log( 'clear_stale_reader_action: Reader last seen ' . ( time() - $last_seen ) . 's ago, likely disconnected.' );
-			return new WP_Error(
-				'reader_stale',
-				'Reader has not been seen recently and may be disconnected. Try restarting the reader.',
-				array( 'status' => 503 )
-			);
+			Logger::log( 'clear_stale_reader_action: Reader last seen ' . ( time() - $last_seen ) . 's ago; attempting payment dispatch anyway.' );
 		}
 
 		$action = $reader['action'] ?? null;
