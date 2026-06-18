@@ -17,7 +17,7 @@ wp core install \
   --skip-email
 
 echo "Installing WooCommerce..."
-wp plugin install woocommerce --activate --path=/var/www/html
+wp plugin install woocommerce --version=10.6.2 --activate --path=/var/www/html
 
 echo "Activating Stripe Terminal plugin..."
 wp plugin activate stripe-terminal-for-woocommerce --path=/var/www/html
