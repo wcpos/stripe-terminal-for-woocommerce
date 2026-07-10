@@ -17,6 +17,8 @@ use WC_Payment_Gateway;
 class Gateway extends WC_Payment_Gateway {
 	use Abstracts\StripeErrorHandler; // Include the Stripe error handler trait.
 
+	private const GATEWAY_ID = 'stripe_terminal_for_woocommerce';
+
 	/**
 	 * Whether test mode is enabled.
 	 *
@@ -42,7 +44,7 @@ class Gateway extends WC_Payment_Gateway {
 	 * Constructor for the gateway.
 	 */
 	public function __construct() {
-		$this->id                 = 'stripe_terminal_for_woocommerce';
+		$this->id                 = self::GATEWAY_ID;
 		$this->method_title       = __( 'Stripe Terminal', 'stripe-terminal-for-woocommerce' );
 		$this->method_description = __( 'Accept in-person payments using Stripe Terminal.', 'stripe-terminal-for-woocommerce' );
 
@@ -142,6 +144,54 @@ class Gateway extends WC_Payment_Gateway {
 		$methods[] = __CLASS__;
 
 		return $methods;
+	}
+
+	/**
+	 * Recover a duplicate POS order-pay submission after Terminal payment completed.
+	 *
+	 * A second form submission can arrive after the first request marks the order
+	 * paid. WooCommerce then skips the gateway and the POS payment template renders
+	 * an "already paid" error instead of reaching the order-received page. Redirect
+	 * only the matching paid Terminal POST so the normal POS completion message runs.
+	 */
+	public static function maybe_redirect_paid_order_submission(): void {
+		global $wp;
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- This read-only recovery path authenticates with WooCommerce's order key below.
+		$is_pay_submission = isset( $_POST['woocommerce_pay'] );
+		if (
+			! \function_exists( 'woocommerce_pos_request' )
+			|| ! woocommerce_pos_request()
+			|| ! $is_pay_submission
+			|| ! isset( $wp->query_vars['order-pay'] )
+		) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- This read-only recovery path authenticates with WooCommerce's order key below.
+		$submitted_payment_method = isset( $_POST['payment_method'] ) && \is_string( $_POST['payment_method'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_method'] ) ) : '';
+		if ( self::GATEWAY_ID !== $submitted_payment_method ) {
+			return;
+		}
+
+		$order = wc_get_order( absint( $wp->query_vars['order-pay'] ) );
+		if ( ! $order instanceof WC_Abstract_Order ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- The order key is WooCommerce's authentication mechanism for order-pay requests.
+		$provided_key = isset( $_GET['key'] ) && \is_string( $_GET['key'] ) ? sanitize_text_field( wp_unslash( $_GET['key'] ) ) : '';
+		if ( '' === $provided_key || ! hash_equals( $order->get_order_key(), $provided_key ) ) {
+			return;
+		}
+
+		if ( self::GATEWAY_ID !== $order->get_payment_method() || ! $order->is_paid() ) {
+			return;
+		}
+
+		wc_nocache_headers();
+		wp_safe_redirect( $order->get_checkout_order_received_url() );
+		exit;
 	}
 
 	/**
