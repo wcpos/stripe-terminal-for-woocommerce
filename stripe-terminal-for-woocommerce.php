@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Stripe Terminal for WooCommerce
  * Description: Adds Stripe Terminal support to WooCommerce for in-person payments.
- * Version:     0.0.24
+ * Version:     0.0.25
  * Author:      kilbot
  * Author URI:  https://kilbot.com/
  * Update URI:  https://github.com/wcpos/stripe-terminal-for-woocommerce
@@ -23,7 +23,7 @@ if ( ! \defined( 'ABSPATH' ) ) {
 }
 
 // Define constants.
-\define( 'STWC_VERSION', '0.0.24' );
+\define( 'STWC_VERSION', '0.0.25' );
 \define( 'STWC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 \define( 'STWC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
@@ -60,6 +60,9 @@ spl_autoload_register(
 function init(): void {
 	// Register the gateway.
 	add_filter( 'woocommerce_payment_gateways', array( Gateway::class, 'register_gateway' ) );
+
+	// Recover duplicate paid Terminal form submissions before the POS template renders an error.
+	add_action( 'wp', array( Gateway::class, 'maybe_redirect_paid_order_submission' ), 20 );
 
 	/*
 	 * Removed the complex React application and terminal-js integration.

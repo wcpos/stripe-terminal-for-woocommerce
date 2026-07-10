@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.25 - 2026-07-10
+
+### Fixed
+
+- Recover duplicate paid Stripe Terminal submissions through the normal POS order-received flow so checkout can finish its receipt handoff instead of showing an already-paid error
+
 ## 0.0.24 - 2026-05-14
 
 ### Fixed

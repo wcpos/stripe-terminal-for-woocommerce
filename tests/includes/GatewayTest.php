@@ -76,6 +76,8 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		protected function tearDown(): void {
 			\Mockery::close();
 			unset( $GLOBALS['wp'] );
+			$_POST = array();
+			$_GET  = array();
 			Monkey\tearDown();
 			parent::tearDown();
 		}
@@ -258,6 +260,74 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 		}
 
+		public function test_paid_pos_terminal_resubmission_redirects_to_order_received_url(): void {
+			$order = $this->prepare_paid_submission_request();
+			$order->shouldReceive( 'is_paid' )->once()->andReturn( true );
+			$order->shouldReceive( 'get_payment_method' )->once()->andReturn( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'get_order_key' )->once()->andReturn( 'wc_order_key' );
+			$order->shouldReceive( 'get_checkout_order_received_url' )->once()->andReturn( 'https://example.test/wcpos-checkout/order-received/42?key=wc_order_key' );
+
+			$redirect_url = null;
+			Functions\when( 'wp_safe_redirect' )->alias(
+				function ( $url ) use ( &$redirect_url ) {
+					$redirect_url = $url;
+
+					throw new \RuntimeException( 'redirected' );
+				}
+			);
+
+			try {
+				Gateway::maybe_redirect_paid_order_submission();
+				$this->fail( 'Expected the paid Terminal submission to redirect.' );
+			} catch ( \RuntimeException $e ) {
+				$this->assertSame( 'redirected', $e->getMessage() );
+			}
+
+			$this->assertSame( 'https://example.test/wcpos-checkout/order-received/42?key=wc_order_key', $redirect_url );
+		}
+
+		public function test_unpaid_pos_terminal_submission_does_not_redirect(): void {
+			$order = $this->prepare_paid_submission_request();
+			$order->shouldReceive( 'get_order_key' )->once()->andReturn( 'wc_order_key' );
+			$order->shouldReceive( 'get_payment_method' )->once()->andReturn( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'is_paid' )->once()->andReturn( false );
+
+			Functions\expect( 'wp_safe_redirect' )->never();
+
+			Gateway::maybe_redirect_paid_order_submission();
+		}
+
+		public function test_paid_pos_terminal_submission_with_wrong_key_does_not_redirect(): void {
+			$order = $this->prepare_paid_submission_request();
+			$order->shouldReceive( 'get_order_key' )->once()->andReturn( 'wc_order_key' );
+			$order->shouldReceive( 'get_payment_method' )->never();
+			$order->shouldReceive( 'is_paid' )->never();
+			$_GET['key'] = 'wrong_key';
+
+			Functions\expect( 'wp_safe_redirect' )->never();
+
+			Gateway::maybe_redirect_paid_order_submission();
+		}
+
+		public function test_paid_non_pos_terminal_submission_does_not_redirect(): void {
+			$this->prepare_paid_submission_request( false );
+
+			Functions\expect( 'wc_get_order' )->never();
+			Functions\expect( 'wp_safe_redirect' )->never();
+
+			Gateway::maybe_redirect_paid_order_submission();
+		}
+
+		public function test_paid_pos_non_terminal_submission_does_not_redirect(): void {
+			$this->prepare_paid_submission_request();
+			$_POST['payment_method'] = 'cod';
+
+			Functions\expect( 'wc_get_order' )->never();
+			Functions\expect( 'wp_safe_redirect' )->never();
+
+			Gateway::maybe_redirect_paid_order_submission();
+		}
+
 		public function test_check_key_status_does_not_set_webhook_for_invalid_key(): void {
 			$gateway = ( new \ReflectionClass( GatewayValidationTestDouble::class ) )->newInstanceWithoutConstructor();
 			$gateway->options = array(
@@ -359,5 +429,49 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
 		}
 
+		/**
+		 * Prepare a submitted POS Terminal order-pay request.
+		 *
+		 * @param bool $is_pos_request Whether this is a POS checkout request.
+		 * @return \Mockery\MockInterface
+		 */
+		private function prepare_paid_submission_request( bool $is_pos_request = true ) {
+			$this->assertTrue(
+				is_callable( array( Gateway::class, 'maybe_redirect_paid_order_submission' ) ),
+				'Gateway must expose paid Terminal submission recovery.'
+			);
+
+			$_POST = array(
+				'woocommerce_pay' => '1',
+				'payment_method'  => 'stripe_terminal_for_woocommerce',
+			);
+			$_GET  = array(
+				'key' => 'wc_order_key',
+			);
+			$GLOBALS['wp'] = (object) array(
+				'query_vars' => array( 'order-pay' => 42 ),
+			);
+
+			$order = \Mockery::mock( \WC_Order::class );
+
+			Functions\stubs(
+				array(
+					'woocommerce_pos_request' => $is_pos_request,
+					'wp_unslash'              => function ( $value ) {
+						return $value;
+					},
+					'sanitize_text_field'     => function ( $value ) {
+						return $value;
+					},
+					'absint'                  => function ( $value ) {
+						return abs( (int) $value );
+					},
+					'wc_nocache_headers'      => true,
+				)
+			);
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+
+			return $order;
+		}
 	}
 }
