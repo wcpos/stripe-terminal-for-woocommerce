@@ -18,7 +18,7 @@
 To accept Terminal payments from the online store checkout (in addition to POS):
 
 1. Enable **Enable Stripe Terminal for web checkout** under `WooCommerce > Settings > Payments > Stripe Terminal`.
-2. Stripe Terminal will appear on both classic shortcode checkout and the WooCommerce Blocks Checkout.
+2. Stripe Terminal will appear on both classic shortcode checkout and the WooCommerce Blocks Checkout (**Blocks requires WordPress 6.6+**; older installs keep classic/POS support and omit Terminal from Blocks checkout only).
 3. After the customer places the order, they are redirected to the order-pay page to connect a reader and complete the card-present payment.
 
 Abandoning the reader step leaves a `pending` order, which is standard deferred-gateway behaviour.

@@ -4,7 +4,7 @@
 
 ### Added
 
-- WooCommerce Blocks checkout support: Stripe Terminal appears when the web-checkout setting is enabled
+- WooCommerce Blocks checkout support: Stripe Terminal appears when the web-checkout setting is enabled (requires WordPress 6.6+ for the Blocks JSX runtime; older WP installs keep classic/POS Terminal and simply omit Terminal from Blocks checkout)
 - After Place order on Blocks (or classic) checkout, customers are redirected to the classic order-pay page to complete payment on the reader
 
 ### Fixed

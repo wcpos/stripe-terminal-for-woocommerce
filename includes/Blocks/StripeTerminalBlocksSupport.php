@@ -36,7 +36,30 @@ final class StripeTerminalBlocksSupport extends AbstractPaymentMethodType {
 	 * @return bool
 	 */
 	public function is_active(): bool {
-		return 'yes' === $this->get_setting( 'enabled', 'no' );
+		if ( 'yes' !== $this->get_setting( 'enabled', 'no' ) ) {
+			return false;
+		}
+
+		// Built Blocks bundle uses the automatic JSX runtime (window.ReactJSXRuntime),
+		// which WordPress only registers from 6.6+. On older installs, stay inactive so
+		// Blocks checkout is not broken by a missing script dependency.
+		return $this->supports_blocks_jsx_runtime();
+	}
+
+	/**
+	 * Whether the current WordPress install provides react-jsx-runtime.
+	 *
+	 * @return bool
+	 */
+	private function supports_blocks_jsx_runtime(): bool {
+		global $wp_version;
+
+		if ( \is_string( $wp_version ) && version_compare( $wp_version, '6.6', '>=' ) ) {
+			return true;
+		}
+
+		// Fallback for odd boots / filtered $wp_version: prefer the actual script registry.
+		return \function_exists( 'wp_script_is' ) && wp_script_is( 'react-jsx-runtime', 'registered' );
 	}
 
 	/**
@@ -45,6 +68,10 @@ final class StripeTerminalBlocksSupport extends AbstractPaymentMethodType {
 	 * @return string[]
 	 */
 	public function get_payment_method_script_handles(): array {
+		if ( ! $this->supports_blocks_jsx_runtime() ) {
+			return array();
+		}
+
 		$script_path       = 'assets/js/blocks/index.js';
 		$script_asset_path = STWC_PLUGIN_DIR . 'assets/js/blocks/index.asset.php';
 		$script_url        = STWC_PLUGIN_URL . $script_path;
