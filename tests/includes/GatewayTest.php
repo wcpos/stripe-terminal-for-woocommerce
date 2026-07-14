@@ -380,6 +380,8 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		public function test_process_payment_requires_strict_paid_true_from_stripe_api_check(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
+			$_POST['woocommerce_pay'] = '1';
+
 			$order = \Mockery::mock( \WC_Order::class );
 			$order->shouldReceive( 'is_paid' )->andReturn( false );
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
@@ -427,6 +429,122 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 
 			$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
+		}
+
+		public function test_process_payment_redirects_to_order_pay_when_unpaid_from_checkout(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( false );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( '' );
+			$order->shouldReceive( 'get_checkout_payment_url' )->withNoArgs()->once()->andReturn( 'https://example.test/checkout/order-pay/42/?pay_for_order=true&key=wc_order_key' );
+			$order->shouldReceive( 'set_transaction_id' )->never();
+			$order->shouldReceive( 'payment_complete' )->never();
+
+			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( $gateway, null );
+
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( 'wc_add_notice' )->alias(
+				function () {
+					TestCase::fail( 'Checkout Place Order should redirect, not add an error notice.' );
+				}
+			);
+
+			$this->assertSame(
+				array(
+					'result'   => 'success',
+					'redirect' => 'https://example.test/checkout/order-pay/42/?pay_for_order=true&key=wc_order_key',
+				),
+				$gateway->process_payment( 42 )
+			);
+		}
+
+		public function test_process_payment_fails_on_order_pay_without_terminal_payment(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+
+			$_POST['woocommerce_pay'] = '1';
+
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( false );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( '' );
+			$order->shouldReceive( 'get_checkout_payment_url' )->never();
+			$order->shouldReceive( 'set_transaction_id' )->never();
+			$order->shouldReceive( 'payment_complete' )->never();
+
+			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( $gateway, null );
+
+			Functions\stubs(
+				array(
+					'__' => function ( $text ) {
+						return $text;
+					},
+				)
+			);
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( 'wc_add_notice' )->alias(
+				function ( $message, $type ) {
+					TestCase::assertSame( 'error', $type );
+					TestCase::assertStringContainsString( 'No successful payment found', $message );
+				}
+			);
+
+			$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
+		}
+
+		public function test_process_payment_completes_order_when_terminal_meta_succeeded(): void {
+			$gateway = new class() extends Gateway {
+				public function __construct() {
+					// Skip parent constructor; only exercise process_payment.
+				}
+
+				public function get_return_url( $order = null ) {
+					return 'https://example.test/checkout/order-received/42/';
+				}
+			};
+
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( false );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_123' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( 'ch_123' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( 'succeeded' );
+			$order->shouldReceive( 'set_transaction_id' )->with( 'ch_123' )->once();
+			$order->shouldReceive( 'payment_complete' )->with( 'ch_123' )->once();
+			$order->shouldReceive( 'add_order_note' )->once();
+
+			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( $gateway, null );
+
+			Functions\stubs(
+				array(
+					'__' => function ( $text ) {
+						return $text;
+					},
+				)
+			);
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+
+			$this->assertSame(
+				array(
+					'result'   => 'success',
+					'redirect' => 'https://example.test/checkout/order-received/42/',
+				),
+				$gateway->process_payment( 42 )
+			);
 		}
 
 		/**

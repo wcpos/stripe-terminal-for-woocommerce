@@ -20,8 +20,12 @@ composer.lock
 assets/js/*
 !assets/js/README.md
 !assets/js/indexeddb.worker.js
+!assets/js/payment.js
+!assets/js/blocks/
+!assets/js/blocks/**
 assets/css/*
 !assets/css/README.md
+!assets/css/payment.css
 assets/asset-manifest.json
 assets/static
 assets/report.html

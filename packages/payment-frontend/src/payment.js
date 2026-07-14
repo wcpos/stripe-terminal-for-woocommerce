@@ -1214,8 +1214,14 @@ class StripeTerminalPayment {
   }
 }
 
-// Initialize when DOM is ready
+// Initialize when DOM is ready and classic Terminal markup is present.
 jQuery(document).ready(function() {
+  // Blocks checkout has no payment_fields() UI; avoid reader AJAX on those pages
+  // even if this script was enqueued by another plugin/theme context.
+  if (jQuery('.stripe-terminal-loading, .stripe-terminal-payment-section').length === 0) {
+    return;
+  }
+
   window.stripeTerminalPayment = new StripeTerminalPayment();
 });
 
