@@ -1,0 +1,13 @@
+{
+  "name": "stripe-terminal-blocks-payment",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "wp-scripts build",
+    "start": "wp-scripts start",
+    "check-engines": "wp-scripts check-engines"
+  },
+  "devDependencies": {
+    "@wordpress/scripts": "^30.15.0"
+  }
+}

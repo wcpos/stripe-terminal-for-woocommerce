@@ -45,6 +45,13 @@ jobs:
           npm install
           npm run build
 
+      - name: Install and Build blocks-payment
+        if: steps.check_version.outputs.release == 'true'
+        working-directory: packages/blocks-payment
+        run: |
+          npm ci
+          npm run build
+
       - name: Create Release
         if: steps.check_version.outputs.release == 'true'
         id: create_release

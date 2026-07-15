@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Stripe Terminal for WooCommerce
  * Description: Adds Stripe Terminal support to WooCommerce for in-person payments.
- * Version:     0.0.25
+ * Version:     0.0.26
  * Author:      kilbot
  * Author URI:  https://kilbot.com/
  * Update URI:  https://github.com/wcpos/stripe-terminal-for-woocommerce
@@ -23,7 +23,7 @@ if ( ! \defined( 'ABSPATH' ) ) {
 }
 
 // Define constants.
-\define( 'STWC_VERSION', '0.0.25' );
+\define( 'STWC_VERSION', '0.0.26' );
 \define( 'STWC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 \define( 'STWC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
@@ -85,3 +85,30 @@ function init(): void {
 	new AjaxHandler();
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 11 );
+
+/**
+ * Declare compatibility with the WooCommerce Cart and Checkout blocks.
+ */
+function declare_blocks_compatibility(): void {
+	if ( class_exists( '\Automattic\WooCommerce\Utilities\FeaturesUtil' ) ) {
+		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'cart_checkout_blocks', __FILE__, true );
+	}
+}
+add_action( 'before_woocommerce_init', __NAMESPACE__ . '\declare_blocks_compatibility' );
+
+/**
+ * Register Stripe Terminal with WooCommerce Blocks checkout.
+ */
+function register_blocks_payment_method(): void {
+	if ( ! class_exists( '\Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
+		return;
+	}
+
+	add_action(
+		'woocommerce_blocks_payment_method_type_registration',
+		function ( $payment_method_registry ): void {
+			$payment_method_registry->register( new Blocks\StripeTerminalBlocksSupport() );
+		}
+	);
+}
+add_action( 'woocommerce_blocks_loaded', __NAMESPACE__ . '\register_blocks_payment_method' );

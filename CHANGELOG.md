@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.26 - 2026-07-15
+
+### Added
+
+- WooCommerce Blocks checkout support: Stripe Terminal appears when the web-checkout setting is enabled (requires WordPress 6.6+ for the Blocks JSX runtime; older WP installs keep classic/POS Terminal and simply omit Terminal from Blocks checkout)
+- After Place order on Blocks (or classic) checkout, customers are redirected to the classic order-pay page to complete payment on the reader
+
+### Fixed
+
+- Classic shortcode main checkout no longer dead-ends with a missing order ID when Stripe Terminal is selected — Place order now redirects to order-pay for Terminal collection
+
+
 ## 0.0.25 - 2026-07-10
 
 ### Fixed

@@ -394,11 +394,23 @@ class Gateway extends WC_Payment_Gateway {
 			}
 		}
 
-			// No payment found, show error.
+		// No Terminal payment yet.
+		// On a direct order-pay form submission, keep the failure notice so
+		// skipping the reader does not silently redirect back to the same page.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Matches maybe_redirect_paid_order_submission detection; form nonce is verified by WooCommerce before process_payment.
+		if ( isset( $_POST['woocommerce_pay'] ) ) {
 			wc_add_notice( __( 'Payment error: No successful payment found for this order.', 'stripe-terminal-for-woocommerce' ), 'error' );
 
+			return array(
+				'result' => 'failure',
+			);
+		}
+
+		// Blocks / classic main checkout: create the pending order then send
+		// the customer to classic order-pay (pay_for_order) where Terminal UI runs.
 		return array(
-			'result' => 'failure',
+			'result'   => 'success',
+			'redirect' => $order->get_checkout_payment_url(),
 		);
 	}
 
@@ -512,8 +524,9 @@ class Gateway extends WC_Payment_Gateway {
 	 * Enqueue payment scripts on checkout pages.
 	 */
 	public function enqueue_payment_scripts(): void {
-			// Only load on checkout pages or when our gateway is selected.
-		if ( ! is_checkout() && ! is_checkout_pay_page() ) {
+		// Only load on classic checkout / order-pay. Blocks checkout uses the
+		// Blocks payment method registration and has no payment_fields() markup.
+		if ( ! $this->should_enqueue_classic_payment_scripts() ) {
 			return;
 		}
 
@@ -643,6 +656,33 @@ class Gateway extends WC_Payment_Gateway {
 		} finally {
 			wp_set_current_user( $original_user_id );
 		}
+	}
+
+	/**
+	 * Whether the classic jQuery Terminal UI scripts should load.
+	 *
+	 * Order-pay always uses classic templates (even on Blocks stores). Main
+	 * Blocks checkout has no payment_fields() markup — skip classic assets there
+	 * to avoid pointless validate/list-reader AJAX on page load.
+	 *
+	 * @return bool
+	 */
+	private function should_enqueue_classic_payment_scripts(): bool {
+		if ( is_checkout_pay_page() ) {
+			return true;
+		}
+
+		if ( ! is_checkout() ) {
+			return false;
+		}
+
+		if ( class_exists( '\Automattic\WooCommerce\Blocks\Utils\CartCheckoutUtils' ) ) {
+			return ! \Automattic\WooCommerce\Blocks\Utils\CartCheckoutUtils::is_checkout_block_default();
+		}
+
+		$checkout_page_id = wc_get_page_id( 'checkout' );
+
+		return ! ( $checkout_page_id > 0 && function_exists( 'has_block' ) && has_block( 'woocommerce/checkout', $checkout_page_id ) );
 	}
 
 	/**
