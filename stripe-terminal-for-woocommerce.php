@@ -87,6 +87,16 @@ function init(): void {
 add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 11 );
 
 /**
+ * Declare compatibility with the WooCommerce Cart and Checkout blocks.
+ */
+function declare_blocks_compatibility(): void {
+	if ( class_exists( '\Automattic\WooCommerce\Utilities\FeaturesUtil' ) ) {
+		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'cart_checkout_blocks', __FILE__, true );
+	}
+}
+add_action( 'before_woocommerce_init', __NAMESPACE__ . '\declare_blocks_compatibility' );
+
+/**
  * Register Stripe Terminal with WooCommerce Blocks checkout.
  */
 function register_blocks_payment_method(): void {
