@@ -24,14 +24,14 @@ jobs:
         id: check_version
         run: |
           VERSION=$(grep -oP "Version:\s*\K\d+(\.\d+)*" stripe-terminal-for-woocommerce.php)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           git fetch --prune --unshallow
           if git tag | grep -q "v$VERSION"; then
             echo "Version has not changed. Skipping release..."
-            echo "::set-output name=release::false"
+            echo "release=false" >> "$GITHUB_OUTPUT"
           else
             echo "Version has changed. Creating new release..."
-            echo "::set-output name=release::true"
+            echo "release=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install composer dependencies
@@ -52,17 +52,24 @@ jobs:
           npm ci
           npm run build
 
+      - name: Extract release notes from CHANGELOG.md
+        if: steps.check_version.outputs.release == 'true'
+        run: |
+          awk -v ver="$VERSION" '
+            /^## / { if (found) exit; if (index($0, "## " ver " ") == 1 || $0 == "## " ver) found=1; next }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          if [ ! -s "$RUNNER_TEMP/release-notes.md" ]; then
+            echo "No CHANGELOG.md entry found for $VERSION; using placeholder notes."
+            echo "Release v$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          fi
+          cat "$RUNNER_TEMP/release-notes.md"
+
       - name: Create Release
         if: steps.check_version.outputs.release == 'true'
-        id: create_release
-        uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1
+        run: gh release create "v$VERSION" --title "Release v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ env.VERSION }}
-          release_name: Release v${{ env.VERSION }}
-          draft: false
-          prerelease: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and upload ZIP
         if: steps.check_version.outputs.release == 'true'
