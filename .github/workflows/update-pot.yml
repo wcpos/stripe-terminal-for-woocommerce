@@ -26,15 +26,13 @@ jobs:
       - name: Setup PHP with tools
         uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2
         with:
-          php-version: "7.3"
-          tools: composer, wp-cli
-
-      - name: Install dependencies
-        run: |
-          wp package install wp-cli/i18n-command:2.2.8
+          php-version: "8.2"
+          # The wp-cli phar bundles i18n-command; no `wp package install` needed
+          # (the old pinned install 404'd and then died on composer auth).
+          tools: wp-cli
 
       - name: Update POT file
-        run: wp i18n make-pot . languages/stripe-terminal-for-woocommerce.pot --domain=stripe-terminal-for-woocommerce --slug=stripe-terminal-for-woocommerce --package-name="WooCommerce POS Email Invoice Gateway" --headers="{\"Report-Msgid-Bugs-To\":\"https://github.com/wcpos/email-invoice-gateway/issues\"}"
+        run: wp i18n make-pot . languages/stripe-terminal-for-woocommerce.pot --domain=stripe-terminal-for-woocommerce --slug=stripe-terminal-for-woocommerce --package-name="Stripe Terminal for WooCommerce" --headers="{\"Report-Msgid-Bugs-To\":\"https://github.com/wcpos/stripe-terminal-for-woocommerce/issues\"}"
 
       - name: Check for changes
         id: git-diff
