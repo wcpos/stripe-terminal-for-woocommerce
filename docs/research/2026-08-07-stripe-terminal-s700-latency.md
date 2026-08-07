@@ -367,3 +367,110 @@ Ordered by likelihood × cheapness.
 - The selectable screen-timeout values in Settings → Appearance are not documented.
 - Whether the pre-dip feature flag ("requires version 2.28 and enabling a Stripe-controlled feature flag") is on for a given account is not documented — confirm with Stripe support.
 - Whether Stripe's reader command routing shares the US-Oregon topology documented for firmware assets (android#719) is unconfirmed.
+
+---
+
+## set_reader_display: busy-reader and zero-total behavior (follow-up)
+
+**Question asked:** we plan to call `POST /v1/terminal/readers/{id}/set_reader_display` as a periodic keep-warm ping with a zero-total cart. (1) What happens if it lands while a payment is `in_progress`? (2) Is a zero total accepted?
+
+**Bottom line: do not fire a blind periodic ping.** Neither question has a documented answer, and the structural evidence says a successful `set_reader_display` would *overwrite* the reader's single `action` slot. The residual risk is real and is not excluded by any source.
+
+### Verified (primary sources)
+
+**The Reader has exactly one `action` slot, and both endpoints write to it.** From Stripe's own OpenAPI spec, `terminal_reader_reader_resource_reader_action`:
+
+- `action.type` is a single enum: `collect_inputs`, `collect_payment_method`, `confirm_payment_intent`, `print_content`, `process_payment_intent`, `process_setup_intent`, `refund_payment`, **`set_reader_display`**
+- `action.status` is a single enum: `failed`, `in_progress`, `succeeded`
+- `required: ["status", "type"]`; the parent field is documented as *"The most recent action performed by the reader."*
+
+(`stripe/openapi` → `openapi/spec3.json`, `components.schemas.terminal_reader_reader_resource_reader_action`; mirrored in the [Reader object reference](https://docs.stripe.com/api/terminal/readers/object).)
+
+→ **There is no separate "display" channel.** A `set_reader_display` that succeeds mid-payment necessarily replaces the `process_payment_intent` action, which would destroy the state your integration polls and make the reader's action webhooks ambiguous.
+
+**Non-payment reader endpoints *are* busy-rejected during a payment.** Documented precedent for `cancel_action`, the closest analogue to `set_reader_display` (both non-payment reader actions):
+
+> "You can't cancel a reader action in the middle of a payment authorization. If a customer has already presented their card to pay on the reader, you must wait for processing to complete. […] Calling `cancel_action` during an authorization results in a `terminal_reader_busy` error."
+> — [Payment cancellation](https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=server-driven#payment-cancellation)
+
+**`terminal_reader_busy` is worded generically, not payment-specifically:**
+
+> `terminal_reader_busy` — "Reader is currently busy processing another request."
+> — [Error codes](https://docs.stripe.com/error-codes)
+
+> "A reader also rejects an API request if it's busy performing updates, changing settings or if a card is inserted from the previous transaction."
+> — [Reader busy](https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=server-driven#reader-busy)
+
+**A reader displaying a cart is itself treated as busy / in use — confirmed by Stripe, and the docs that said otherwise were wrong.** Stripe collaborator `bric-stripe` on [stripe-terminal-android#337](https://github.com/stripe/stripe-terminal-android/issues/337) (2024-02-05):
+
+> "This is working as intended and **the docs were incorrect. Setting the reader display is treated as 'busy'** so requires the `failIfInUse` flag to be false."
+
+And the reason, from the same engineer on [stripe-terminal-ios#233](https://github.com/stripe/stripe-terminal-ios/issues/233) (2023-06-07):
+
+> "if the reader is in a region that supports 'Quick Chip' **the reader can accept payment during while its displaying cart information during setReaderDisplay**. So for that, and then for consistency, it intentionally treats that as 'in use' for the fail if in use check."
+
+The [connect-reader docs](https://docs.stripe.com/terminal/payments/connect-reader?terminal-sdk-platform=android&reader-type=internet) have since been corrected — "idle" is now defined as *"displaying the welcome screen before calling `collectPaymentMethod`"*, with the old "or displaying cart details" clause removed.
+
+→ **A keep-warm ping does not leave the reader idle. It puts the reader into a state Stripe classifies as in use**, and in Quick Chip regions it arms the reader to accept a card.
+
+**`set_reader_display` does not auto-clear on server-driven.**
+
+> "To clear reader display on the server-driven integration, call the `cancel_action` endpoint."
+> — [Display cart details, server-driven](https://docs.stripe.com/terminal/features/display?terminal-sdk-platform=server-driven)
+
+**Zero-total: the schema imposes no minimum.** From `spec3.json`, the `set_reader_display` request body:
+
+```json
+"cart": {
+  "properties": {
+    "currency":   {"format": "currency", "type": "string"},
+    "line_items": {"type": "array", "items": {"properties": {
+        "amount": {"type": "integer"},
+        "description": {"maxLength": 5000, "type": "string"},
+        "quantity": {"type": "integer"}},
+      "required": ["amount", "description", "quantity"]}},
+    "tax":   {"type": "integer"},
+    "total": {"type": "integer"}
+  },
+  "required": ["currency", "line_items", "total"]
+}
+```
+
+No `minimum`, no `exclusiveMinimum`, no `minItems`. Top-level `required: ["type"]`; `type` is enum `["cart"]`; `cart` itself is optional. The stripe-php generated PHPDoc agrees: `array{cart?: array{currency: string, line_items: array{amount: int, description: string, quantity: int}[], tax?: int, total: int}, expand?: string[], type: string}` (`lib/Service/Terminal/ReaderService.php`).
+
+**The prose contrast is the real signal.** Stripe marks positivity in descriptions where it means it, and does *not* for the cart fields:
+
+| Field | Documented description |
+| --- | --- |
+| `cart.total` | "Total balance of cart due in the smallest currency unit." |
+| `cart.line_items.amount` | "The price of the item in the smallest currency unit." |
+| `cart.tax` | "The amount of tax in the smallest currency unit." |
+| `process_config.tipping.amount_eligible` (on `process_payment_intent`) | "**Must be a positive integer** in the smallest currency unit…" |
+| `payment_intents.amount` | "**A positive integer** representing how much to charge…" |
+
+([set_reader_display](https://docs.stripe.com/api/terminal/readers/set_reader_display), [process_payment_intent](https://docs.stripe.com/api/terminal/readers/process_payment_intent))
+
+**`set_reader_display` can succeed at the API and fail silently at the device.** [stripe-node#1692](https://github.com/stripe/stripe-node/issues/1692) (2023-02-24, anecdote, closed as "ask support"): sending float values for `tax` or `line_items[].amount` produced **HTTP success on every request** while the reader *"shows the default background image"*:
+
+> "I know that you're not supposed to send float values, however, I'd expect an error here and not just silently fail. All the requests in the dev tools also succeed, however, the just terminal shows the default background image."
+
+→ **A 200 from `set_reader_display` is not evidence the reader rendered anything.** A malformed or degenerate cart can blank the reader with no error surfaced anywhere.
+
+**Not a blocker, but worth knowing:** [stripe-terminal-react-native#1005](https://github.com/stripe/stripe-terminal-react-native/issues/1005) is titled "setReaderDisplay not supported on S700", which is misleading. Stripe collaborator `ugochukwu-stripe` (2025-08-01): *"We intentionally do not support {{SetReaderDisplay/ClearReaderDisplay}} for **handoff mode/apps on devices**, since this integration shape has an application running on the reader and can build a more customizable Cart UI."* That restriction is specific to handoff / Apps on Devices. **Server-driven `set_reader_display` on S700 is supported** — it is the documented flow on the [display page](https://docs.stripe.com/terminal/features/display?terminal-sdk-platform=server-driven).
+
+### Unverified
+
+- **What `set_reader_display` actually returns during an `in_progress` `process_payment_intent` on a server-driven integration.** No Stripe doc states it. No community report exists — `gh search issues` for `setReaderDisplay` / `set_reader_display` / `terminal_reader_busy` across all of GitHub, and a StackExchange API query for `setReaderDisplay` (1 unrelated hit), turned up nothing on this interaction. The three plausible outcomes — rejected with `terminal_reader_busy`, silently replacing the payment action, or accepted-and-ignored — are all consistent with the sources; none is excluded.
+- **The counter-evidence you must weigh:** the docs say *"Payments that have not begun processing can be replaced with a new payment."* ([Reader busy](https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=server-driven#reader-busy)). A `process_payment_intent` that is `in_progress` with no card yet presented has *not* begun processing — so a replacement window demonstrably exists in exactly the state a keep-warm ping is most likely to hit. Whether `set_reader_display` counts as a replacing action there is undocumented. **This is the specific risk that makes a blind ping unsafe.**
+- **HTTP status code for `terminal_reader_busy`.** Not published. Its `type` is `invalid_request_error`, which Stripe normally maps to **400**; the docs example shows only the error body, no status line. 409 is not ruled out.
+- **Whether a zero total is accepted in practice**, and what the reader renders if it is. No community report of a zero-amount cart exists, accepted or rejected. Given #1692, "API accepts it and the reader shows the splash screen" is a live possibility — which would both defeat the keep-warm purpose and blank the display.
+- **Error code if a zero/degenerate cart is rejected.** No `terminal_*` code covers amount validation; it would most likely surface as `parameter_invalid_integer` or a bare `invalid_request_error`. Unconfirmed.
+- **How long a `set_reader_display` cart stays on screen.** No TTL is documented anywhere. The only documented way to clear it on server-driven is `cancel_action`, which implies it does *not* expire on its own. On the SDK side, `bric-stripe` agreed clearing on disconnect "makes sense" and noted *"the JS SDK is already doing this"* ([ios#233](https://github.com/stripe/stripe-terminal-ios/issues/233)) — SDK-specific, no bearing on server-driven. The 1-hour battery screen timeout blanks the *display* but says nothing about the *action*.
+
+### Recommendation
+
+1. **Don't ping on a timer.** Every source points the same way: the ping writes to the same single `action` slot the payment uses, and Stripe treats a displayed cart as "in use". A timer will eventually fire inside a payment window.
+2. **If you keep any priming at all, make it event-driven** — fire `set_reader_display` once when the cart is finalised, which is what Stripe documents (*"call `setReaderDisplay` before processing the payment"*) and which also buys pre-dip in the US. That is the supported shape and it addresses the same latency goal.
+3. **Gate on reader state regardless:** read the Reader and skip unless `action` is null or `action.status` is `succeeded`/`failed`. Note this is TOCTOU-racy — it narrows the window, it does not close it.
+4. **Send a real cart, not a zero one.** Even if zero is accepted, #1692 shows the reader can render nothing on a cart the API accepted, and a blank reader is worse than a sleepy one.
+5. **Before shipping any of this, test empirically against a sandbox reader** — call `set_reader_display` while a `process_payment_intent` is `in_progress` and record the HTTP status, `error.code`, and what the reader screen does. That single experiment resolves everything marked unverified above, and nothing in the public record substitutes for it.

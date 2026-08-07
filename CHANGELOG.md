@@ -5,11 +5,12 @@
 ### Changed
 
 - Reduce Stripe API round-trips before reader dispatch by caching the account country, dispatching before reader-state recovery, and skipping fresh-order status scans
-- Add explicit, filterable Stripe API connection and request timeouts
+- Add explicit, filterable Stripe API timeouts: 10s connect everywhere, 30s for read-only calls; reader commands keep the full 80s so a dispatch is never aborted while Stripe is delivering it to the reader
 
 ### Added
 
 - Add click-path timing diagnostics to WooCommerce logs
+- Best-effort reader keep-warm: a zero-total display ping exercises the reader's command channel when a POS order is created, periodically while the POS is active, and when the payment page connects a reader — so idle readers don't greet the first payment with a stale connection (disable with the `stwc_enable_reader_keep_warm` filter)
 
 ### Fixed
 

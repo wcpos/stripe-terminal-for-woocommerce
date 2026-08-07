@@ -68,6 +68,7 @@ class AjaxHandlerTest extends TestCase {
 		Functions\stubs(
 			array(
 				'add_action'          => true,
+				'update_option'       => true,
 				'get_option'          => function () {
 					// Return empty settings so init_stripe_service() never
 					// finds an API key — the service stays null.

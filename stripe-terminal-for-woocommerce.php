@@ -83,6 +83,9 @@ function init(): void {
 
 	// Initialize AJAX handlers early.
 	new AjaxHandler();
+
+	// Best-effort reader keep-warm (POS activity + new-order triggers).
+	( new ReaderWarmer() )->register();
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 11 );
 

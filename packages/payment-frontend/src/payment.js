@@ -1067,14 +1067,42 @@ class StripeTerminalPayment {
   connectReader(reader) {
     this.connectedReader = reader;
     this.saveReader(reader.id);
-    
+
     // Update UI
     this.updateReaderUI();
-    
+
     // Show success message
     this.showSuccess(`${this.strings.connected || 'Connected'} to ${reader.label || reader.id}`);
-    
+
     console.log('Connected to reader:', reader);
+
+    this.warmReader(reader.id);
+  }
+
+  // Fire-and-forget keep-warm ping so the reader's command channel is fresh
+  // before the cashier clicks pay. Failures are silent by design.
+  warmReader(readerId) {
+    const orderId = this.config.orderId;
+    if (!orderId || !readerId) {
+      return;
+    }
+
+    try {
+      jQuery.ajax({
+        url: this.ajaxUrl,
+        type: 'POST',
+        data: this.addPaymentRequestData({
+          action: 'stripe_terminal_set_reader_display',
+          nonce: this.nonce,
+          order_id: orderId,
+          reader_id: readerId
+        })
+      }).catch((error) => {
+        console.debug('Reader warm ping failed:', error);
+      });
+    } catch (error) {
+      console.debug('Reader warm ping failed:', error);
+    }
   }
 
   handleDisconnectReader(event) {

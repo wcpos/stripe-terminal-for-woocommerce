@@ -43,8 +43,8 @@ class StripeTerminalService {
 		$this->api_key = $api_key;
 
 		$http_client = \Stripe\HttpClient\CurlClient::instance();
-		$http_client->setConnectTimeout( apply_filters( 'stwc_stripe_connect_timeout', 5 ) );
-		$http_client->setTimeout( apply_filters( 'stwc_stripe_request_timeout', 30 ) );
+		$http_client->setConnectTimeout( apply_filters( 'stwc_stripe_connect_timeout', 10 ) );
+		$http_client->setTimeout( apply_filters( 'stwc_stripe_request_timeout', 80 ) );
 		\Stripe\ApiRequestor::setHttpClient( $http_client );
 	}
 
@@ -95,6 +95,25 @@ class StripeTerminalService {
 		} finally {
 			$elapsed_ms = (int) round( ( microtime( true ) - $started_at ) * 1000 );
 			Logger::log( sprintf( '[timing] %s took %dms', $label, $elapsed_ms ) );
+		}
+	}
+
+	/**
+	 * Run a read-only Stripe operation with the shorter timeout bucket.
+	 *
+	 * @param callable $fn Operation to run.
+	 *
+	 * @return mixed The operation result.
+	 */
+	private function with_read_timeout( callable $fn ) {
+		$http_client    = \Stripe\HttpClient\CurlClient::instance();
+		$default_timeout = $http_client->getTimeout();
+		$http_client->setTimeout( apply_filters( 'stwc_stripe_read_timeout', 30 ) );
+
+		try {
+			return $fn();
+		} finally {
+			$http_client->setTimeout( $default_timeout );
 		}
 	}
 
@@ -384,7 +403,11 @@ class StripeTerminalService {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
-			$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+			$payment_intent = $this->with_read_timeout(
+				function () use ( $payment_intent_id ) {
+					return \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+				}
+			);
 
 			if ( 'succeeded' === $payment_intent->status ) {
 					// Payment already succeeded, update the order.
@@ -412,7 +435,11 @@ class StripeTerminalService {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
-			$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+			$payment_intent = $this->with_read_timeout(
+				function () use ( $payment_intent_id ) {
+					return \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+				}
+			);
 
 			if ( 'requires_payment_method' === $payment_intent->status || 'requires_confirmation' === $payment_intent->status ) {
 				$payment_intent->cancel();
@@ -469,6 +496,58 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Push a zero-total placeholder cart to the reader display.
+	 *
+	 * Used only as a best-effort keep-warm ping: it never shows order amounts.
+	 * A rejection still exercises the reader's command channel, which is the
+	 * point, so callers must treat every failure as a non-event.
+	 *
+	 * @param string $reader_id The reader ID.
+	 *
+	 * @return array|WP_Error The reader data or error.
+	 */
+	public function set_reader_display( string $reader_id ) {
+		$total       = 0;
+		$currency    = strtolower( get_woocommerce_currency() );
+		$description = get_bloginfo( 'name' ) ? get_bloginfo( 'name' ) : 'Ready';
+		$cart        = array(
+			'type' => 'cart',
+			'cart' => array(
+				'currency'   => $currency,
+				'total'      => $total,
+				'line_items' => array(
+					array(
+						'description' => $description,
+						'amount'      => $total,
+						'quantity'    => 1,
+					),
+				),
+			),
+		);
+
+		try {
+			$reader = $this->timed(
+				'set_reader_display',
+				function () use ( $reader_id, $cart ) {
+					return $this->get_stripe_client()->terminal->readers->setReaderDisplay( $reader_id, $cart );
+				}
+			);
+
+			return $reader->toArray();
+		} catch ( \Stripe\Exception\InvalidRequestException $e ) {
+			if ( 'terminal_reader_busy' === $e->getStripeCode() ) {
+				Logger::log( 'set_reader_display: Reader is busy; skipping warm.' );
+
+				return array( 'status' => 'busy' );
+			}
+
+			return $this->handle_stripe_exception( $e, 'set_reader_display_error' );
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'set_reader_display_error' );
+		}
+	}
+
+	/**
 	 * Retrieve a single reader to inspect its current state.
 	 *
 	 * @param string $reader_id The reader ID.
@@ -477,12 +556,16 @@ class StripeTerminalService {
 	 */
 	public function get_reader( string $reader_id ) {
 		try {
-			$reader = $this->timed(
-				'get_reader',
+			$reader = $this->with_read_timeout(
 				function () use ( $reader_id ) {
-					$stripe = $this->get_stripe_client();
+					return $this->timed(
+						'get_reader',
+						function () use ( $reader_id ) {
+							$stripe = $this->get_stripe_client();
 
-					return $stripe->terminal->readers->retrieve( $reader_id );
+							return $stripe->terminal->readers->retrieve( $reader_id );
+						}
+					);
 				}
 			);
 
@@ -543,7 +626,11 @@ class StripeTerminalService {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
-			$locations = \Stripe\Terminal\Location::all();
+			$locations = $this->with_read_timeout(
+				function () {
+					return \Stripe\Terminal\Location::all();
+				}
+			);
 
 			return $locations->toArray();
 		} catch ( Exception $e ) {
@@ -588,12 +675,20 @@ class StripeTerminalService {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
 			if ( $reader_id ) {
-				$reader = \Stripe\Terminal\Reader::retrieve( $reader_id );
+				$reader = $this->with_read_timeout(
+					function () use ( $reader_id ) {
+						return \Stripe\Terminal\Reader::retrieve( $reader_id );
+					}
+				);
 
 				return $reader->toArray();
 			}
 				// Get all readers.
-			$readers = \Stripe\Terminal\Reader::all();
+			$readers = $this->with_read_timeout(
+				function () {
+					return \Stripe\Terminal\Reader::all();
+				}
+			);
 
 			return $readers->toArray();
 		} catch ( Exception $e ) {
@@ -656,6 +751,21 @@ class StripeTerminalService {
 	 * @return array|WP_Error The payment status information or error.
 	 */
 	public function check_payment_status_from_stripe( WC_Order $order ) {
+		return $this->with_read_timeout(
+			function () use ( $order ) {
+				return $this->check_payment_status_with_read_timeout( $order );
+			}
+		);
+	}
+
+	/**
+	 * Perform the payment-status lookup while the read timeout is active.
+	 *
+	 * @param WC_Order $order The WooCommerce order.
+	 *
+	 * @return array|WP_Error The payment status information or error.
+	 */
+	private function check_payment_status_with_read_timeout( WC_Order $order ) {
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
@@ -866,7 +976,11 @@ class StripeTerminalService {
 		}
 
 			// Retrieve the payment intent to get order metadata.
-		$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+		$payment_intent = $this->with_read_timeout(
+			function () use ( $payment_intent_id ) {
+				return \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+			}
+		);
 		$order_id       = $payment_intent->metadata->order_id ?? null;
 
 		if ( ! $order_id ) {
@@ -994,10 +1108,14 @@ class StripeTerminalService {
 		if ( false === $country ) {
 			try {
 				\Stripe\Stripe::setApiKey( $this->api_key );
-				$account = $this->timed(
-					'Account::retrieve',
+				$account = $this->with_read_timeout(
 					function () {
-						return \Stripe\Account::retrieve();
+						return $this->timed(
+							'Account::retrieve',
+							function () {
+								return \Stripe\Account::retrieve();
+							}
+						);
 					}
 				);
 				$country = $account->country ?? 'US';

@@ -57,6 +57,9 @@ class AjaxHandler {
 		add_action( 'wp_ajax_stripe_terminal_get_readers', array( $this, 'get_readers' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_get_readers', array( $this, 'get_readers' ) );
 
+		add_action( 'wp_ajax_stripe_terminal_set_reader_display', array( $this, 'set_reader_display' ) );
+		add_action( 'wp_ajax_nopriv_stripe_terminal_set_reader_display', array( $this, 'set_reader_display' ) );
+
 		// Payment status check.
 		add_action( 'wp_ajax_stripe_terminal_check_payment_status', array( $this, 'check_payment_status' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_check_payment_status', array( $this, 'check_payment_status' ) );
@@ -161,6 +164,9 @@ class AjaxHandler {
 					strtoupper( $order->get_currency() )
 				)
 			);
+
+			// Remember the reader so background keep-warm pings target the right device.
+			update_option( 'stwc_last_reader_id', $reader_id, false );
 
 			// Step 2: Process payment intent on the reader.
 			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
@@ -451,6 +457,60 @@ class AjaxHandler {
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Get readers error: ' . $e->getMessage() );
 			wp_send_json_error( 'Failed to retrieve readers: ' . $e->getMessage() );
+		}
+	}
+
+	/**
+	 * Warm the selected reader from the payment page (best-effort).
+	 *
+	 * Always responds success so warming can never surface a cashier-facing
+	 * error; `warmed` reports whether a ping was actually sent.
+	 */
+	public function set_reader_display(): void {
+		try {
+			// phpcs:disable WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
+			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
+			// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+			if ( ! $order_id || ! $reader_id ) {
+				wp_send_json_error( 'Missing order ID or reader ID' );
+
+				return;
+			}
+
+			$order = wc_get_order( $order_id );
+			if ( ! $order ) {
+				wp_send_json_error( 'Order not found' );
+
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
+				return;
+			}
+
+			if ( ! $this->can_access_order( $order ) ) {
+				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+
+				return;
+			}
+
+			if ( ! $this->stripe_service ) {
+				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
+
+				return;
+			}
+
+			update_option( 'stwc_last_reader_id', $reader_id, false );
+
+			$warmer = new ReaderWarmer( $this->stripe_service );
+			$warmed = $warmer->maybe_warm( $reader_id );
+
+			wp_send_json_success( array( 'warmed' => $warmed ) );
+		} catch ( Exception $e ) {
+			Logger::log( 'Stripe Terminal AJAX - Reader warm error: ' . $e->getMessage() );
+			wp_send_json_success( array( 'warmed' => false ) );
 		}
 	}
 

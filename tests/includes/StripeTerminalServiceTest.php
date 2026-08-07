@@ -112,19 +112,65 @@ class StripeTerminalServiceTest extends TestCase {
 	public function test_constructor_configures_shared_stripe_http_timeouts(): void {
 		$client = \Stripe\HttpClient\CurlClient::instance();
 		$client->setConnectTimeout( 30 );
-		$client->setTimeout( 80 );
+		$client->setTimeout( 30 );
 
 		Functions\when( 'apply_filters' )->alias(
 			function ( $hook, $value ) {
-				return 'stwc_stripe_connect_timeout' === $hook ? 7 : 23;
+				return 'stwc_stripe_connect_timeout' === $hook ? 7 : 83;
 			}
 		);
 
 		new StripeTerminalService( 'sk_test_fake_key_123' );
 
 		$this->assertSame( 7, $client->getConnectTimeout() );
-		$this->assertSame( 23, $client->getTimeout() );
+		$this->assertSame( 83, $client->getTimeout() );
 		$this->assertSame( $client, \Stripe\ApiRequestor::httpClient() );
+	}
+
+	/**
+	 * Test constructor uses the asymmetric timeout defaults.
+	 */
+	public function test_constructor_uses_asymmetric_timeout_defaults(): void {
+		$client = \Stripe\HttpClient\CurlClient::instance();
+
+		new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$this->assertSame( 10, $client->getConnectTimeout() );
+		$this->assertSame( 80, $client->getTimeout() );
+	}
+
+	/**
+	 * Test reader retrieval uses the read bucket and restores command timeout.
+	 */
+	public function test_get_reader_temporarily_uses_read_timeout(): void {
+		Functions\when( 'apply_filters' )->alias(
+			function ( $hook, $value ) {
+				return 'stwc_stripe_read_timeout' === $hook ? 17 : $value;
+			}
+		);
+
+		$service     = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$http_client = \Stripe\HttpClient\CurlClient::instance();
+		$during      = null;
+		$reader      = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$reader->shouldReceive( 'toArray' )->andReturn( array( 'id' => 'tmr_test' ) );
+		$readers = Mockery::mock();
+		$readers->shouldReceive( 'retrieve' )->andReturnUsing(
+			function () use ( &$during, $http_client, $reader ) {
+				$during = $http_client->getTimeout();
+
+				return $reader;
+			}
+		);
+		$terminal          = Mockery::mock();
+		$terminal->readers = $readers;
+		$stripe            = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->terminal  = $terminal;
+		$service->set_stripe_client( $stripe );
+
+		$this->assertSame( array( 'id' => 'tmr_test' ), $service->get_reader( 'tmr_test' ) );
+		$this->assertSame( 17, $during );
+		$this->assertSame( 80, $http_client->getTimeout() );
 	}
 
 	// -----------------------------------------------------------------------
@@ -472,6 +518,76 @@ class StripeTerminalServiceTest extends TestCase {
 		);
 
 		$this->assertInstanceOf( WP_Error::class, $result );
+	}
+
+	/**
+	 * Test set_reader_display sends the zero-total store placeholder.
+	 */
+	public function test_set_reader_display_sends_ambient_placeholder(): void {
+		$this->assertTrue( method_exists( StripeTerminalService::class, 'set_reader_display' ) );
+		Functions\when( 'get_bloginfo' )->justReturn( 'Test Store' );
+		Functions\when( 'get_woocommerce_currency' )->justReturn( 'CAD' );
+
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$reader  = Mockery::mock( \Stripe\Terminal\Reader::class );
+		$reader->shouldReceive( 'toArray' )->andReturn( array( 'id' => 'tmr_test' ) );
+		$readers = Mockery::mock();
+		$readers->shouldReceive( 'setReaderDisplay' )
+			->with(
+				'tmr_test',
+				array(
+					'type' => 'cart',
+					'cart' => array(
+						'currency'   => 'cad',
+						'total'      => 0,
+						'line_items' => array(
+							array(
+								'description' => 'Test Store',
+								'amount'      => 0,
+								'quantity'    => 1,
+							),
+						),
+					),
+				)
+			)
+			->once()
+			->andReturn( $reader );
+		$terminal          = Mockery::mock();
+		$terminal->readers = $readers;
+		$stripe            = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->terminal  = $terminal;
+		$service->set_stripe_client( $stripe );
+
+		$this->assertSame( array( 'id' => 'tmr_test' ), $service->set_reader_display( 'tmr_test' ) );
+	}
+
+	/**
+	 * Test a busy reader is a successful best-effort warm outcome.
+	 */
+	public function test_set_reader_display_returns_busy_status(): void {
+		$this->assertTrue( method_exists( StripeTerminalService::class, 'set_reader_display' ) );
+		Functions\when( 'get_bloginfo' )->justReturn( 'Test Store' );
+		Functions\when( 'get_woocommerce_currency' )->justReturn( 'USD' );
+
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$readers = Mockery::mock();
+		$readers->shouldReceive( 'setReaderDisplay' )->andThrow(
+			\Stripe\Exception\InvalidRequestException::factory(
+				'Reader busy.',
+				400,
+				null,
+				null,
+				null,
+				'terminal_reader_busy'
+			)
+		);
+		$terminal          = Mockery::mock();
+		$terminal->readers = $readers;
+		$stripe            = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->terminal  = $terminal;
+		$service->set_stripe_client( $stripe );
+
+		$this->assertSame( array( 'status' => 'busy' ), $service->set_reader_display( 'tmr_test' ) );
 	}
 
 	/**
