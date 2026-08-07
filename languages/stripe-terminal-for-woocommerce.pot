@@ -1,283 +1,458 @@
-# Copyright (C) 2025 kilbot
-# This file is distributed under the GPL v2 or later.
+# Copyright (C) 2026 kilbot
+# This file is distributed under the GPL v3 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: Stripe Terminal for WooCommerce 0.0.20\n"
-"Report-Msgid-Bugs-To: https://github.com/wcpos/email-invoice-gateway/issues\n"
+"Project-Id-Version: Stripe Terminal for WooCommerce 0.0.27\n"
+"Report-Msgid-Bugs-To: https://github.com/wcpos/stripe-terminal-for-woocommerce/issues\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2025-09-09T08:14:06+00:00\n"
+"POT-Creation-Date: 2026-08-07T07:10:39+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: stripe-terminal-for-woocommerce\n"
 
 #. Plugin Name of the plugin
+#: stripe-terminal-for-woocommerce.php
 msgid "Stripe Terminal for WooCommerce"
 msgstr ""
 
 #. Description of the plugin
+#: stripe-terminal-for-woocommerce.php
 msgid "Adds Stripe Terminal support to WooCommerce for in-person payments."
 msgstr ""
 
 #. Author of the plugin
+#: stripe-terminal-for-woocommerce.php
 msgid "kilbot"
 msgstr ""
 
 #. Author URI of the plugin
+#: stripe-terminal-for-woocommerce.php
 msgid "https://kilbot.com/"
 msgstr ""
 
+#. translators: 1: Stripe error code, 2: Stripe error message.
+#: includes/abstracts/APIController.php:90
+#: includes/Abstracts/APIController.php:90
+#: includes/abstracts/StripeErrorHandler.php:103
+#: includes/Abstracts/StripeErrorHandler.php:103
 #, php-format
 msgid "Stripe error (%1$s): %2$s"
 msgstr ""
 
+#: includes/abstracts/APIController.php:109
+#: includes/Abstracts/APIController.php:109
+#: includes/abstracts/StripeErrorHandler.php:125
+#: includes/Abstracts/StripeErrorHandler.php:125
 msgid "An unexpected error occurred."
 msgstr ""
 
+#. translators: 1: Payment intent ID, 2: payment amount, 3: payment currency, 4: payment status.
+#: includes/API.php:462
 #, php-format
-msgid "Stripe Terminal: Payment Intent succeeded - ID: %s, Amount: %s %s, Status: %s. Order ready for processing."
+msgid "Stripe Terminal: Payment Intent succeeded - ID: %1$s, Amount: %2$s %3$s, Status: %4$s. Order ready for processing."
 msgstr ""
 
+#. translators: 1: Payment intent ID, 2: charge ID, 3: payment amount, 4: payment currency, 5: payment status.
+#: includes/API.php:534
 #, php-format
-msgid "Stripe Terminal: Charge succeeded - Payment Intent: %s, Charge: %s, Amount: %s %s, Status: %s. Order ready for processing."
+msgid "Stripe Terminal: Charge succeeded - Payment Intent: %1$s, Charge: %2$s, Amount: %3$s %4$s, Status: %5$s. Order ready for processing."
 msgstr ""
 
+#. translators: 1: error message, 2: error code, 3: decline code, 4: payment intent ID
+#: includes/API.php:587
+#, php-format
+msgid "Stripe Terminal: Payment declined - %1$s (code: %2$s, decline_code: %3$s). Payment Intent: %4$s"
+msgstr ""
+
+#: includes/Gateway.php:48
+#: includes/Gateway.php:91
+#: assets/js/blocks/index.js:1
+#: packages/blocks-payment/src/index.js:11
 msgid "Stripe Terminal"
 msgstr ""
 
+#: includes/Gateway.php:49
 msgid "Accept in-person payments using Stripe Terminal."
 msgstr ""
 
+#: includes/Gateway.php:77
 msgid "Enable/Disable"
 msgstr ""
 
 #. Translators: Placeholders %s is the link to WooCommerce POS.
+#: includes/Gateway.php:81
 #, php-format
 msgid "Enable Stripe Terminal for web checkout (not necessary for %s)"
 msgstr ""
 
+#: includes/Gateway.php:84
+msgid "This enables the gateway for online store checkout. The POS uses this gateway automatically when configured."
+msgstr ""
+
+#: includes/Gateway.php:88
 msgid "Title"
 msgstr ""
 
+#: includes/Gateway.php:90
 msgid "The title displayed to customers during checkout."
 msgstr ""
 
+#: includes/Gateway.php:94
 msgid "Description"
 msgstr ""
 
+#: includes/Gateway.php:96
 msgid "The description displayed to customers during checkout."
 msgstr ""
 
+#: includes/Gateway.php:97
 msgid "Pay in person using Stripe Terminal."
 msgstr ""
 
+#: includes/Gateway.php:100
 msgid "Live Secret Key"
 msgstr ""
 
+#: includes/Gateway.php:110
 msgid "Test Secret Key"
 msgstr ""
 
+#: includes/Gateway.php:120
 msgid "Test Mode"
 msgstr ""
 
+#: includes/Gateway.php:122
 msgid "Enable Test Mode"
 msgstr ""
 
+#: includes/Gateway.php:124
 msgid "Test Mode is enforced when not using SSL."
 msgstr ""
 
+#: includes/Gateway.php:127
+msgid "Phone Orders (MOTO)"
+msgstr ""
+
+#: includes/Gateway.php:129
+msgid "Enable phone order payments via Stripe Terminal"
+msgstr ""
+
+#: includes/Gateway.php:131
+msgid "Allows merchants to key in card details on the reader for phone orders. Requires MOTO permissions enabled on your Stripe account — contact Stripe support to request access. Only works with S700, S710, and WisePOS E readers."
+msgstr ""
+
+#: includes/Gateway.php:134
+msgid "Reader Keep-Warm (Experimental)"
+msgstr ""
+
+#: includes/Gateway.php:136
+msgid "Keep the reader connection warm while the POS is in use"
+msgstr ""
+
+#: includes/Gateway.php:138
+msgid "Sends a periodic ping to the reader so the first payment after the reader has been idle is not slow. Try this if payments regularly take a long time to appear on the reader. Not recommended when multiple registers share one reader."
+msgstr ""
+
+#: includes/Gateway.php:216
 msgid "Stripe Terminal Locations"
 msgstr ""
 
+#: includes/Gateway.php:226
 msgid "No locations found. Please connect your Stripe account first."
 msgstr ""
 
-#, php-format
-msgid "Order processed via Stripe Terminal. Payment Intent: %s, Charge: %s"
+#: includes/Gateway.php:267
+msgid "•••••••••••••••• (saved; leave blank to keep)"
 msgstr ""
 
+#. translators: 1: Payment intent ID, 2: charge ID.
+#: includes/Gateway.php:347
 #, php-format
-msgid "Order processed via Stripe Terminal (API check). Payment Intent: %s, Charge: %s"
+msgid "Order processed via Stripe Terminal. Payment Intent: %1$s, Charge: %2$s"
 msgstr ""
 
+#. translators: 1: Payment intent ID, 2: charge ID.
+#: includes/Gateway.php:386
+#, php-format
+msgid "Order processed via Stripe Terminal (API check). Payment Intent: %1$s, Charge: %2$s"
+msgstr ""
+
+#: includes/Gateway.php:409
 msgid "Payment error: No successful payment found for this order."
 msgstr ""
 
+#: includes/Gateway.php:438
+#: includes/Gateway.php:605
 msgid "Loading Stripe Terminal..."
 msgstr ""
 
+#: includes/Gateway.php:458
 msgid "Available Readers"
 msgstr ""
 
+#: includes/Gateway.php:467
 msgid "Connected Reader"
 msgstr ""
 
+#: includes/Gateway.php:468
 msgid "Disconnect"
 msgstr ""
 
+#: includes/Gateway.php:478
+#: includes/Gateway.php:610
+msgid "Phone Order"
+msgstr ""
+
+#: includes/Gateway.php:481
+msgid "Enable to key in card details for phone/mail orders"
+msgstr ""
+
+#: includes/Gateway.php:489
+#: includes/Gateway.php:597
 msgid "Pay with Terminal"
 msgstr ""
 
+#: includes/Gateway.php:493
 msgid "Cancel Payment"
 msgstr ""
 
+#: includes/Gateway.php:497
+#: includes/Gateway.php:593
+msgid "Try Another Card"
+msgstr ""
+
+#: includes/Gateway.php:501
 msgid "Simulate Payment"
 msgstr ""
 
+#: includes/Gateway.php:505
 msgid "Check Payment Status"
 msgstr ""
 
+#: includes/Gateway.php:513
 msgid "Logs"
 msgstr ""
 
+#: includes/Gateway.php:515
 msgid "Show logs"
 msgstr ""
 
+#: includes/Gateway.php:516
 msgid "CLEAR"
 msgstr ""
 
+#: includes/Gateway.php:520
 msgid "Payment activity will appear here..."
 msgstr ""
 
+#: includes/Gateway.php:527
 msgid "Please enable JavaScript to use the Stripe Terminal integration."
 msgstr ""
 
+#: includes/Gateway.php:587
 msgid "Starting payment..."
 msgstr ""
 
+#: includes/Gateway.php:588
 msgid "Payment in progress..."
 msgstr ""
 
+#: includes/Gateway.php:589
 msgid "Cancellation request sent. Please check the reader."
 msgstr ""
 
+#: includes/Gateway.php:590
 msgid "Payment successful!"
 msgstr ""
 
+#: includes/Gateway.php:591
 msgid "Payment failed:"
 msgstr ""
 
+#: includes/Gateway.php:592
+msgid "Card declined"
+msgstr ""
+
+#: includes/Gateway.php:594
 msgid "Network error occurred"
 msgstr ""
 
+#: includes/Gateway.php:595
 msgid "Payment system not initialized"
 msgstr ""
 
+#: includes/Gateway.php:596
 msgid "Missing order ID or amount"
 msgstr ""
 
+#: includes/Gateway.php:598
 msgid "Please use the terminal to complete the payment"
 msgstr ""
 
+#: includes/Gateway.php:599
 msgid "Payment timed out"
 msgstr ""
 
+#: includes/Gateway.php:600
 msgid "No active payment to cancel"
 msgstr ""
 
+#: includes/Gateway.php:601
 msgid "Connecting..."
 msgstr ""
 
+#: includes/Gateway.php:602
 msgid "Connected"
 msgstr ""
 
+#: includes/Gateway.php:603
 msgid "Disconnected"
 msgstr ""
 
+#: includes/Gateway.php:604
 msgid "Please select a reader to continue"
 msgstr ""
 
+#: includes/Gateway.php:606
 msgid "Loading readers..."
 msgstr ""
 
+#: includes/Gateway.php:607
 msgid "No readers available. Please register a reader in your Stripe Dashboard."
 msgstr ""
 
+#: includes/Gateway.php:608
 msgid "Stripe Terminal service is not properly configured. Please check your API key settings."
 msgstr ""
 
+#: includes/Gateway.php:609
 msgid "Unable to retrieve available readers. Please try again later."
 msgstr ""
 
+#: includes/Gateway.php:611
+msgid "Enable to key in card details for phone orders"
+msgstr ""
+
+#: includes/Gateway.php:764
 msgid "Stripe webhook active."
 msgstr ""
 
+#. translators: %s: Stripe webhook URL.
+#: includes/Gateway.php:767
 #, php-format
 msgid "Stripe webhook successfully created: %s"
 msgstr ""
 
+#: includes/Gateway.php:774
 msgid "Error setting Stripe webhook: "
 msgstr ""
 
-#. translators: %s: Human readable time
+#. translators: %s: Human readable time.
+#: includes/Gateway.php:882
 #, php-format
 msgid "Last seen: %s"
 msgstr ""
 
+#: includes/Gateway.php:889
+#: includes/Gateway.php:918
 msgid "Offline"
 msgstr ""
 
+#: includes/Gateway.php:892
 msgid "Online"
 msgstr ""
 
+#: includes/Gateway.php:902
 msgid "Device:"
 msgstr ""
 
+#: includes/Gateway.php:904
 msgid "Serial:"
 msgstr ""
 
+#: includes/Gateway.php:914
 msgid "Connect"
 msgstr ""
 
+#: includes/Gateway.php:936
 msgid "Your Stripe test secret API key."
 msgstr ""
 
+#: includes/Gateway.php:939
 msgid "Your Stripe live secret API key."
 msgstr ""
 
-msgid "Invalid test API key. Test keys must start with sk_test_."
+#: includes/Gateway.php:984
+msgid "Invalid test API key. Test keys must start with sk_test_ or rk_test_."
 msgstr ""
 
-msgid "Invalid live API key. Live keys must start with sk_live_."
+#: includes/Gateway.php:994
+msgid "Invalid live API key. Live keys must start with sk_live_ or rk_live_."
 msgstr ""
 
+#: includes/Gateway.php:1004
+msgid "Restricted Stripe API key format is valid. Ensure the key has Terminal and PaymentIntent permissions."
+msgstr ""
+
+#: includes/Gateway.php:1020
 msgid "Test key provided, but charges are not enabled for the account."
 msgstr ""
 
+#: includes/Gateway.php:1030
 msgid "Live key provided, but charges are not enabled for the account."
 msgstr ""
 
+#: includes/Gateway.php:1039
 msgid "Stripe API key is valid."
 msgstr ""
 
+#: includes/Gateway.php:1063
 msgid "No API key provided. Please enter your Stripe API key and save the settings."
 msgstr ""
 
+#. translators: %s: Stripe documentation URL for setting up locations.
+#: includes/Gateway.php:1076
 #, php-format
 msgid "No Stripe Terminal locations found. Please <a href=\"%s\" target=\"_blank\">set up locations</a> in your Stripe Dashboard."
 msgstr ""
 
+#: includes/Gateway.php:1098
 msgid "No readers associated with this location."
 msgstr ""
 
+#. translators: %d: Number of readers available for the location.
+#: includes/Gateway.php:1101
 #, php-format
 msgid "%d reader(s) available."
 msgstr ""
 
+#. translators: 1: Location display name, 2: location ID, 3: formatted address, 4: readers summary.
+#: includes/Gateway.php:1107
 #, php-format
 msgid "<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s"
 msgstr ""
 
+#. translators: 1: Payment intent ID, 2: charge ID.
+#: includes/StripeTerminalService.php:866
 #, php-format
-msgid "Stripe Terminal payment detected via manual check. Payment Intent: %s, Charge: %s. Order ready for processing."
+msgid "Stripe Terminal payment detected via manual check. Payment Intent: %1$s, Charge: %2$s. Order ready for processing."
 msgstr ""
 
+#. translators: 1: Payment intent ID, 2: charge ID.
+#: includes/StripeTerminalService.php:1030
 #, php-format
-msgid "Stripe Terminal payment detected via webhook. Payment Intent: %s, Charge: %s. Order ready for processing."
+msgid "Stripe Terminal payment detected via webhook. Payment Intent: %1$s, Charge: %2$s. Order ready for processing."
 msgstr ""
 
+#: includes/StripeTerminalService.php:1076
 msgid "Payment failed via Stripe Terminal."
+msgstr ""
+
+#: assets/js/blocks/index.js:1
+#: packages/blocks-payment/src/index.js:26
+msgid "After placing your order you will complete payment on the card reader."
 msgstr ""
