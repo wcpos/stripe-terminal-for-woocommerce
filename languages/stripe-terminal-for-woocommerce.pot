@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-08-07T07:10:39+00:00\n"
+"POT-Creation-Date: 2026-08-07T07:28:10+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: stripe-terminal-for-woocommerce\n"
@@ -35,17 +35,13 @@ msgid "https://kilbot.com/"
 msgstr ""
 
 #. translators: 1: Stripe error code, 2: Stripe error message.
-#: includes/abstracts/APIController.php:90
 #: includes/Abstracts/APIController.php:90
-#: includes/abstracts/StripeErrorHandler.php:103
 #: includes/Abstracts/StripeErrorHandler.php:103
 #, php-format
 msgid "Stripe error (%1$s): %2$s"
 msgstr ""
 
-#: includes/abstracts/APIController.php:109
 #: includes/Abstracts/APIController.php:109
-#: includes/abstracts/StripeErrorHandler.php:125
 #: includes/Abstracts/StripeErrorHandler.php:125
 msgid "An unexpected error occurred."
 msgstr ""
@@ -70,7 +66,6 @@ msgstr ""
 
 #: includes/Gateway.php:48
 #: includes/Gateway.php:91
-#: assets/js/blocks/index.js:1
 #: packages/blocks-payment/src/index.js:11
 msgid "Stripe Terminal"
 msgstr ""
@@ -452,7 +447,6 @@ msgstr ""
 msgid "Payment failed via Stripe Terminal."
 msgstr ""
 
-#: assets/js/blocks/index.js:1
 #: packages/blocks-payment/src/index.js:26
 msgid "After placing your order you will complete payment on the card reader."
 msgstr ""
