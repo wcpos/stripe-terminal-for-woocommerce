@@ -135,6 +135,7 @@ class AjaxHandler {
 			// Step 1: Create payment intent using the service.
 			Logger::log( 'Stripe Terminal AJAX - Creating payment intent for Order #' . $order_id . ' (Amount: ' . $amount . ')' );
 			$payment_intent = $this->stripe_service->create_payment_intent( $order, $amount, $moto );
+			$intent_ready_at = microtime( true );
 
 			if ( is_wp_error( $payment_intent ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent creation failed: ' . $payment_intent->get_error_message() );
@@ -173,10 +174,16 @@ class AjaxHandler {
 
 			// Step 2: Process payment intent on the reader.
 			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
-			$process_config = $moto ? array( 'moto' => true ) : array();
-			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
-			$elapsed_ms    = (int) round( ( microtime( true ) - $started_at ) * 1000 );
-			Logger::log( sprintf( '[timing] click-to-dispatch total %dms', $elapsed_ms ) );
+			$process_config      = $moto ? array( 'moto' => true ) : array();
+			$dispatch_started_at = microtime( true );
+			$reader_result       = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+			$now                 = microtime( true );
+			$timing              = array(
+				'total_ms'    => (int) round( ( $now - $started_at ) * 1000 ),
+				'create_ms'   => (int) round( ( $intent_ready_at - $started_at ) * 1000 ),
+				'dispatch_ms' => (int) round( ( $now - $dispatch_started_at ) * 1000 ),
+			);
+			Logger::log( sprintf( '[timing] click-to-dispatch total %dms', $timing['total_ms'] ) );
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent processing failed: ' . $reader_result->get_error_message() );
@@ -196,11 +203,12 @@ class AjaxHandler {
 				)
 			);
 
-			// Return both payment intent and reader data.
+			// Return payment intent, reader data, and timing for the on-page log.
 			wp_send_json_success(
 				array(
 					'payment_intent' => $payment_intent,
 					'reader'         => $reader_result,
+					'timing'         => $timing,
 				)
 			);
 		} catch ( Exception $e ) {

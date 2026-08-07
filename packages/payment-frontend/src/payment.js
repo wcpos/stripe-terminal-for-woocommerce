@@ -101,6 +101,16 @@ class StripeTerminalPayment {
       
       this.currentPaymentIntent = response.payment_intent;
 
+      // Show the cashier where the time went (also logged server-side).
+      if (response.timing) {
+        const secs = (ms) => (ms / 1000).toFixed(1) + 's';
+        this.addToLog(
+          `Payment sent to reader in ${secs(response.timing.total_ms)} ` +
+          `(create intent ${secs(response.timing.create_ms)}, reader dispatch ${secs(response.timing.dispatch_ms)})`,
+          'info'
+        );
+      }
+
       // Store reader's last_seen_at for pickup verification.
       this.readerLastSeenAt = response.reader?.last_seen_at || null;
 
