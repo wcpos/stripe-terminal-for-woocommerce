@@ -37,18 +37,30 @@ class ReaderWarmer {
 	}
 
 	/**
-	 * Register warming hooks. Call once from the plugin bootstrap.
+	 * Whether keep-warm is enabled (gateway setting, filterable override).
 	 *
 	 * Disabled by default: verified against Stripe's API (2026-08-07, simulated
 	 * reader) that set_reader_display returns HTTP 200 during an in-progress
 	 * payment and REPLACES the payment action, killing collection. The guards
 	 * in maybe_warm() narrow that race but cannot close it, so warming is
-	 * opt-in via the stwc_enable_reader_keep_warm filter.
+	 * opt-in via the "Reader Keep-Warm (Experimental)" gateway setting.
+	 *
+	 * @return bool
+	 */
+	private function is_enabled(): bool {
+		$settings = (array) Settings::get_gateway_settings();
+		$enabled  = 'yes' === ( $settings['enable_reader_keep_warm'] ?? 'no' );
+
+		return (bool) apply_filters( 'stwc_enable_reader_keep_warm', $enabled );
+	}
+
+	/**
+	 * Register warming hooks. Call once from the plugin bootstrap.
+	 *
+	 * Hooks always register; enablement is checked per event so toggling the
+	 * setting takes effect without a new page-load race at bootstrap time.
 	 */
 	public function register(): void {
-		if ( ! apply_filters( 'stwc_enable_reader_keep_warm', false ) ) {
-			return;
-		}
 
 		add_action( 'woocommerce_new_order', array( $this, 'warm_new_order' ), 10, 2 );
 		add_action( 'stwc_warm_reader', array( $this, 'warm_reader' ) );
@@ -67,6 +79,10 @@ class ReaderWarmer {
 	 */
 	public function warm_new_order( $order_id, $order ): void {
 		try {
+			if ( ! $this->is_enabled() ) {
+				return;
+			}
+
 			$pos_created = \in_array( $order->get_created_via(), (array) apply_filters( 'stwc_warm_on_created_via', array( 'woocommerce-pos' ) ), true )
 				|| '1' === (string) $order->get_meta( '_pos' );
 			$ours        = 'stripe_terminal_for_woocommerce' === $order->get_payment_method();
@@ -117,7 +133,7 @@ class ReaderWarmer {
 	 * @return bool Whether a warm ping was sent.
 	 */
 	public function maybe_warm( string $reader_id ): bool {
-		if ( ! apply_filters( 'stwc_enable_reader_keep_warm', false ) ) {
+		if ( ! $this->is_enabled() ) {
 			return false;
 		}
 
@@ -160,6 +176,10 @@ class ReaderWarmer {
 	 */
 	public function track_pos_activity( $result, $server, $request ) {
 		try {
+			if ( ! $this->is_enabled() ) {
+				return $result;
+			}
+
 			$route   = $request->get_route();
 			$matches = false;
 			foreach ( (array) apply_filters( 'stwc_pos_route_prefixes', array( '/wcpos/' ) ) as $prefix ) {

@@ -23,6 +23,9 @@ class ReaderWarmerTest extends TestCase {
 			array(
 				'add_action'    => true,
 				'add_filter'    => true,
+				'get_option'    => function () {
+					return array();
+				},
 				// Warming is opt-in; tests exercise it as if the site enabled it.
 				'apply_filters' => function ( $hook, $value ) {
 					return 'stwc_enable_reader_keep_warm' === $hook ? true : $value;
@@ -149,7 +152,7 @@ class ReaderWarmerTest extends TestCase {
 	}
 
 	public function test_maybe_warm_is_disabled_by_default(): void {
-		// Default filter value: warming off. No API traffic at all.
+		// Unchecked settings box, unfiltered: warming off. No API traffic at all.
 		Functions\when( 'apply_filters' )->alias(
 			function ( $hook, $value ) {
 				return $value;

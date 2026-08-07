@@ -130,6 +130,13 @@ class Gateway extends WC_Payment_Gateway {
 				'default'     => 'no',
 				'description' => __( 'Allows merchants to key in card details on the reader for phone orders. Requires MOTO permissions enabled on your Stripe account — contact Stripe support to request access. Only works with S700, S710, and WisePOS E readers.', 'stripe-terminal-for-woocommerce' ),
 			),
+			'enable_reader_keep_warm' => array(
+				'title'       => __( 'Reader Keep-Warm (Experimental)', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'label'       => __( 'Keep the reader connection warm while the POS is in use', 'stripe-terminal-for-woocommerce' ),
+				'default'     => 'no',
+				'description' => __( 'Sends a periodic ping to the reader so the first payment after the reader has been idle is not slow. Try this if payments regularly take a long time to appear on the reader. Not recommended when multiple registers share one reader.', 'stripe-terminal-for-woocommerce' ),
+			),
 		);
 	}
 
