@@ -38,9 +38,15 @@ class ReaderWarmer {
 
 	/**
 	 * Register warming hooks. Call once from the plugin bootstrap.
+	 *
+	 * Disabled by default: verified against Stripe's API (2026-08-07, simulated
+	 * reader) that set_reader_display returns HTTP 200 during an in-progress
+	 * payment and REPLACES the payment action, killing collection. The guards
+	 * in maybe_warm() narrow that race but cannot close it, so warming is
+	 * opt-in via the stwc_enable_reader_keep_warm filter.
 	 */
 	public function register(): void {
-		if ( ! apply_filters( 'stwc_enable_reader_keep_warm', true ) ) {
+		if ( ! apply_filters( 'stwc_enable_reader_keep_warm', false ) ) {
 			return;
 		}
 
@@ -97,26 +103,38 @@ class ReaderWarmer {
 	}
 
 	/**
-	 * Warm a specific reader unless it has an in-progress action.
+	 * Warm a specific reader unless a payment could be disturbed.
 	 *
 	 * The reader has a single action slot shared by payments and display
-	 * commands, and Stripe does not document what a display command does to a
-	 * payment that is waiting for a card. Checking the action state first
-	 * narrows that race; it cannot fully close it, which is why warming is
-	 * filterable off entirely.
+	 * commands. Verified on Stripe's API: a display command sent mid-payment
+	 * succeeds and replaces the payment action, killing collection. Two guards
+	 * narrow that race — never warm while a non-display action is in progress,
+	 * and never warm within 120s of a payment dispatch — but they cannot fully
+	 * close it, which is why warming defaults off.
 	 *
 	 * @param string $reader_id The reader ID.
 	 *
 	 * @return bool Whether a warm ping was sent.
 	 */
 	public function maybe_warm( string $reader_id ): bool {
+		if ( ! apply_filters( 'stwc_enable_reader_keep_warm', false ) ) {
+			return false;
+		}
+
+		if ( time() - (int) get_option( 'stwc_payment_dispatch_at', 0 ) < 120 ) {
+			Logger::log( 'Reader warm skipped: a payment was dispatched recently.' );
+
+			return false;
+		}
+
 		$service = $this->get_stripe_service();
 		if ( ! $service ) {
 			return false;
 		}
 
 		$reader = $service->get_reader( $reader_id );
-		if ( ! is_wp_error( $reader ) && 'in_progress' === ( $reader['action']['status'] ?? null ) ) {
+		$action = ! is_wp_error( $reader ) ? ( $reader['action'] ?? null ) : null;
+		if ( $action && 'in_progress' === ( $action['status'] ?? null ) && 'set_reader_display' !== ( $action['type'] ?? null ) ) {
 			Logger::log( 'Reader warm skipped: reader has an in-progress action.' );
 
 			return false;

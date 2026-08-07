@@ -165,8 +165,11 @@ class AjaxHandler {
 				)
 			);
 
-			// Remember the reader so background keep-warm pings target the right device.
+			// Remember the reader so background keep-warm pings target the right
+			// device, and stamp the dispatch so warms back off while a payment
+			// may be in flight (a display command mid-payment kills collection).
 			update_option( 'stwc_last_reader_id', $reader_id, false );
+			update_option( 'stwc_payment_dispatch_at', time(), false );
 
 			// Step 2: Process payment intent on the reader.
 			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );

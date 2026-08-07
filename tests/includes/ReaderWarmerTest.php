@@ -23,8 +23,9 @@ class ReaderWarmerTest extends TestCase {
 			array(
 				'add_action'    => true,
 				'add_filter'    => true,
+				// Warming is opt-in; tests exercise it as if the site enabled it.
 				'apply_filters' => function ( $hook, $value ) {
-					return $value;
+					return 'stwc_enable_reader_keep_warm' === $hook ? true : $value;
 				},
 			)
 		);
@@ -147,12 +148,36 @@ class ReaderWarmerTest extends TestCase {
 		$this->assertSame( $result, $warmer->track_pos_activity( $result, null, $request ) );
 	}
 
-	public function test_maybe_warm_skips_reader_with_in_progress_action(): void {
+	public function test_maybe_warm_is_disabled_by_default(): void {
+		// Default filter value: warming off. No API traffic at all.
+		Functions\when( 'apply_filters' )->alias(
+			function ( $hook, $value ) {
+				return $value;
+			}
+		);
+		Functions\expect( 'update_option' )->never();
+
+		$service = Mockery::mock( StripeTerminalService::class );
+		$service->shouldReceive( 'get_reader' )->never();
+		$service->shouldReceive( 'set_reader_display' )->never();
+
+		$warmer = new ReaderWarmer( $service );
+
+		$this->assertFalse( $warmer->maybe_warm( 'tmr_any' ) );
+	}
+
+	public function test_maybe_warm_skips_reader_with_in_progress_payment_action(): void {
+		Functions\when( 'get_option' )->justReturn( 0 );
 		Functions\expect( 'update_option' )->never();
 
 		$service = Mockery::mock( StripeTerminalService::class );
 		$service->shouldReceive( 'get_reader' )->once()->with( 'tmr_busy' )->andReturn(
-			array( 'action' => array( 'status' => 'in_progress' ) )
+			array(
+				'action' => array(
+					'type'   => 'process_payment_intent',
+					'status' => 'in_progress',
+				),
+			)
 		);
 		$service->shouldReceive( 'set_reader_display' )->never();
 
@@ -161,7 +186,47 @@ class ReaderWarmerTest extends TestCase {
 		$this->assertFalse( $warmer->maybe_warm( 'tmr_busy' ) );
 	}
 
+	public function test_maybe_warm_skips_after_recent_payment_dispatch(): void {
+		Functions\when( 'get_option' )->justReturn( time() - 30 );
+		Functions\expect( 'update_option' )->never();
+
+		$service = Mockery::mock( StripeTerminalService::class );
+		$service->shouldReceive( 'get_reader' )->never();
+		$service->shouldReceive( 'set_reader_display' )->never();
+
+		$warmer = new ReaderWarmer( $service );
+
+		$this->assertFalse( $warmer->maybe_warm( 'tmr_busy' ) );
+	}
+
+	public function test_maybe_warm_repings_over_previous_display_action(): void {
+		// A completed warm leaves a set_reader_display action that reports
+		// in_progress indefinitely; replacing display with display is safe.
+		Functions\when( 'get_option' )->justReturn( 0 );
+		Functions\expect( 'update_option' )
+			->once()
+			->with( 'stwc_last_warm_at', Mockery::type( 'int' ), false );
+
+		$service = Mockery::mock( StripeTerminalService::class );
+		$service->shouldReceive( 'get_reader' )->once()->with( 'tmr_warm' )->andReturn(
+			array(
+				'action' => array(
+					'type'   => 'set_reader_display',
+					'status' => 'in_progress',
+				),
+			)
+		);
+		$service->shouldReceive( 'set_reader_display' )->once()->with( 'tmr_warm' )->andReturn(
+			array( 'id' => 'tmr_warm' )
+		);
+
+		$warmer = new ReaderWarmer( $service );
+
+		$this->assertTrue( $warmer->maybe_warm( 'tmr_warm' ) );
+	}
+
 	public function test_maybe_warm_pings_idle_reader(): void {
+		Functions\when( 'get_option' )->justReturn( 0 );
 		Functions\expect( 'update_option' )
 			->once()
 			->with( 'stwc_last_warm_at', Mockery::type( 'int' ), false );

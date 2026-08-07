@@ -474,3 +474,38 @@ No `minimum`, no `exclusiveMinimum`, no `minItems`. Top-level `required: ["type"
 3. **Gate on reader state regardless:** read the Reader and skip unless `action` is null or `action.status` is `succeeded`/`failed`. Note this is TOCTOU-racy — it narrows the window, it does not close it.
 4. **Send a real cart, not a zero one.** Even if zero is accepted, #1692 shows the reader can render nothing on a cart the API accepted, and a blank reader is worse than a sleepy one.
 5. **Before shipping any of this, test empirically against a sandbox reader** — call `set_reader_display` while a `process_payment_intent` is `in_progress` and record the HTTP status, `error.code`, and what the reader screen does. That single experiment resolves everything marked unverified above, and nothing in the public record substitutes for it.
+
+## Simulated-reader experiment results (2026-08-07)
+
+The decisive experiment recommended above was run against Stripe's test-mode
+API with a fresh simulated WisePOS E reader (`registration_code=simulated-wpe`,
+US account). Raw sequence and observed results:
+
+1. **Zero-total cart on idle reader** — `POST .../set_reader_display` with
+   `cart[total]=0`, one zero-amount line item: **HTTP 200, accepted**. The
+   reader's `action` becomes `{type: set_reader_display, status: in_progress}`
+   and **stays `in_progress` indefinitely** (a display action never reaches a
+   terminal status on its own). Implication: any gate written as "skip if
+   action.status == in_progress" blocks all warms after the first; gates must
+   discriminate on `action.type`.
+2. **Display during in-progress payment (the safety question)** — with a
+   `process_payment_intent` action `in_progress` on the reader (PI dispatched,
+   card not yet presented): `set_reader_display` returned **HTTP 200** and
+   **replaced the payment action**. Reader `action` became
+   `set_reader_display in_progress` with no payment intent; the PaymentIntent
+   reverted to `requires_payment_method`; a subsequent
+   `present_payment_method` test-helper call did not complete the payment.
+   **No `terminal_reader_busy` rejection occurred. A warming ping fired
+   mid-payment kills the payment silently.** This confirms the worst of the
+   three outcomes left open by the public record (simulated reader; a physical
+   S700 mid-card-read was not tested and could differ).
+3. **Payment after display** — dispatching `process_payment_intent` while the
+   reader showed a previously set cart succeeded and cleanly replaced the
+   display action (the documented pre-dip ordering). `cancel_action` also
+   clears a display action.
+
+Consequences applied in this plugin: keep-warm ships **disabled by default**
+(`stwc_enable_reader_keep_warm` filter, default `false`); when enabled, warms
+are refused while a non-display action is `in_progress` **and** for 120s after
+any payment dispatch (`stwc_payment_dispatch_at` option stamped in the payment
+AJAX path). These guards narrow the TOCTOU race; they cannot close it.

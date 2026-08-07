@@ -10,7 +10,7 @@
 ### Added
 
 - Add click-path timing diagnostics to WooCommerce logs
-- Best-effort reader keep-warm: a zero-total display ping exercises the reader's command channel when a POS order is created, periodically while the POS is active, and when the payment page connects a reader — so idle readers don't greet the first payment with a stale connection (disable with the `stwc_enable_reader_keep_warm` filter)
+- Experimental reader keep-warm (opt-in, off by default): a zero-total display ping exercises the reader's command channel when a POS order is created, periodically while the POS is active, and when the payment page connects a reader — so idle readers don't greet the first payment with a stale connection. Enable with `add_filter( 'stwc_enable_reader_keep_warm', '__return_true' );`. Off by default because a display command sent mid-payment replaces the payment on the reader (verified against Stripe's API); guards suppress warms around dispatches but the race cannot be fully closed
 
 ### Fixed
 
