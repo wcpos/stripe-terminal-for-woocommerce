@@ -9,7 +9,7 @@
 
 ### Added
 
-- Add click-path timing diagnostics to WooCommerce logs
+- Add click-path timing diagnostics to WooCommerce logs, and show the payment timing breakdown (create intent / reader dispatch) in the on-page terminal log the cashier can see
 - Experimental "Reader Keep-Warm" gateway setting (off by default): a zero-total display ping exercises the reader's command channel when a POS order is created, periodically while the POS is active, and when the payment page connects a reader — so idle readers don't greet the first payment with a stale connection. Off by default because a display command sent mid-payment replaces the payment on the reader (verified against Stripe's API); guards suppress warms around dispatches but the race cannot be fully closed, so avoid enabling it when multiple registers share one reader
 
 ### Fixed
