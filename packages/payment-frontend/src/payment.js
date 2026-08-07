@@ -360,7 +360,14 @@ class StripeTerminalPayment {
       this.pollingTimeout = null;
     }
 
+    let requestInFlight = false;
+
     this.pollingInterval = setInterval(async () => {
+      if (requestInFlight) {
+        return;
+      }
+
+      requestInFlight = true;
       try {
         const response = await jQuery.ajax({
           url: this.ajaxUrl,
@@ -394,6 +401,8 @@ class StripeTerminalPayment {
         }
       } catch (error) {
         console.error('Payment polling error:', error);
+      } finally {
+        requestInFlight = false;
       }
     }, 2000);
 
@@ -844,17 +853,10 @@ class StripeTerminalPayment {
       // Show loading state
       this.showLoading();
       
-      // First validate the service
-      const serviceValid = await this.validateService();
-      if (!serviceValid) {
-        this.showServiceError();
-        return;
-      }
-      
-      // Then fetch readers
+      // Fetching readers also validates the Stripe service connection.
       const readers = await this.fetchReaders();
       if (readers === null) {
-        this.showReadersError();
+        this.showServiceError();
         return;
       }
       
@@ -868,24 +870,6 @@ class StripeTerminalPayment {
     } catch (error) {
       console.error('Failed to initialize interface:', error);
       this.showServiceError();
-    }
-  }
-
-  async validateService() {
-    try {
-      const response = await jQuery.ajax({
-        url: this.ajaxUrl,
-        type: 'POST',
-        data: {
-          action: 'stripe_terminal_validate_service',
-          nonce: this.nonce
-        }
-      });
-      
-      return response.success;
-    } catch (error) {
-      console.error('Service validation failed:', error);
-      return false;
     }
   }
 

@@ -354,8 +354,8 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-			// No payment metadata found, check Stripe API directly.
-		if ( $this->stripe_service ) {
+		// Only recover from Stripe when this order has evidence of a prior Terminal attempt.
+		if ( $this->stripe_service && ( $order->get_transaction_id() || $payment_intent_id ) ) {
 			$status_result = $this->stripe_service->check_payment_status_from_stripe( $order );
 
 			if (

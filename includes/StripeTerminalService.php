@@ -41,6 +41,11 @@ class StripeTerminalService {
 	 */
 	public function __construct( string $api_key ) {
 		$this->api_key = $api_key;
+
+		$http_client = \Stripe\HttpClient\CurlClient::instance();
+		$http_client->setConnectTimeout( apply_filters( 'stwc_stripe_connect_timeout', 5 ) );
+		$http_client->setTimeout( apply_filters( 'stwc_stripe_request_timeout', 30 ) );
+		\Stripe\ApiRequestor::setHttpClient( $http_client );
 	}
 
 	/**
@@ -72,6 +77,25 @@ class StripeTerminalService {
 	 */
 	public function set_stripe_client( \Stripe\StripeClient $client ): void {
 		$this->stripe_client = $client;
+	}
+
+	/**
+	 * Run an operation and log its duration without changing its result.
+	 *
+	 * @param string   $label Operation label.
+	 * @param callable $fn    Operation to run.
+	 *
+	 * @return mixed The operation result.
+	 */
+	private function timed( string $label, callable $fn ) {
+		$started_at = microtime( true );
+
+		try {
+			return $fn();
+		} finally {
+			$elapsed_ms = (int) round( ( microtime( true ) - $started_at ) * 1000 );
+			Logger::log( sprintf( '[timing] %s took %dms', $label, $elapsed_ms ) );
+		}
 	}
 
 	/**
@@ -120,14 +144,19 @@ class StripeTerminalService {
 				);
 			}
 
-			$payment_intent = \Stripe\PaymentIntent::create(
-				array(
-					'amount'               => $amount,
-					'currency'             => $currency,
-					'payment_method_types' => $payment_method_types,
-					'description'          => $description,
-					'metadata'             => array( 'order_id' => $order_id ),
-				)
+			$payment_intent = $this->timed(
+				'PaymentIntent::create',
+				function () use ( $amount, $currency, $payment_method_types, $description, $order_id ) {
+					return \Stripe\PaymentIntent::create(
+						array(
+							'amount'               => $amount,
+							'currency'             => $currency,
+							'payment_method_types' => $payment_method_types,
+							'description'          => $description,
+							'metadata'             => array( 'order_id' => $order_id ),
+						)
+					);
+				}
 			);
 
 			return $payment_intent->toArray();
@@ -139,8 +168,7 @@ class StripeTerminalService {
 	/**
 	 * Process a payment intent on a reader.
 	 *
-	 * Pre-flight: checks for stale reader actions and clears them.
-	 * On timeout: cancels reader action and retries once.
+	 * Dispatches optimistically, then recovers busy or timed-out readers once.
 	 *
 	 * @param string $reader_id         The reader ID.
 	 * @param string $payment_intent_id The payment intent ID.
@@ -155,14 +183,24 @@ class StripeTerminalService {
 		);
 		$process_config = array_merge( $default_config, $process_config );
 
-		// Pre-flight: check reader state and clear stale actions.
-		$preflight = $this->clear_stale_reader_action( $reader_id, $payment_intent_id );
-		if ( is_wp_error( $preflight ) ) {
-			return $preflight;
-		}
-
-		// Attempt to process payment on the reader.
+		// Dispatch first; reader retrieval is only needed to diagnose a conflict.
 		$result = $this->send_process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+		if ( is_wp_error( $result ) ) {
+			$error_data = (array) $result->get_error_data();
+			$is_busy    = 'terminal_reader_busy' === ( $error_data['stripe_code'] ?? null )
+				|| 409 === ( $error_data['status'] ?? null );
+
+			if ( $is_busy ) {
+				Logger::log( 'process_payment_intent: Reader conflict detected, checking for a stale action before retrying.' );
+				$recovery_result = $this->clear_stale_reader_action( $reader_id, $payment_intent_id );
+				if ( is_wp_error( $recovery_result ) ) {
+					return $recovery_result;
+				}
+
+				// Return the single retry directly so recovery paths cannot stack.
+				return $this->send_process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+			}
+		}
 
 		// On timeout, cancel reader action and retry once.
 		if ( is_wp_error( $result ) && $this->is_timeout_error( $result ) ) {
@@ -201,13 +239,19 @@ class StripeTerminalService {
 	 */
 	private function send_process_payment_intent( string $reader_id, string $payment_intent_id, array $process_config ) {
 		try {
-			$stripe = $this->get_stripe_client();
-			$reader = $stripe->terminal->readers->processPaymentIntent(
-				$reader_id,
-				array(
-					'payment_intent' => $payment_intent_id,
-					'process_config' => $process_config,
-				)
+			$reader = $this->timed(
+				'send_process_payment_intent',
+				function () use ( $reader_id, $payment_intent_id, $process_config ) {
+					$stripe = $this->get_stripe_client();
+
+					return $stripe->terminal->readers->processPaymentIntent(
+						$reader_id,
+						array(
+							'payment_intent' => $payment_intent_id,
+							'process_config' => $process_config,
+						)
+					);
+				}
 			);
 
 			return $reader->toArray();
@@ -217,7 +261,7 @@ class StripeTerminalService {
 	}
 
 	/**
-	 * Clear stale reader actions before processing.
+	 * Clear stale reader actions after a dispatch conflict.
 	 *
 	 * A stale action is one that has failed, or is for a different payment
 	 * intent and is no longer in progress. Reader freshness timestamps are
@@ -393,8 +437,14 @@ class StripeTerminalService {
 	 */
 	public function cancel_reader_action( string $reader_id ) {
 		try {
-			$stripe = $this->get_stripe_client();
-			$reader = $stripe->terminal->readers->cancelAction( $reader_id );
+			$reader = $this->timed(
+				'cancel_reader_action',
+				function () use ( $reader_id ) {
+					$stripe = $this->get_stripe_client();
+
+					return $stripe->terminal->readers->cancelAction( $reader_id );
+				}
+			);
 
 			return $reader->toArray();
 		} catch ( \Stripe\Exception\InvalidRequestException $e ) {
@@ -427,8 +477,14 @@ class StripeTerminalService {
 	 */
 	public function get_reader( string $reader_id ) {
 		try {
-			$stripe = $this->get_stripe_client();
-			$reader = $stripe->terminal->readers->retrieve( $reader_id );
+			$reader = $this->timed(
+				'get_reader',
+				function () use ( $reader_id ) {
+					$stripe = $this->get_stripe_client();
+
+					return $stripe->terminal->readers->retrieve( $reader_id );
+				}
+			);
 
 			return $reader->toArray();
 		} catch ( Exception $e ) {
@@ -622,7 +678,23 @@ class StripeTerminalService {
 				}
 			}
 
-				// If we don't have a payment intent yet, search for it by order metadata.
+			// If intent metadata exists, retrieve that intent directly before scanning.
+			if ( ! isset( $payment_intent ) ) {
+				$recorded_payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
+				if ( $recorded_payment_intent_id ) {
+					try {
+						$payment_intent = \Stripe\PaymentIntent::retrieve( $recorded_payment_intent_id );
+					} catch ( \Stripe\Exception\InvalidRequestException $e ) {
+						if ( 404 !== $e->getHttpStatus() ) {
+							return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
+						}
+
+						Logger::log( 'Stripe Terminal manual status check: recorded payment intent not found, falling back to metadata search.' );
+					}
+				}
+			}
+
+			// If we don't have a payment intent yet, search for it by order metadata.
 			if ( ! isset( $payment_intent ) ) {
 				$payment_intents = \Stripe\PaymentIntent::all(
 					array(
@@ -916,14 +988,28 @@ class StripeTerminalService {
 	 * @return array Array of supported currency codes.
 	 */
 	private function get_supported_currencies(): array {
-			// Get account information to determine region.
-		try {
-			\Stripe\Stripe::setApiKey( $this->api_key );
-			$account = \Stripe\Account::retrieve();
-			$country = $account->country ?? 'US'; // Default to US if not available.
-		} catch ( Exception $e ) {
-			// If we can't get account info, default to US.
-			$country = 'US';
+		$cache_key = 'stwc_account_country_' . substr( md5( $this->api_key ), 0, 8 );
+		$country   = get_transient( $cache_key );
+
+		if ( false === $country ) {
+			try {
+				\Stripe\Stripe::setApiKey( $this->api_key );
+				$account = $this->timed(
+					'Account::retrieve',
+					function () {
+						return \Stripe\Account::retrieve();
+					}
+				);
+				$country = $account->country ?? 'US';
+				if ( ! empty( $account->country ) ) {
+					set_transient( $cache_key, $country, 604800 );
+				}
+			} catch ( Exception $e ) {
+				// If we can't get account info, default to US without caching the fallback.
+				$country = 'US';
+			}
+		} else {
+			Logger::log( '[timing] Account::retrieve (cache) took 0ms' );
 		}
 
 			// Return supported currencies based on country.

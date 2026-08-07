@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.27 - 2026-08-07
+
+### Changed
+
+- Reduce Stripe API round-trips before reader dispatch by caching the account country, dispatching before reader-state recovery, and skipping fresh-order status scans
+- Add explicit, filterable Stripe API connection and request timeouts
+
+### Added
+
+- Add click-path timing diagnostics to WooCommerce logs
+
+### Fixed
+
+- Prevent overlapping payment-status polls when Stripe responses are slow
+
 ## 0.0.26 - 2026-07-15
 
 ### Added

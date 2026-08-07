@@ -83,6 +83,8 @@ class AjaxHandler {
 	 * Create and process a payment intent for Stripe Terminal.
 	 */
 	public function create_payment_intent(): void {
+		$started_at = microtime( true );
+
 		try {
 			// Get and validate parameters.
 			// phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce is verified by verify_ajax_nonce() above, which provides specific missing/invalid messages.
@@ -164,6 +166,8 @@ class AjaxHandler {
 			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
 			$process_config = $moto ? array( 'moto' => true ) : array();
 			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+			$elapsed_ms    = (int) round( ( microtime( true ) - $started_at ) * 1000 );
+			Logger::log( sprintf( '[timing] click-to-dispatch total %dms', $elapsed_ms ) );
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent processing failed: ' . $reader_result->get_error_message() );

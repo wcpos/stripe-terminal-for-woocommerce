@@ -13,6 +13,37 @@ use WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService;
 use WP_Error;
 
 /**
+ * Queue-backed Stripe HTTP client for service integration tests.
+ */
+class StripeHttpClientFake implements \Stripe\HttpClient\ClientInterface {
+	/**
+	 * @var array<int, array{body:array,status:int}>
+	 */
+	private $responses;
+
+	/**
+	 * @var array<int, array{method:string,url:string,params:array}>
+	 */
+	public $requests = array();
+
+	public function __construct( array $responses ) {
+		$this->responses = $responses;
+	}
+
+	public function request( $method, $abs_url, $headers, $params, $has_file, $api_mode = 'v1', $max_network_retries = null ) {
+		$this->requests[] = array(
+			'method' => $method,
+			'url'    => $abs_url,
+			'params' => $params,
+		);
+
+		$response = array_shift( $this->responses );
+
+		return array( wp_json_encode( $response['body'] ), $response['status'], array() );
+	}
+}
+
+/**
  * @covers \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService
  */
 class StripeTerminalServiceTest extends TestCase {
@@ -27,8 +58,16 @@ class StripeTerminalServiceTest extends TestCase {
 		// Stub common WP functions used by the error handler.
 		Functions\stubs(
 			array(
+				'apply_filters' => function ( $hook, $value ) {
+					return $value;
+				},
 				'esc_html' => function ( $text ) {
 					return $text;
+				},
+				'get_transient' => false,
+				'set_transient' => true,
+				'wp_json_encode' => function ( $value ) {
+					return json_encode( $value );
 				},
 				'__' => function ( $text, $domain = 'default' ) {
 					return $text;
@@ -65,6 +104,27 @@ class StripeTerminalServiceTest extends TestCase {
 		$service = new StripeTerminalService( '' );
 
 		$this->assertInstanceOf( StripeTerminalService::class, $service );
+	}
+
+	/**
+	 * Test constructor applies host-configurable timeouts to Stripe's shared client.
+	 */
+	public function test_constructor_configures_shared_stripe_http_timeouts(): void {
+		$client = \Stripe\HttpClient\CurlClient::instance();
+		$client->setConnectTimeout( 30 );
+		$client->setTimeout( 80 );
+
+		Functions\when( 'apply_filters' )->alias(
+			function ( $hook, $value ) {
+				return 'stwc_stripe_connect_timeout' === $hook ? 7 : 23;
+			}
+		);
+
+		new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$this->assertSame( 7, $client->getConnectTimeout() );
+		$this->assertSame( 23, $client->getTimeout() );
+		$this->assertSame( $client, \Stripe\ApiRequestor::httpClient() );
 	}
 
 	// -----------------------------------------------------------------------
@@ -412,6 +472,52 @@ class StripeTerminalServiceTest extends TestCase {
 		);
 
 		$this->assertInstanceOf( WP_Error::class, $result );
+	}
+
+	/**
+	 * Test status recovery retrieves the recorded payment intent without scanning 100 intents.
+	 */
+	public function test_check_payment_status_retrieves_recorded_payment_intent_directly(): void {
+		$service = new StripeTerminalService( 'sk_test_status_key' );
+		$client  = new StripeHttpClientFake(
+			array(
+				array(
+					'body'   => array(
+						'id'       => 'pi_recorded',
+						'object'   => 'payment_intent',
+						'status'   => 'processing',
+						'amount'   => 2500,
+						'currency' => 'usd',
+						'created'  => 1700000000,
+					),
+					'status' => 200,
+				),
+				array(
+					'body'   => array(
+						'object' => 'list',
+						'data'   => array(),
+					),
+					'status' => 200,
+				),
+			)
+		);
+		\Stripe\ApiRequestor::setHttpClient( $client );
+
+		$order = Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_transaction_id' )->andReturn( '' );
+		$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_recorded' );
+		$order->shouldReceive( 'is_paid' )->andReturn( false );
+		$order->shouldReceive( 'get_status' )->andReturn( 'pending' );
+
+		$result = $service->check_payment_status_from_stripe( $order );
+
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['success'] );
+		$this->assertSame( 'pi_recorded', $result['payment_intent']['id'] );
+		$this->assertCount( 2, $client->requests );
+		$this->assertStringEndsWith( '/v1/payment_intents/pi_recorded', $client->requests[0]['url'] );
+		$this->assertStringNotContainsString( '/v1/payment_intents?', $client->requests[0]['url'] );
 	}
 
 	// -----------------------------------------------------------------------
@@ -972,39 +1078,37 @@ class StripeTerminalServiceTest extends TestCase {
 	}
 
 	// -----------------------------------------------------------------------
-	// Pre-flight reader freshness gate tests
+	// Dispatch-first reader recovery tests
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Test process_payment_intent still dispatches when reader last_seen_at is old.
-	 *
-	 * Stripe can report an older last_seen_at for idle smart readers even though
-	 * they can still receive server-driven processPaymentIntent commands. Blocking
-	 * on this timestamp strands usable readers until merchants restart them.
+	 * Test the happy path dispatches without retrieving reader state first.
 	 */
-	public function test_process_payment_intent_attempts_dispatch_when_last_seen_old(): void {
+	public function test_process_payment_intent_dispatches_without_reader_preflight(): void {
 		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
 
-		// Build mock: readers->retrieve() returns reader with stale last_seen_at.
 		$reader_mock = Mockery::mock( \Stripe\Terminal\Reader::class );
 		$reader_mock->shouldReceive( 'toArray' )
 			->andReturn(
 				array(
-					'id'           => 'tmr_fake_reader',
-					'last_seen_at' => time() - 300, // 5 minutes ago
-					'action'       => null,
+					'id'     => 'tmr_fake_reader',
+					'action' => null,
 				)
 			);
 
-		$readers_mock = Mockery::mock();
+		$retrieve_calls = 0;
+		$readers_mock    = Mockery::mock();
 		$readers_mock->shouldReceive( 'retrieve' )
-			->with( 'tmr_fake_reader' )
-			->andReturn( $reader_mock );
+			->andReturnUsing(
+				function () use ( &$retrieve_calls, $reader_mock ) {
+					++$retrieve_calls;
+
+					return $reader_mock;
+				}
+			);
 		$readers_mock->shouldReceive( 'processPaymentIntent' )
 			->once()
-			->andThrow(
-				\Stripe\Exception\AuthenticationException::factory( 'Invalid API Key' )
-			);
+			->andReturn( $reader_mock );
 
 		$terminal_mock          = Mockery::mock();
 		$terminal_mock->readers = $readers_mock;
@@ -1016,8 +1120,14 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_fake_intent' );
 
-		$this->assertInstanceOf( WP_Error::class, $result );
-		$this->assertNotSame( 'reader_stale', $result->get_error_code() );
+		$this->assertSame( 0, $retrieve_calls );
+		$this->assertSame(
+			array(
+				'id'     => 'tmr_fake_reader',
+				'action' => null,
+			),
+			$result
+		);
 	}
 
 	/**
@@ -1041,10 +1151,26 @@ class StripeTerminalServiceTest extends TestCase {
 				)
 			);
 
-		$readers_mock = Mockery::mock();
+		$dispatch_calls = 0;
+		$readers_mock   = Mockery::mock();
+		$readers_mock->shouldReceive( 'processPaymentIntent' )
+			->with( 'tmr_fake_reader', Mockery::type( 'array' ) )
+			->andReturnUsing(
+				function () use ( &$dispatch_calls ) {
+					++$dispatch_calls;
+
+					throw \Stripe\Exception\InvalidRequestException::factory(
+						'Reader is busy.',
+						409,
+						null,
+						null,
+						null,
+						'terminal_reader_busy'
+					);
+				}
+			);
 		$readers_mock->shouldReceive( 'retrieve' )->with( 'tmr_fake_reader' )->once()->andReturn( $reader_with_action );
 		$readers_mock->shouldNotReceive( 'cancelAction' );
-		$readers_mock->shouldNotReceive( 'processPaymentIntent' );
 
 		$terminal_mock          = Mockery::mock();
 		$terminal_mock->readers = $readers_mock;
@@ -1056,96 +1182,82 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_new_intent' );
 
+		$this->assertSame( 1, $dispatch_calls );
 		$this->assertInstanceOf( WP_Error::class, $result );
 		$this->assertSame( 'reader_busy', $result->get_error_code() );
-		$this->assertSame( 409, $result->get_error_data()['status'] );
+		$this->assertSame(
+			array(
+				'status'                    => 409,
+				'reader_id'                 => 'tmr_fake_reader',
+				'current_payment_intent_id' => 'pi_old_intent',
+				'can_force_cancel'          => true,
+			),
+			$result->get_error_data()
+		);
 	}
 
 	/**
-	 * Test process_payment_intent proceeds when reader last_seen_at is recent.
-	 *
-	 * The method should pass the freshness check but will still fail on the
-	 * actual processPaymentIntent call (fake key), proving it got past the gate.
+	 * Test a cached account country avoids an account API request.
 	 */
-	public function test_process_payment_intent_passes_freshness_when_last_seen_recent(): void {
-		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+	public function test_supported_currencies_uses_cached_account_country(): void {
+		$cache_key = 'stwc_account_country_' . substr( md5( 'sk_test_cache_key' ), 0, 8 );
+		$requested_key = null;
+		Functions\when( 'get_transient' )->alias(
+			function ( $key ) use ( &$requested_key ) {
+				$requested_key = $key;
 
-		// Build mock: readers->retrieve() returns reader with recent last_seen_at.
-		$reader_mock = Mockery::mock( \Stripe\Terminal\Reader::class );
-		$reader_mock->shouldReceive( 'toArray' )
-			->andReturn(
-				array(
-					'id'           => 'tmr_fake_reader',
-					'last_seen_at' => time() - 30, // 30 seconds ago
-					'action'       => null,
-				)
-			);
+				return 'CA';
+			}
+		);
 
-		// The processPaymentIntent call will fail with fake key — that's expected.
-		// We just need to prove the freshness check didn't block us.
-		$readers_mock = Mockery::mock();
-		$readers_mock->shouldReceive( 'retrieve' )
-			->with( 'tmr_fake_reader' )
-			->andReturn( $reader_mock );
-		$readers_mock->shouldReceive( 'processPaymentIntent' )
-			->andThrow(
-				\Stripe\Exception\AuthenticationException::factory( 'Invalid API Key' )
-			);
+		$service = new StripeTerminalService( 'sk_test_cache_key' );
+		$method  = new \ReflectionMethod( StripeTerminalService::class, 'get_supported_currencies' );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$method->setAccessible( true );
+		}
 
-		$terminal_mock          = Mockery::mock();
-		$terminal_mock->readers = $readers_mock;
-
-		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
-		$stripe_mock->terminal = $terminal_mock;
-
-		$service->set_stripe_client( $stripe_mock );
-
-		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_fake_intent' );
-
-		// Should be a WP_Error from the processPaymentIntent call, NOT reader_stale.
-		$this->assertInstanceOf( WP_Error::class, $result );
-		$this->assertNotSame( 'reader_stale', $result->get_error_code() );
+		$this->assertSame( array( 'cad' ), $method->invoke( $service ) );
+		$this->assertSame( $cache_key, $requested_key );
 	}
 
 	/**
-	 * Test process_payment_intent proceeds when last_seen_at is null.
-	 *
-	 * Some reader types may not report last_seen_at. The freshness check
-	 * should be skipped (not block) when the value is missing.
+	 * Test an account-country cache miss stores Stripe's response for one week.
 	 */
-	public function test_process_payment_intent_skips_freshness_when_last_seen_null(): void {
-		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+	public function test_supported_currencies_caches_retrieved_account_country(): void {
+		$cache_key = 'stwc_account_country_' . substr( md5( 'sk_test_cache_miss' ), 0, 8 );
+		$stored_transient = null;
+		Functions\when( 'get_transient' )->justReturn( false );
+		Functions\when( 'set_transient' )->alias(
+			function ( $key, $value, $ttl ) use ( &$stored_transient ) {
+				$stored_transient = array( $key, $value, $ttl );
 
-		$reader_mock = Mockery::mock( \Stripe\Terminal\Reader::class );
-		$reader_mock->shouldReceive( 'toArray' )
-			->andReturn(
+				return true;
+			}
+		);
+
+		$service = new StripeTerminalService( 'sk_test_cache_miss' );
+		$client  = new StripeHttpClientFake(
+			array(
 				array(
-					'id'           => 'tmr_fake_reader',
-					'last_seen_at' => null,
-					'action'       => null,
-				)
-			);
+					'body'   => array(
+						'id'      => 'acct_test',
+						'object'  => 'account',
+						'country' => 'GB',
+					),
+					'status' => 200,
+				),
+			)
+		);
+		\Stripe\ApiRequestor::setHttpClient( $client );
 
-		$readers_mock = Mockery::mock();
-		$readers_mock->shouldReceive( 'retrieve' )
-			->with( 'tmr_fake_reader' )
-			->andReturn( $reader_mock );
-		$readers_mock->shouldReceive( 'processPaymentIntent' )
-			->andThrow(
-				\Stripe\Exception\AuthenticationException::factory( 'Invalid API Key' )
-			);
+		$method = new \ReflectionMethod( StripeTerminalService::class, 'get_supported_currencies' );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$method->setAccessible( true );
+		}
 
-		$terminal_mock          = Mockery::mock();
-		$terminal_mock->readers = $readers_mock;
-
-		$stripe_mock           = Mockery::mock( \Stripe\StripeClient::class );
-		$stripe_mock->terminal = $terminal_mock;
-
-		$service->set_stripe_client( $stripe_mock );
-
-		$result = $service->process_payment_intent( 'tmr_fake_reader', 'pi_fake_intent' );
-
-		$this->assertInstanceOf( WP_Error::class, $result );
-		$this->assertNotSame( 'reader_stale', $result->get_error_code() );
+		$this->assertSame( array( 'gbp' ), $method->invoke( $service ) );
+		$this->assertSame( array( $cache_key, 'GB', 604800 ), $stored_transient );
+		$this->assertCount( 1, $client->requests );
+		$this->assertStringEndsWith( '/v1/account', $client->requests[0]['url'] );
 	}
 }
