@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.27 - 2026-08-07
+
+### Changed
+
+- Reduce Stripe API round-trips before reader dispatch by caching the account country, dispatching before reader-state recovery, and skipping fresh-order status scans
+- Add explicit, filterable Stripe API timeouts: 10s connect everywhere, 30s for read-only calls; reader commands keep the full 80s so a dispatch is never aborted while Stripe is delivering it to the reader
+
+### Added
+
+- Add click-path timing diagnostics to WooCommerce logs, and show the payment timing breakdown (create intent / reader dispatch) in the on-page terminal log the cashier can see
+- Experimental "Reader Keep-Warm" gateway setting (off by default): a zero-total display ping exercises the reader's command channel when a POS order is created, periodically while the POS is active, and when the payment page connects a reader — so idle readers don't greet the first payment with a stale connection. Off by default because a display command sent mid-payment replaces the payment on the reader (verified against Stripe's API); guards suppress warms around dispatches but the race cannot be fully closed, so avoid enabling it when multiple registers share one reader
+
+### Fixed
+
+- Prevent overlapping payment-status polls when Stripe responses are slow
+
 ## 0.0.26 - 2026-07-15
 
 ### Added

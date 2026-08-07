@@ -387,6 +387,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( '' );
+			$order->shouldReceive( 'get_transaction_id' )->andReturn( 'ch_test' );
 			$order->shouldReceive( 'set_transaction_id' )->never();
 			$order->shouldReceive( 'payment_complete' )->never();
 
@@ -439,15 +440,27 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( '' );
+			$order->shouldReceive( 'get_transaction_id' )->andReturn( '' );
 			$order->shouldReceive( 'get_checkout_payment_url' )->withNoArgs()->once()->andReturn( 'https://example.test/checkout/order-pay/42/?pay_for_order=true&key=wc_order_key' );
 			$order->shouldReceive( 'set_transaction_id' )->never();
 			$order->shouldReceive( 'payment_complete' )->never();
+
+			$status_checks  = 0;
+			$stripe_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$stripe_service->shouldReceive( 'check_payment_status_from_stripe' )
+				->andReturnUsing(
+					function () use ( &$status_checks ) {
+						++$status_checks;
+
+						return new \WP_Error( 'not_found' );
+					}
+				);
 
 			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
 			if ( PHP_VERSION_ID < 80100 ) {
 				$property->setAccessible( true );
 			}
-			$property->setValue( $gateway, null );
+			$property->setValue( $gateway, $stripe_service );
 
 			Functions\when( 'wc_get_order' )->justReturn( $order );
 			Functions\when( 'wc_add_notice' )->alias(
@@ -463,6 +476,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				),
 				$gateway->process_payment( 42 )
 			);
+			$this->assertSame( 0, $status_checks );
 		}
 
 		public function test_process_payment_fails_on_order_pay_without_terminal_payment(): void {

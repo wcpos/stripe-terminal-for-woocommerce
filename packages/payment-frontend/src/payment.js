@@ -101,6 +101,16 @@ class StripeTerminalPayment {
       
       this.currentPaymentIntent = response.payment_intent;
 
+      // Show the cashier where the time went (also logged server-side).
+      if (response.timing) {
+        const secs = (ms) => (ms / 1000).toFixed(1) + 's';
+        this.addToLog(
+          `Payment sent to reader in ${secs(response.timing.total_ms)} ` +
+          `(create intent ${secs(response.timing.create_ms)}, reader dispatch ${secs(response.timing.dispatch_ms)})`,
+          'info'
+        );
+      }
+
       // Store reader's last_seen_at for pickup verification.
       this.readerLastSeenAt = response.reader?.last_seen_at || null;
 
@@ -360,7 +370,14 @@ class StripeTerminalPayment {
       this.pollingTimeout = null;
     }
 
+    let requestInFlight = false;
+
     this.pollingInterval = setInterval(async () => {
+      if (requestInFlight) {
+        return;
+      }
+
+      requestInFlight = true;
       try {
         const response = await jQuery.ajax({
           url: this.ajaxUrl,
@@ -394,6 +411,8 @@ class StripeTerminalPayment {
         }
       } catch (error) {
         console.error('Payment polling error:', error);
+      } finally {
+        requestInFlight = false;
       }
     }, 2000);
 
@@ -844,17 +863,10 @@ class StripeTerminalPayment {
       // Show loading state
       this.showLoading();
       
-      // First validate the service
-      const serviceValid = await this.validateService();
-      if (!serviceValid) {
-        this.showServiceError();
-        return;
-      }
-      
-      // Then fetch readers
+      // Fetching readers also validates the Stripe service connection.
       const readers = await this.fetchReaders();
       if (readers === null) {
-        this.showReadersError();
+        this.showServiceError();
         return;
       }
       
@@ -868,24 +880,6 @@ class StripeTerminalPayment {
     } catch (error) {
       console.error('Failed to initialize interface:', error);
       this.showServiceError();
-    }
-  }
-
-  async validateService() {
-    try {
-      const response = await jQuery.ajax({
-        url: this.ajaxUrl,
-        type: 'POST',
-        data: {
-          action: 'stripe_terminal_validate_service',
-          nonce: this.nonce
-        }
-      });
-      
-      return response.success;
-    } catch (error) {
-      console.error('Service validation failed:', error);
-      return false;
     }
   }
 
@@ -1083,14 +1077,42 @@ class StripeTerminalPayment {
   connectReader(reader) {
     this.connectedReader = reader;
     this.saveReader(reader.id);
-    
+
     // Update UI
     this.updateReaderUI();
-    
+
     // Show success message
     this.showSuccess(`${this.strings.connected || 'Connected'} to ${reader.label || reader.id}`);
-    
+
     console.log('Connected to reader:', reader);
+
+    this.warmReader(reader.id);
+  }
+
+  // Fire-and-forget keep-warm ping so the reader's command channel is fresh
+  // before the cashier clicks pay. Failures are silent by design.
+  warmReader(readerId) {
+    const orderId = this.config.orderId;
+    if (!orderId || !readerId) {
+      return;
+    }
+
+    try {
+      jQuery.ajax({
+        url: this.ajaxUrl,
+        type: 'POST',
+        data: this.addPaymentRequestData({
+          action: 'stripe_terminal_set_reader_display',
+          nonce: this.nonce,
+          order_id: orderId,
+          reader_id: readerId
+        })
+      }).catch((error) => {
+        console.debug('Reader warm ping failed:', error);
+      });
+    } catch (error) {
+      console.debug('Reader warm ping failed:', error);
+    }
   }
 
   handleDisconnectReader(event) {

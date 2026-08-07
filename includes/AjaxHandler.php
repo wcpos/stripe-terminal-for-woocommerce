@@ -57,6 +57,9 @@ class AjaxHandler {
 		add_action( 'wp_ajax_stripe_terminal_get_readers', array( $this, 'get_readers' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_get_readers', array( $this, 'get_readers' ) );
 
+		add_action( 'wp_ajax_stripe_terminal_set_reader_display', array( $this, 'set_reader_display' ) );
+		add_action( 'wp_ajax_nopriv_stripe_terminal_set_reader_display', array( $this, 'set_reader_display' ) );
+
 		// Payment status check.
 		add_action( 'wp_ajax_stripe_terminal_check_payment_status', array( $this, 'check_payment_status' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_check_payment_status', array( $this, 'check_payment_status' ) );
@@ -83,6 +86,8 @@ class AjaxHandler {
 	 * Create and process a payment intent for Stripe Terminal.
 	 */
 	public function create_payment_intent(): void {
+		$started_at = microtime( true );
+
 		try {
 			// Get and validate parameters.
 			// phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce is verified by verify_ajax_nonce() above, which provides specific missing/invalid messages.
@@ -130,6 +135,7 @@ class AjaxHandler {
 			// Step 1: Create payment intent using the service.
 			Logger::log( 'Stripe Terminal AJAX - Creating payment intent for Order #' . $order_id . ' (Amount: ' . $amount . ')' );
 			$payment_intent = $this->stripe_service->create_payment_intent( $order, $amount, $moto );
+			$intent_ready_at = microtime( true );
 
 			if ( is_wp_error( $payment_intent ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent creation failed: ' . $payment_intent->get_error_message() );
@@ -160,10 +166,24 @@ class AjaxHandler {
 				)
 			);
 
+			// Remember the reader so background keep-warm pings target the right
+			// device, and stamp the dispatch so warms back off while a payment
+			// may be in flight (a display command mid-payment kills collection).
+			update_option( 'stwc_last_reader_id', $reader_id, false );
+			update_option( 'stwc_payment_dispatch_at', time(), false );
+
 			// Step 2: Process payment intent on the reader.
 			Logger::log( 'Stripe Terminal AJAX - Processing payment intent ' . $payment_intent_id . ' on reader ' . $reader_id );
-			$process_config = $moto ? array( 'moto' => true ) : array();
-			$reader_result = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+			$process_config      = $moto ? array( 'moto' => true ) : array();
+			$dispatch_started_at = microtime( true );
+			$reader_result       = $this->stripe_service->process_payment_intent( $reader_id, $payment_intent_id, $process_config );
+			$now                 = microtime( true );
+			$timing              = array(
+				'total_ms'    => (int) round( ( $now - $started_at ) * 1000 ),
+				'create_ms'   => (int) round( ( $intent_ready_at - $started_at ) * 1000 ),
+				'dispatch_ms' => (int) round( ( $now - $dispatch_started_at ) * 1000 ),
+			);
+			Logger::log( sprintf( '[timing] click-to-dispatch total %dms', $timing['total_ms'] ) );
 
 			if ( is_wp_error( $reader_result ) ) {
 				Logger::log( 'Stripe Terminal AJAX - Payment intent processing failed: ' . $reader_result->get_error_message() );
@@ -183,11 +203,12 @@ class AjaxHandler {
 				)
 			);
 
-			// Return both payment intent and reader data.
+			// Return payment intent, reader data, and timing for the on-page log.
 			wp_send_json_success(
 				array(
 					'payment_intent' => $payment_intent,
 					'reader'         => $reader_result,
+					'timing'         => $timing,
 				)
 			);
 		} catch ( Exception $e ) {
@@ -447,6 +468,60 @@ class AjaxHandler {
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Get readers error: ' . $e->getMessage() );
 			wp_send_json_error( 'Failed to retrieve readers: ' . $e->getMessage() );
+		}
+	}
+
+	/**
+	 * Warm the selected reader from the payment page (best-effort).
+	 *
+	 * Always responds success so warming can never surface a cashier-facing
+	 * error; `warmed` reports whether a ping was actually sent.
+	 */
+	public function set_reader_display(): void {
+		try {
+			// phpcs:disable WordPress.Security.NonceVerification.Missing -- AJAX request is verified by nonce or signed order token before side effects.
+			$order_id  = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			$reader_id = isset( $_POST['reader_id'] ) ? sanitize_text_field( wp_unslash( $_POST['reader_id'] ) ) : '';
+			// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+			if ( ! $order_id || ! $reader_id ) {
+				wp_send_json_error( 'Missing order ID or reader ID' );
+
+				return;
+			}
+
+			$order = wc_get_order( $order_id );
+			if ( ! $order ) {
+				wp_send_json_error( 'Order not found' );
+
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
+				return;
+			}
+
+			if ( ! $this->can_access_order( $order ) ) {
+				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+
+				return;
+			}
+
+			if ( ! $this->stripe_service ) {
+				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
+
+				return;
+			}
+
+			update_option( 'stwc_last_reader_id', $reader_id, false );
+
+			$warmer = new ReaderWarmer( $this->stripe_service );
+			$warmed = $warmer->maybe_warm( $reader_id );
+
+			wp_send_json_success( array( 'warmed' => $warmed ) );
+		} catch ( Exception $e ) {
+			Logger::log( 'Stripe Terminal AJAX - Reader warm error: ' . $e->getMessage() );
+			wp_send_json_success( array( 'warmed' => false ) );
 		}
 	}
 
