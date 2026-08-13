@@ -14,7 +14,7 @@
     "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
     "friendsofphp/php-cs-fixer": "^3.0",
     "mockery/mockery": "^1.6",
-    "php-stubs/woocommerce-stubs": "^10.5",
+    "php-stubs/woocommerce-stubs": "^11.0",
     "phpcompatibility/phpcompatibility-wp": "^2.0",
     "phpunit/phpunit": "^9.6",
     "sirbrillig/phpcs-variable-analysis": "^3.0",
