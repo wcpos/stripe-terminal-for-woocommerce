@@ -440,12 +440,18 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-		$livemode = $order->get_meta( '_stripe_terminal_livemode' );
-		if ( '' !== $livemode && ( 'no' === $livemode ) !== $this->test_mode ) {
-			$api_key              = $this->get_option( 'yes' === $livemode ? 'secret_key' : 'test_secret_key' );
-			$this->stripe_service = $api_key ? new StripeTerminalService( $api_key ) : null;
+		// Refund with the key matching the mode the order was paid in, scoped to
+		// this call so the gateway instance keeps its configured-mode service.
+		$stripe_service = $this->stripe_service;
+		$livemode       = $order->get_meta( '_stripe_terminal_livemode' );
+		if ( '' !== $livemode ) {
+			$order_used_test_mode = 'no' === $livemode;
+			if ( $order_used_test_mode !== $this->test_mode ) {
+				$api_key        = $this->get_option( $order_used_test_mode ? 'test_secret_key' : 'secret_key' );
+				$stripe_service = $api_key ? new StripeTerminalService( $api_key ) : null;
+			}
 		}
-		if ( ! $this->stripe_service ) {
+		if ( ! $stripe_service ) {
 			return new \WP_Error(
 				'refund_service_unavailable',
 				__( 'Stripe Terminal is not configured. Please add your Stripe secret key before refunding.', 'stripe-terminal-for-woocommerce' )
@@ -490,7 +496,7 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-		$refund = $this->stripe_service->refund_payment( $charge_or_intent_id, $stripe_amount, $args );
+		$refund = $stripe_service->refund_payment( $charge_or_intent_id, $stripe_amount, $args );
 		if ( is_wp_error( $refund ) ) {
 			$error_message = strtolower( $refund->get_error_message() );
 			if ( false !== strpos( $error_message, 'interac' ) || false !== strpos( $error_message, 'in-person refund' ) || false !== strpos( $error_message, 'in_person_refund' ) ) {

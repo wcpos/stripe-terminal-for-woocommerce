@@ -649,12 +649,15 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			$result = $gateway->process_refund( 42, 5 );
 
+			// refund_charge_not_found (not refund_service_unavailable) proves a
+			// service was built from the live key for this order's mode.
 			$this->assertSame( 'refund_charge_not_found', $result->get_error_code() );
 			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
 			if ( PHP_VERSION_ID < 80100 ) {
 				$property->setAccessible( true );
 			}
-			$this->assertSame( 'sk_live_original', $property->getValue( $gateway )->get_api_key() );
+			// The gateway keeps its configured-mode service; the swap is call-scoped.
+			$this->assertSame( $current_service, $property->getValue( $gateway ) );
 		}
 
 		public function test_process_refund_explains_interac_reader_requirement(): void {
