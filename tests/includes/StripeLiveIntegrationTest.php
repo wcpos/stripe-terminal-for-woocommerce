@@ -12,6 +12,7 @@ use Brain\Monkey;
 use Brain\Monkey\Functions;
 use PHPUnit\Framework\TestCase;
 use WCPOS\WooCommercePOS\StripeTerminal\AjaxHandler;
+use WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService;
 
 /**
  * @coversNothing
@@ -130,6 +131,49 @@ class StripeLiveIntegrationTest extends TestCase {
 		$this->assertSame( array( 'card_present' ), $payment_intent->payment_method_types );
 		$this->assertIsString( $payment_intent->client_secret );
 		$this->assertStringContainsString( '_secret_', $payment_intent->client_secret );
+	}
+
+	public function test_refunds_confirmed_payment_intent_against_stripe_test_mode(): void {
+		$this->require_stripe_test_key();
+
+		Monkey\setUp();
+		try {
+			$payment_intent = \Stripe\PaymentIntent::create(
+				array(
+					'amount'               => 1234,
+					'currency'             => 'usd',
+					'payment_method_types' => array( 'card' ),
+					'payment_method'       => 'pm_card_visa',
+					'confirm'              => true,
+					'description'          => 'STWC live integration refund smoke test',
+					'metadata'             => array(
+						'stwc_test' => 'stripe_live_integration',
+					),
+				)
+			);
+			$this->assertSame( 'succeeded', $payment_intent->status );
+
+			$service = new StripeTerminalService( $this->secret_key );
+			$refund  = $service->refund_payment(
+				$payment_intent->id,
+				null,
+				array(
+					'request_options' => array(
+						'idempotency_key' => 'stwc-smoke-refund-' . $payment_intent->id,
+					),
+				)
+			);
+
+			if ( is_wp_error( $refund ) ) {
+				$this->fail( 'refund_payment returned WP_Error: ' . $refund->get_error_message() );
+			}
+
+			$this->assertStringStartsWith( 're_', $refund['id'] );
+			$this->assertSame( 1234, $refund['amount'] );
+			$this->assertContains( $refund['status'], array( 'succeeded', 'pending' ) );
+		} finally {
+			Monkey\tearDown();
+		}
 	}
 
 	private function require_stripe_test_key(): void {
