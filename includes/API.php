@@ -290,11 +290,11 @@ class API extends Abstracts\APIController {
 	 */
 	public function capture_payment_intent( WP_REST_Request $request ) {
 		try {
-			$params         = $request->get_json_params();
-			$order_id       = $params['order_id'] ?? null;
-			$payment_intent = $params['payment_intent'] ?? null;
+			$params            = $request->get_json_params();
+			$order_id          = $params['order_id'] ?? null;
+			$payment_intent_id = $params['payment_intent']['id'] ?? null;
 
-			if ( empty( $order_id ) || empty( $payment_intent ) ) {
+			if ( empty( $order_id ) || empty( $payment_intent_id ) ) {
 				return new WP_Error(
 					'missing_params',
 					'Both order_id and payment_intent are required.',
@@ -311,16 +311,30 @@ class API extends Abstracts\APIController {
 				);
 			}
 
-			// Extract charge data.
-			$charge = $payment_intent['charges']['data'][0] ?? null;
+			// This endpoint is unauthenticated, and refunds later act on the metadata
+			// saved here. Never store client-supplied payment data: retrieve the
+			// payment intent with the store's own key and derive everything from it.
+			\Stripe\Stripe::setApiKey( $this->api_key );
+			$payment_intent = $this->retrieve_payment_intent( $payment_intent_id );
+
+			$intent_order_id = isset( $payment_intent->metadata->order_id ) ? (string) $payment_intent->metadata->order_id : '';
+			if ( (string) $order_id !== $intent_order_id ) {
+				return new WP_Error(
+					'order_mismatch',
+					'The payment intent does not belong to this order.',
+					array( 'status' => 403 )
+				);
+			}
+
+			$charge = $payment_intent->charges->data[0] ?? $this->retrieve_latest_charge( $payment_intent->id );
 
 			// Save immediate metadata.
-			$order->update_meta_data( '_transaction_id', $charge['id'] ?? null );
-			$order->update_meta_data( '_stripe_currency', strtoupper( $charge['currency'] ?? '' ) );
-			$order->update_meta_data( '_stripe_charge_captured', $charge['captured'] ? 'yes' : 'no' );
-			$order->update_meta_data( '_stripe_intent_id', $payment_intent['id'] ?? null );
-			$order->update_meta_data( '_stripe_terminal_livemode', ! empty( $payment_intent['livemode'] ) ? 'yes' : 'no' );
-			$order->update_meta_data( '_stripe_card_type', ucfirst( $charge['payment_method_details']['card']['brand'] ?? '' ) );
+			$order->update_meta_data( '_transaction_id', $charge->id ?? null );
+			$order->update_meta_data( '_stripe_currency', strtoupper( $charge->currency ?? '' ) );
+			$order->update_meta_data( '_stripe_charge_captured', ! empty( $charge->captured ) ? 'yes' : 'no' );
+			$order->update_meta_data( '_stripe_intent_id', $payment_intent->id );
+			$order->update_meta_data( '_stripe_terminal_livemode', ! empty( $payment_intent->livemode ) ? 'yes' : 'no' );
+			$order->update_meta_data( '_stripe_card_type', ucfirst( $charge->payment_method_details->card->brand ?? '' ) );
 
 			// Save order.
 			$order->save();
@@ -340,6 +354,35 @@ class API extends Abstracts\APIController {
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'update_order_payment_error' );
 		}
+	}
+
+	/**
+	 * Retrieve a payment intent from Stripe (seam for testing).
+	 *
+	 * @param string $payment_intent_id The payment intent ID.
+	 *
+	 * @return \Stripe\PaymentIntent The payment intent.
+	 */
+	protected function retrieve_payment_intent( string $payment_intent_id ) {
+		return \Stripe\PaymentIntent::retrieve( $payment_intent_id );
+	}
+
+	/**
+	 * Retrieve the latest charge for a payment intent (seam for testing).
+	 *
+	 * @param string $payment_intent_id The payment intent ID.
+	 *
+	 * @return null|\Stripe\Charge The latest charge, if any.
+	 */
+	protected function retrieve_latest_charge( string $payment_intent_id ) {
+		$charges = \Stripe\Charge::all(
+			array(
+				'payment_intent' => $payment_intent_id,
+				'limit'          => 1,
+			)
+		);
+
+		return $charges->data[0] ?? null;
 	}
 
 	/**

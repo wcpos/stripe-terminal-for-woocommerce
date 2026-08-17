@@ -6,6 +6,10 @@
 
 - Add WooCommerce admin refund support for Stripe Terminal payments
 
+### Security
+
+- Harden the capture-payment-intent endpoint: payment metadata (charge ID, live/test mode) is now derived from the payment intent retrieved server-side from Stripe and must belong to the given order, instead of trusting client-supplied JSON
+
 ## 0.0.27 - 2026-08-07
 
 ### Changed
