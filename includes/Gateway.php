@@ -47,6 +47,7 @@ class Gateway extends WC_Payment_Gateway {
 		$this->id                 = self::GATEWAY_ID;
 		$this->method_title       = __( 'Stripe Terminal', 'stripe-terminal-for-woocommerce' );
 		$this->method_description = __( 'Accept in-person payments using Stripe Terminal.', 'stripe-terminal-for-woocommerce' );
+		$this->supports           = array( 'products', 'refunds' );
 
 		// Load gateway settings.
 		$this->init_form_fields();
@@ -419,6 +420,130 @@ class Gateway extends WC_Payment_Gateway {
 			'result'   => 'success',
 			'redirect' => $order->get_checkout_payment_url(),
 		);
+	}
+
+	/**
+	 * Process a refund through Stripe.
+	 *
+	 * @param int        $order_id Order ID.
+	 * @param null|float $amount   Refund amount, or null for the remaining amount.
+	 * @param string     $reason   Refund reason.
+	 *
+	 * @return true|\WP_Error True on success, otherwise an error.
+	 */
+	public function process_refund( $order_id, $amount = null, $reason = '' ) {
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			return new \WP_Error(
+				'refund_order_not_found',
+				__( 'The order could not be found.', 'stripe-terminal-for-woocommerce' )
+			);
+		}
+
+		// Refund with the key matching the mode the order was paid in, scoped to
+		// this call so the gateway instance keeps its configured-mode service.
+		$stripe_service = $this->stripe_service;
+		$livemode       = $order->get_meta( '_stripe_terminal_livemode' );
+		if ( '' !== $livemode ) {
+			$order_used_test_mode = 'no' === $livemode;
+			if ( $order_used_test_mode !== $this->test_mode ) {
+				$api_key        = $this->get_option( $order_used_test_mode ? 'test_secret_key' : 'secret_key' );
+				$stripe_service = $api_key ? new StripeTerminalService( $api_key ) : null;
+			}
+		}
+		if ( ! $stripe_service ) {
+			return new \WP_Error(
+				'refund_service_unavailable',
+				__( 'Stripe Terminal is not configured. Please add your Stripe secret key before refunding.', 'stripe-terminal-for-woocommerce' )
+			);
+		}
+
+		$charge_or_intent_id = $order->get_meta( '_transaction_id' );
+		if ( ! $charge_or_intent_id ) {
+			$charge_or_intent_id = $order->get_meta( '_stripe_terminal_charge_id' );
+		}
+		if ( ! $charge_or_intent_id ) {
+			$charge_or_intent_id = $order->get_meta( '_stripe_intent_id' );
+		}
+		if ( ! $charge_or_intent_id ) {
+			$charge_or_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
+		}
+		if ( ! $charge_or_intent_id ) {
+			return new \WP_Error(
+				'refund_charge_not_found',
+				__( 'This order has no Stripe charge on record.', 'stripe-terminal-for-woocommerce' )
+			);
+		}
+
+		$stripe_amount = null === $amount ? null : Utils\CurrencyConverter::convert_to_stripe_amount( $amount, $order->get_currency() );
+		$args          = array(
+			'request_options' => array(
+				'idempotency_key' => \sprintf(
+					'stwc_refund_%d_%s_%d',
+					$order_id,
+					null === $stripe_amount ? 'full' : $stripe_amount,
+					\count( $order->get_refunds() )
+				),
+			),
+		);
+
+		$accepted_reasons = array( 'duplicate', 'fraudulent', 'requested_by_customer' );
+		if ( \in_array( $reason, $accepted_reasons, true ) ) {
+			$args['reason'] = $reason;
+		} elseif ( '' !== $reason ) {
+			$args['metadata'] = array(
+				'reason' => \function_exists( 'mb_substr' ) ? \mb_substr( $reason, 0, 500 ) : \substr( $reason, 0, 500 ),
+			);
+		}
+
+		$refund = $stripe_service->refund_payment( $charge_or_intent_id, $stripe_amount, $args );
+		if ( is_wp_error( $refund ) ) {
+			$error_message = strtolower( $refund->get_error_message() );
+			if ( false !== strpos( $error_message, 'interac' ) || false !== strpos( $error_message, 'in-person refund' ) || false !== strpos( $error_message, 'in_person_refund' ) ) {
+				return new \WP_Error(
+					$refund->get_error_code(),
+					__( 'Refunds for Interac payments must be performed at the reader and are not yet supported by this plugin.', 'stripe-terminal-for-woocommerce' ),
+					$refund->get_error_data()
+				);
+			}
+
+			return $refund;
+		}
+
+		$order_note = \sprintf(
+			/* translators: 1: Refund ID, 2: amount, 3: currency code, 4: refund status. */
+			__( 'Stripe refund %1$s: %2$s %3$s (%4$s).', 'stripe-terminal-for-woocommerce' ),
+			$refund['id'],
+			Utils\CurrencyConverter::convert_from_stripe_amount( $refund['amount'], $order->get_currency() ),
+			strtoupper( $order->get_currency() ),
+			$refund['status']
+		);
+		if ( '' !== $reason && ! \in_array( $reason, $accepted_reasons, true ) ) {
+			$order_note .= ' ' . \sprintf(
+				/* translators: %s: Merchant-provided refund reason. */
+				__( 'Reason: %s', 'stripe-terminal-for-woocommerce' ),
+				$reason
+			);
+		}
+		$order->add_order_note( $order_note );
+
+		// Pending refunds are normal asynchronous processing (e.g. Stripe holds the
+		// refund until the available balance covers it) — only failed/canceled means
+		// the money will not move. Erroring on pending would make WooCommerce discard
+		// its refund record while Stripe still completes the refund.
+		if ( \in_array( $refund['status'], array( 'failed', 'canceled' ), true ) ) {
+			return new \WP_Error(
+				'refund_not_succeeded',
+				\sprintf(
+					/* translators: 1: Refund ID, 2: refund status. */
+					__( 'Stripe refund %1$s has status "%2$s" and did not complete.', 'stripe-terminal-for-woocommerce' ),
+					$refund['id'],
+					$refund['status']
+				)
+			);
+		}
+
+		return true;
 	}
 
 	/**

@@ -14,8 +14,23 @@ namespace {
 
 	if ( ! class_exists( 'WC_Payment_Gateway' ) ) {
 		class WC_Payment_Gateway {
+			public $id;
+			public $method_title;
+			public $method_description;
+			public $title;
+			public $description;
+			public $supports = array( 'products' );
+			public $form_fields = array();
+			public $options = array();
+
 			public function get_option( $key ) {
-				return 'enable_moto' === $key ? 'no' : null;
+				return 'enable_moto' === $key ? 'no' : ( $this->options[ $key ] ?? null );
+			}
+
+			public function init_settings() {}
+
+			public function supports( $feature ) {
+				return in_array( $feature, $this->supports, true );
 			}
 		}
 	}
@@ -376,6 +391,288 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertFalse( $gateway->webhook_called );
 		}
 
+		public function test_gateway_supports_refunds(): void {
+			Functions\stubs(
+				array(
+					'__'         => function ( $text ) {
+						return $text;
+					},
+					'add_action' => true,
+					'is_ssl'     => true,
+				)
+			);
+
+			$this->assertTrue( ( new Gateway() )->supports( 'refunds' ) );
+		}
+
+		/**
+		 * @dataProvider refund_charge_id_provider
+		 */
+		public function test_process_refund_resolves_charge_id_in_priority_order( array $meta, string $expected_id ): void {
+			$order   = $this->mock_refund_order( $meta );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )
+				->once()
+				->with(
+					$expected_id,
+					1050,
+					array(
+						'request_options' => array( 'idempotency_key' => 'stwc_refund_42_1050_2' ),
+					)
+				)
+				->andReturn(
+					array(
+						'id'     => 're_123',
+						'amount' => 1050,
+						'status' => 'succeeded',
+					)
+				);
+			$order->shouldReceive( 'add_order_note' )->once();
+
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 10.50 ) );
+		}
+
+		public function refund_charge_id_provider(): array {
+			return array(
+				'transaction before mutable terminal charge' => array(
+					array(
+						'_stripe_terminal_charge_id' => 'ch_terminal',
+						'_transaction_id'            => 'ch_transaction',
+						'_stripe_intent_id'           => 'pi_intent',
+					),
+					'ch_transaction',
+				),
+				'transaction fallback' => array(
+					array( '_transaction_id' => 'ch_transaction' ),
+					'ch_transaction',
+				),
+				'payment intent fallback' => array(
+					array( '_stripe_intent_id' => 'pi_intent' ),
+					'pi_intent',
+				),
+				'terminal payment intent fallback' => array(
+					array( '_stripe_terminal_payment_intent_id' => 'pi_terminal' ),
+					'pi_terminal',
+				),
+			);
+		}
+
+		public function test_process_refund_converts_zero_decimal_currency_amount(): void {
+			$order   = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_jpy' ), 'JPY' );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )->with( 'ch_jpy', 1250, \Mockery::type( 'array' ) )->once()->andReturn(
+				array(
+					'id'     => 're_jpy',
+					'amount' => 1250,
+					'status' => 'succeeded',
+				)
+			);
+			$order->shouldReceive( 'add_order_note' )->once();
+
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 1250 ) );
+		}
+
+		public function test_process_refund_returns_error_when_order_has_no_stripe_payment_id(): void {
+			$order = $this->mock_refund_order( array() );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$result = $this->make_refund_gateway( \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class ) )
+				->process_refund( 42, 10 );
+
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertStringContainsString( 'no Stripe charge', $result->get_error_message() );
+		}
+
+		public function test_process_refund_returns_error_when_service_is_unavailable(): void {
+			$order = $this->mock_refund_order( array() );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$result = $this->make_refund_gateway( null )->process_refund( 42, 10 );
+
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertSame( 'refund_service_unavailable', $result->get_error_code() );
+		}
+
+		public function test_process_refund_returns_error_when_order_is_missing(): void {
+			Functions\when( 'wc_get_order' )->justReturn( false );
+			Functions\when( '__' )->returnArg();
+
+			$result = $this->make_refund_gateway( \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class ) )
+				->process_refund( 42, 10 );
+
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertStringContainsString( 'could not be found', $result->get_error_message() );
+		}
+
+		public function test_process_refund_propagates_service_error_unchanged(): void {
+			$order = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_error' ) );
+			$error = new \WP_Error( 'stripe_error', 'Refund failed.' );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )->once()->andReturn( $error );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+
+			$this->assertSame( $error, $this->make_refund_gateway( $service )->process_refund( 42, 10 ) );
+		}
+
+		public function test_process_refund_adds_success_note_and_passes_accepted_reason(): void {
+			$order   = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_full' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )
+				->with( 'ch_full', null, \Mockery::on( fn( $args ) => 'requested_by_customer' === $args['reason'] ) )
+				->once()
+				->andReturn(
+					array(
+						'id'     => 're_full',
+						'amount' => 2500,
+						'status' => 'succeeded',
+					)
+				);
+			$order->shouldReceive( 'add_order_note' )
+				->with( \Mockery::on( fn( $note ) => false !== strpos( $note, 're_full' ) && false !== strpos( $note, '25 USD' ) && false !== strpos( $note, 'succeeded' ) ) )
+				->once();
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, null, 'requested_by_customer' ) );
+		}
+
+		public function test_process_refund_stores_free_text_reason_in_metadata_and_note(): void {
+			$order   = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_reason' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )
+				->with( 'ch_reason', 500, \Mockery::on( fn( $args ) => array( 'reason' => 'Damaged item' ) === $args['metadata'] ) )
+				->once()
+				->andReturn(
+					array(
+						'id'     => 're_reason',
+						'amount' => 500,
+						'status' => 'succeeded',
+					)
+				);
+			$order->shouldReceive( 'add_order_note' )->with( \Mockery::on( fn( $note ) => false !== strpos( $note, 'Damaged item' ) ) )->once();
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5, 'Damaged item' ) );
+		}
+
+		public function test_process_refund_limits_stripe_metadata_reason_but_preserves_order_note(): void {
+			$reason  = str_repeat( 'a', 501 );
+			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_reason' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )
+				->with( 'ch_reason', 500, \Mockery::on( fn( $args ) => 500 === strlen( $args['metadata']['reason'] ) ) )
+				->once()
+				->andReturn(
+					array(
+						'id'     => 're_reason',
+						'amount' => 500,
+						'status' => 'succeeded',
+					)
+				);
+			$order->shouldReceive( 'add_order_note' )->with( \Mockery::on( fn( $note ) => false !== strpos( $note, $reason ) ) )->once();
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5, $reason ) );
+		}
+
+		public function test_process_refund_accepts_pending_refund_as_success(): void {
+			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_pending' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )->once()->andReturn(
+				array(
+					'id'     => 're_pending',
+					'amount' => 500,
+					'status' => 'pending',
+				)
+			);
+			$order->shouldReceive( 'add_order_note' )->with( \Mockery::on( fn( $note ) => false !== strpos( $note, 'pending' ) ) )->once();
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5 ) );
+		}
+
+		/**
+		 * @dataProvider refund_terminal_failure_status_provider
+		 */
+		public function test_process_refund_returns_error_for_terminal_failure_statuses( string $status ): void {
+			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_failed' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )->once()->andReturn(
+				array(
+					'id'     => 're_failed',
+					'amount' => 500,
+					'status' => $status,
+				)
+			);
+			$order->shouldReceive( 'add_order_note' )->with( \Mockery::on( fn( $note ) => false !== strpos( $note, $status ) ) )->once();
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$result = $this->make_refund_gateway( $service )->process_refund( 42, 5 );
+
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertSame( 'refund_not_succeeded', $result->get_error_code() );
+		}
+
+		public function refund_terminal_failure_status_provider(): array {
+			return array(
+				'failed'   => array( 'failed' ),
+				'canceled' => array( 'canceled' ),
+			);
+		}
+
+		public function test_process_refund_selects_key_for_original_payment_mode(): void {
+			$order           = $this->mock_refund_order( array( '_stripe_terminal_livemode' => 'yes' ) );
+			$current_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$current_service->shouldNotReceive( 'refund_payment' );
+			$gateway = $this->make_refund_gateway( $current_service );
+			$gateway->options['secret_key'] = 'sk_live_original';
+			$property = new \ReflectionProperty( Gateway::class, 'test_mode' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( $gateway, true );
+			Functions\when( 'apply_filters' )->alias( fn( $hook, $value ) => $value );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$result = $gateway->process_refund( 42, 5 );
+
+			// refund_charge_not_found (not refund_service_unavailable) proves a
+			// service was built from the live key for this order's mode.
+			$this->assertSame( 'refund_charge_not_found', $result->get_error_code() );
+			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			// The gateway keeps its configured-mode service; the swap is call-scoped.
+			$this->assertSame( $current_service, $property->getValue( $gateway ) );
+		}
+
+		public function test_process_refund_explains_interac_reader_requirement(): void {
+			$order   = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_interac' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )->once()->andReturn( new \WP_Error( 'stripe_error', 'Interac refunds require an in-person refund.' ) );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$result = $this->make_refund_gateway( $service )->process_refund( 42, 5 );
+
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertStringContainsString( 'must be performed at the reader', $result->get_error_message() );
+		}
+
 
 		public function test_process_payment_requires_strict_paid_true_from_stripe_api_check(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
@@ -602,6 +899,26 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				)
 			);
 			Functions\when( 'wc_get_order' )->justReturn( $order );
+
+			return $order;
+		}
+
+		private function make_refund_gateway( $service ): Gateway {
+			$gateway  = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( $gateway, $service );
+
+			return $gateway;
+		}
+
+		private function mock_refund_order( array $meta, string $currency = 'USD' ) {
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_meta' )->andReturnUsing( fn( $key ) => $meta[ $key ] ?? '' );
+			$order->shouldReceive( 'get_currency' )->andReturn( $currency );
+			$order->shouldReceive( 'get_refunds' )->andReturn( array( 'refund-1', 'refund-2' ) );
 
 			return $order;
 		}

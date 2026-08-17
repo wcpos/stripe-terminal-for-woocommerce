@@ -239,12 +239,105 @@ class StripeTerminalServiceTest extends TestCase {
 	 * Test that set_stripe_client returns void.
 	 */
 	public function test_set_stripe_client_returns_void(): void {
+		$method = new \ReflectionMethod( StripeTerminalService::class, 'set_stripe_client' );
+
+		$this->assertSame( 'void', (string) $method->getReturnType() );
+	}
+
+	/**
+	 * Test a full charge refund omits amount and keeps the command timeout.
+	 */
+	public function test_refund_payment_creates_full_charge_refund(): void {
 		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
-		$client  = new \Stripe\StripeClient( 'sk_test_key' );
+		$refund  = Mockery::mock( \Stripe\Refund::class );
+		$refund->shouldReceive( 'toArray' )->andReturn( array( 'id' => 're_full' ) );
+		$during_timeout = null;
+		$refunds        = Mockery::mock();
+		$refunds->shouldReceive( 'create' )
+			->with( array( 'charge' => 'ch_123' ), array( 'idempotency_key' => 'refund-key' ) )
+			->once()
+			->andReturnUsing(
+				function () use ( &$during_timeout, $refund ) {
+					$during_timeout = \Stripe\HttpClient\CurlClient::instance()->getTimeout();
 
-		$result = $service->set_stripe_client( $client );
+					return $refund;
+				}
+			);
+		$stripe          = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->refunds = $refunds;
+		$service->set_stripe_client( $stripe );
 
-		$this->assertNull( $result );
+		$result = $service->refund_payment(
+			'ch_123',
+			null,
+			array( 'request_options' => array( 'idempotency_key' => 'refund-key' ) )
+		);
+
+		$this->assertSame( array( 'id' => 're_full' ), $result );
+		$this->assertSame( 80, $during_timeout );
+	}
+
+	/**
+	 * Test a partial payment-intent refund forwards amount and arguments.
+	 */
+	public function test_refund_payment_creates_partial_payment_intent_refund(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$refund  = Mockery::mock( \Stripe\Refund::class );
+		$refund->shouldReceive( 'toArray' )->andReturn( array( 'id' => 're_partial' ) );
+		$refunds = Mockery::mock();
+		$refunds->shouldReceive( 'create' )
+			->with(
+				array(
+					'payment_intent' => 'pi_123',
+					'amount'         => 1050,
+					'metadata'       => array( 'reason' => 'Damaged item' ),
+				),
+				array()
+			)
+			->once()
+			->andReturn( $refund );
+		$stripe          = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->refunds = $refunds;
+		$service->set_stripe_client( $stripe );
+
+		$result = $service->refund_payment( 'pi_123', 1050, array( 'metadata' => array( 'reason' => 'Damaged item' ) ) );
+
+		$this->assertSame( array( 'id' => 're_partial' ), $result );
+	}
+
+	/**
+	 * Test py_ IDs are sent as charge IDs.
+	 */
+	public function test_refund_payment_treats_py_id_as_charge(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$refund  = Mockery::mock( \Stripe\Refund::class );
+		$refund->shouldReceive( 'toArray' )->andReturn( array( 'id' => 're_py' ) );
+		$refunds = Mockery::mock();
+		$refunds->shouldReceive( 'create' )->with( array( 'charge' => 'py_123' ), array() )->once()->andReturn( $refund );
+		$stripe          = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->refunds = $refunds;
+		$service->set_stripe_client( $stripe );
+
+		$this->assertSame( array( 'id' => 're_py' ), $service->refund_payment( 'py_123' ) );
+	}
+
+	/**
+	 * Test Stripe refund exceptions are converted to WP_Error.
+	 */
+	public function test_refund_payment_returns_wp_error_for_stripe_exception(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$refunds = Mockery::mock();
+		$refunds->shouldReceive( 'create' )->andThrow(
+			\Stripe\Exception\InvalidRequestException::factory( 'Refund failed.', 400 )
+		);
+		$stripe          = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->refunds = $refunds;
+		$service->set_stripe_client( $stripe );
+
+		$result = $service->refund_payment( 'ch_error' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'refund_payment_error', $result->get_error_data()['context'] );
 	}
 
 	// -----------------------------------------------------------------------
@@ -872,8 +965,9 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$payment_intent = \Stripe\PaymentIntent::constructFrom(
 			array(
-				'id'      => 'pi_test_123',
-				'charges' => array(
+				'id'       => 'pi_test_123',
+				'livemode' => true,
+				'charges'  => array(
 					'data' => array(
 						array(
 							'id'                     => 'ch_test_123',
@@ -902,6 +996,9 @@ class StripeTerminalServiceTest extends TestCase {
 			->with( '_stripe_intent_id', 'pi_test_123' )
 			->once();
 		$order->shouldReceive( 'update_meta_data' )
+			->with( '_stripe_terminal_livemode', 'yes' )
+			->once();
+		$order->shouldReceive( 'update_meta_data' )
 			->with( '_stripe_card_type', 'Visa' )
 			->once();
 		$order->shouldReceive( 'save' )->once();
@@ -920,8 +1017,9 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$payment_intent = \Stripe\PaymentIntent::constructFrom(
 			array(
-				'id'      => 'pi_test_456',
-				'charges' => array(
+				'id'       => 'pi_test_456',
+				'livemode' => false,
+				'charges'  => array(
 					'data' => array(
 						array(
 							'id'                     => 'ch_test_456',
@@ -939,6 +1037,9 @@ class StripeTerminalServiceTest extends TestCase {
 		$order = Mockery::mock( 'WC_Order' );
 		$order->shouldReceive( 'update_meta_data' )
 			->with( '_stripe_charge_captured', 'no' )
+			->once();
+		$order->shouldReceive( 'update_meta_data' )
+			->with( '_stripe_terminal_livemode', 'no' )
 			->once();
 		$order->shouldReceive( 'update_meta_data' )->times( 4 ); // The other 4 calls.
 		$order->shouldReceive( 'save' )->once();
@@ -980,8 +1081,9 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$payment_intent = \Stripe\PaymentIntent::constructFrom(
 			array(
-				'id'      => 'pi_test_no_brand',
-				'charges' => array(
+				'id'       => 'pi_test_no_brand',
+				'livemode' => true,
+				'charges'  => array(
 					'data' => array(
 						array(
 							'id'                     => 'ch_test_no_brand',
@@ -999,6 +1101,9 @@ class StripeTerminalServiceTest extends TestCase {
 		$order = Mockery::mock( 'WC_Order' );
 		$order->shouldReceive( 'update_meta_data' )
 			->with( '_stripe_card_type', '' )
+			->once();
+		$order->shouldReceive( 'update_meta_data' )
+			->with( '_stripe_terminal_livemode', 'yes' )
 			->once();
 		$order->shouldReceive( 'update_meta_data' )->times( 4 ); // Other calls.
 		$order->shouldReceive( 'save' )->once();
