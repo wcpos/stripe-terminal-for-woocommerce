@@ -239,12 +239,9 @@ class StripeTerminalServiceTest extends TestCase {
 	 * Test that set_stripe_client returns void.
 	 */
 	public function test_set_stripe_client_returns_void(): void {
-		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
-		$client  = new \Stripe\StripeClient( 'sk_test_key' );
+		$method = new \ReflectionMethod( StripeTerminalService::class, 'set_stripe_client' );
 
-		$result = $service->set_stripe_client( $client );
-
-		$this->assertNull( $result );
+		$this->assertSame( 'void', (string) $method->getReturnType() );
 	}
 
 	/**
