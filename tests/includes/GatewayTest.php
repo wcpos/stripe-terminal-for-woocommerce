@@ -21,9 +21,10 @@ namespace {
 			public $description;
 			public $supports = array( 'products' );
 			public $form_fields = array();
+			public $options = array();
 
 			public function get_option( $key ) {
-				return 'enable_moto' === $key ? 'no' : null;
+				return 'enable_moto' === $key ? 'no' : ( $this->options[ $key ] ?? null );
 			}
 
 			public function init_settings() {}
@@ -436,13 +437,13 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 		public function refund_charge_id_provider(): array {
 			return array(
-				'terminal charge first' => array(
+				'transaction before mutable terminal charge' => array(
 					array(
 						'_stripe_terminal_charge_id' => 'ch_terminal',
 						'_transaction_id'            => 'ch_transaction',
 						'_stripe_intent_id'           => 'pi_intent',
 					),
-					'ch_terminal',
+					'ch_transaction',
 				),
 				'transaction fallback' => array(
 					array( '_transaction_id' => 'ch_transaction' ),
@@ -490,6 +491,8 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		}
 
 		public function test_process_refund_returns_error_when_service_is_unavailable(): void {
+			$order = $this->mock_refund_order( array() );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
 			Functions\when( '__' )->returnArg();
 
 			$result = $this->make_refund_gateway( null )->process_refund( 42, 10 );
@@ -559,6 +562,72 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			Functions\when( '__' )->returnArg();
 
 			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5, 'Damaged item' ) );
+		}
+
+		public function test_process_refund_limits_stripe_metadata_reason_but_preserves_order_note(): void {
+			$reason  = str_repeat( 'a', 501 );
+			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_reason' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )
+				->with( 'ch_reason', 500, \Mockery::on( fn( $args ) => 500 === strlen( $args['metadata']['reason'] ) ) )
+				->once()
+				->andReturn(
+					array(
+						'id'     => 're_reason',
+						'amount' => 500,
+						'status' => 'succeeded',
+					)
+				);
+			$order->shouldReceive( 'add_order_note' )->with( \Mockery::on( fn( $note ) => false !== strpos( $note, $reason ) ) )->once();
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5, $reason ) );
+		}
+
+		public function test_process_refund_returns_error_for_pending_refund(): void {
+			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_pending' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )->once()->andReturn(
+				array(
+					'id'     => 're_pending',
+					'amount' => 500,
+					'status' => 'pending',
+				)
+			);
+			$order->shouldReceive( 'add_order_note' )->with( \Mockery::on( fn( $note ) => false !== strpos( $note, 'pending' ) ) )->once();
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$result = $this->make_refund_gateway( $service )->process_refund( 42, 5 );
+
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertSame( 'refund_not_succeeded', $result->get_error_code() );
+		}
+
+		public function test_process_refund_selects_key_for_original_payment_mode(): void {
+			$order           = $this->mock_refund_order( array( '_stripe_terminal_livemode' => 'yes' ) );
+			$current_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$current_service->shouldNotReceive( 'refund_payment' );
+			$gateway = $this->make_refund_gateway( $current_service );
+			$gateway->options['secret_key'] = 'sk_live_original';
+			$property = new \ReflectionProperty( Gateway::class, 'test_mode' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( $gateway, true );
+			Functions\when( 'apply_filters' )->alias( fn( $hook, $value ) => $value );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
+			$result = $gateway->process_refund( 42, 5 );
+
+			$this->assertSame( 'refund_charge_not_found', $result->get_error_code() );
+			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$this->assertSame( 'sk_live_original', $property->getValue( $gateway )->get_api_key() );
 		}
 
 		public function test_process_refund_explains_interac_reader_requirement(): void {

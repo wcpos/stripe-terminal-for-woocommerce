@@ -319,6 +319,7 @@ class API extends Abstracts\APIController {
 			$order->update_meta_data( '_stripe_currency', strtoupper( $charge['currency'] ?? '' ) );
 			$order->update_meta_data( '_stripe_charge_captured', $charge['captured'] ? 'yes' : 'no' );
 			$order->update_meta_data( '_stripe_intent_id', $payment_intent['id'] ?? null );
+			$order->update_meta_data( '_stripe_terminal_livemode', ! empty( $payment_intent['livemode'] ) ? 'yes' : 'no' );
 			$order->update_meta_data( '_stripe_card_type', ucfirst( $charge['payment_method_details']['card']['brand'] ?? '' ) );
 
 			// Save order.
@@ -447,6 +448,7 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $payment_intent->amount );
 		$order->update_meta_data( '_stripe_terminal_payment_currency', $payment_intent->currency );
+		$order->update_meta_data( '_stripe_terminal_livemode', ! empty( $payment_intent->livemode ) ? 'yes' : 'no' );
 		$is_moto        = isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true );
 		$payment_method = $is_moto ? 'card' : 'card_present';
 		if ( $is_moto ) {
@@ -519,6 +521,7 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $charge->amount );
 		$order->update_meta_data( '_stripe_terminal_payment_currency', $charge->currency );
+		$order->update_meta_data( '_stripe_terminal_livemode', ! empty( $payment_intent->livemode ) ? 'yes' : 'no' );
 		$is_moto        = isset( $payment_intent->payment_method_types ) && in_array( 'card', (array) $payment_intent->payment_method_types, true );
 		$payment_method = $is_moto ? 'card' : 'card_present';
 		if ( $is_moto ) {

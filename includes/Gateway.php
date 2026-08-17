@@ -432,13 +432,6 @@ class Gateway extends WC_Payment_Gateway {
 	 * @return true|\WP_Error True on success, otherwise an error.
 	 */
 	public function process_refund( $order_id, $amount = null, $reason = '' ) {
-		if ( ! $this->stripe_service ) {
-			return new \WP_Error(
-				'refund_service_unavailable',
-				__( 'Stripe Terminal is not configured. Please add your Stripe secret key before refunding.', 'stripe-terminal-for-woocommerce' )
-			);
-		}
-
 		$order = wc_get_order( $order_id );
 		if ( ! $order ) {
 			return new \WP_Error(
@@ -447,9 +440,21 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-		$charge_or_intent_id = $order->get_meta( '_stripe_terminal_charge_id' );
+		$livemode = $order->get_meta( '_stripe_terminal_livemode' );
+		if ( '' !== $livemode && ( 'no' === $livemode ) !== $this->test_mode ) {
+			$api_key              = $this->get_option( 'yes' === $livemode ? 'secret_key' : 'test_secret_key' );
+			$this->stripe_service = $api_key ? new StripeTerminalService( $api_key ) : null;
+		}
+		if ( ! $this->stripe_service ) {
+			return new \WP_Error(
+				'refund_service_unavailable',
+				__( 'Stripe Terminal is not configured. Please add your Stripe secret key before refunding.', 'stripe-terminal-for-woocommerce' )
+			);
+		}
+
+		$charge_or_intent_id = $order->get_meta( '_transaction_id' );
 		if ( ! $charge_or_intent_id ) {
-			$charge_or_intent_id = $order->get_meta( '_transaction_id' );
+			$charge_or_intent_id = $order->get_meta( '_stripe_terminal_charge_id' );
 		}
 		if ( ! $charge_or_intent_id ) {
 			$charge_or_intent_id = $order->get_meta( '_stripe_intent_id' );
@@ -480,7 +485,9 @@ class Gateway extends WC_Payment_Gateway {
 		if ( \in_array( $reason, $accepted_reasons, true ) ) {
 			$args['reason'] = $reason;
 		} elseif ( '' !== $reason ) {
-			$args['metadata'] = array( 'reason' => $reason );
+			$args['metadata'] = array(
+				'reason' => \function_exists( 'mb_substr' ) ? \mb_substr( $reason, 0, 500 ) : \substr( $reason, 0, 500 ),
+			);
 		}
 
 		$refund = $this->stripe_service->refund_payment( $charge_or_intent_id, $stripe_amount, $args );
@@ -513,6 +520,17 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 		$order->add_order_note( $order_note );
+		if ( 'succeeded' !== $refund['status'] ) {
+			return new \WP_Error(
+				'refund_not_succeeded',
+				\sprintf(
+					/* translators: 1: Refund ID, 2: refund status. */
+					__( 'Stripe refund %1$s has status "%2$s" and has not completed.', 'stripe-terminal-for-woocommerce' ),
+					$refund['id'],
+					$refund['status']
+				)
+			);
+		}
 
 		return true;
 	}

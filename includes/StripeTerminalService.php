@@ -627,6 +627,7 @@ class StripeTerminalService {
 			$order->update_meta_data( '_stripe_currency', strtoupper( $charge->currency ) );
 			$order->update_meta_data( '_stripe_charge_captured', $charge->captured ? 'yes' : 'no' );
 			$order->update_meta_data( '_stripe_intent_id', $payment_intent->id );
+			$order->update_meta_data( '_stripe_terminal_livemode', ! empty( $payment_intent->livemode ) ? 'yes' : 'no' );
 			$order->update_meta_data( '_stripe_card_type', ucfirst( $charge->payment_method_details->card->brand ?? '' ) );
 
 			// Save order.

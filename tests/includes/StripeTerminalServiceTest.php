@@ -968,8 +968,9 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$payment_intent = \Stripe\PaymentIntent::constructFrom(
 			array(
-				'id'      => 'pi_test_123',
-				'charges' => array(
+				'id'       => 'pi_test_123',
+				'livemode' => true,
+				'charges'  => array(
 					'data' => array(
 						array(
 							'id'                     => 'ch_test_123',
@@ -998,6 +999,9 @@ class StripeTerminalServiceTest extends TestCase {
 			->with( '_stripe_intent_id', 'pi_test_123' )
 			->once();
 		$order->shouldReceive( 'update_meta_data' )
+			->with( '_stripe_terminal_livemode', 'yes' )
+			->once();
+		$order->shouldReceive( 'update_meta_data' )
 			->with( '_stripe_card_type', 'Visa' )
 			->once();
 		$order->shouldReceive( 'save' )->once();
@@ -1016,8 +1020,9 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$payment_intent = \Stripe\PaymentIntent::constructFrom(
 			array(
-				'id'      => 'pi_test_456',
-				'charges' => array(
+				'id'       => 'pi_test_456',
+				'livemode' => false,
+				'charges'  => array(
 					'data' => array(
 						array(
 							'id'                     => 'ch_test_456',
@@ -1035,6 +1040,9 @@ class StripeTerminalServiceTest extends TestCase {
 		$order = Mockery::mock( 'WC_Order' );
 		$order->shouldReceive( 'update_meta_data' )
 			->with( '_stripe_charge_captured', 'no' )
+			->once();
+		$order->shouldReceive( 'update_meta_data' )
+			->with( '_stripe_terminal_livemode', 'no' )
 			->once();
 		$order->shouldReceive( 'update_meta_data' )->times( 4 ); // The other 4 calls.
 		$order->shouldReceive( 'save' )->once();
@@ -1076,8 +1084,9 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$payment_intent = \Stripe\PaymentIntent::constructFrom(
 			array(
-				'id'      => 'pi_test_no_brand',
-				'charges' => array(
+				'id'       => 'pi_test_no_brand',
+				'livemode' => true,
+				'charges'  => array(
 					'data' => array(
 						array(
 							'id'                     => 'ch_test_no_brand',
@@ -1095,6 +1104,9 @@ class StripeTerminalServiceTest extends TestCase {
 		$order = Mockery::mock( 'WC_Order' );
 		$order->shouldReceive( 'update_meta_data' )
 			->with( '_stripe_card_type', '' )
+			->once();
+		$order->shouldReceive( 'update_meta_data' )
+			->with( '_stripe_terminal_livemode', 'yes' )
 			->once();
 		$order->shouldReceive( 'update_meta_data' )->times( 4 ); // Other calls.
 		$order->shouldReceive( 'save' )->once();
