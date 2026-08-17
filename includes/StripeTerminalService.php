@@ -80,6 +80,40 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Refund a Stripe charge or payment intent.
+	 *
+	 * @param string   $charge_or_intent_id Stripe charge or payment intent ID.
+	 * @param null|int $amount              Refund amount in the smallest currency unit.
+	 * @param array    $args                Additional refund parameters and request options.
+	 *
+	 * @return array|WP_Error The refund data or error.
+	 */
+	public function refund_payment( string $charge_or_intent_id, ?int $amount = null, array $args = array() ) {
+		try {
+			$request_options = $args['request_options'] ?? array();
+			unset( $args['request_options'] );
+
+			$id_parameter = 0 === strpos( $charge_or_intent_id, 'pi_' ) ? 'payment_intent' : 'charge';
+			$params       = array( $id_parameter => $charge_or_intent_id );
+			if ( null !== $amount ) {
+				$params['amount'] = $amount;
+			}
+			$params = array_merge( $params, $args );
+
+			$refund = $this->timed(
+				'refund_payment',
+				function () use ( $params, $request_options ) {
+					return $this->get_stripe_client()->refunds->create( $params, $request_options );
+				}
+			);
+
+			return $refund->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'refund_payment_error' );
+		}
+	}
+
+	/**
 	 * Run an operation and log its duration without changing its result.
 	 *
 	 * @param string   $label Operation label.

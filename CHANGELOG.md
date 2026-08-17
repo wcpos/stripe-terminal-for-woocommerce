@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add WooCommerce admin refund support for Stripe Terminal payments
+
 ## 0.0.27 - 2026-08-07
 
 ### Changed

@@ -247,6 +247,102 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertNull( $result );
 	}
 
+	/**
+	 * Test a full charge refund omits amount and keeps the command timeout.
+	 */
+	public function test_refund_payment_creates_full_charge_refund(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$refund  = Mockery::mock( \Stripe\Refund::class );
+		$refund->shouldReceive( 'toArray' )->andReturn( array( 'id' => 're_full' ) );
+		$during_timeout = null;
+		$refunds        = Mockery::mock();
+		$refunds->shouldReceive( 'create' )
+			->with( array( 'charge' => 'ch_123' ), array( 'idempotency_key' => 'refund-key' ) )
+			->once()
+			->andReturnUsing(
+				function () use ( &$during_timeout, $refund ) {
+					$during_timeout = \Stripe\HttpClient\CurlClient::instance()->getTimeout();
+
+					return $refund;
+				}
+			);
+		$stripe          = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->refunds = $refunds;
+		$service->set_stripe_client( $stripe );
+
+		$result = $service->refund_payment(
+			'ch_123',
+			null,
+			array( 'request_options' => array( 'idempotency_key' => 'refund-key' ) )
+		);
+
+		$this->assertSame( array( 'id' => 're_full' ), $result );
+		$this->assertSame( 80, $during_timeout );
+	}
+
+	/**
+	 * Test a partial payment-intent refund forwards amount and arguments.
+	 */
+	public function test_refund_payment_creates_partial_payment_intent_refund(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$refund  = Mockery::mock( \Stripe\Refund::class );
+		$refund->shouldReceive( 'toArray' )->andReturn( array( 'id' => 're_partial' ) );
+		$refunds = Mockery::mock();
+		$refunds->shouldReceive( 'create' )
+			->with(
+				array(
+					'payment_intent' => 'pi_123',
+					'amount'         => 1050,
+					'metadata'       => array( 'reason' => 'Damaged item' ),
+				),
+				array()
+			)
+			->once()
+			->andReturn( $refund );
+		$stripe          = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->refunds = $refunds;
+		$service->set_stripe_client( $stripe );
+
+		$result = $service->refund_payment( 'pi_123', 1050, array( 'metadata' => array( 'reason' => 'Damaged item' ) ) );
+
+		$this->assertSame( array( 'id' => 're_partial' ), $result );
+	}
+
+	/**
+	 * Test py_ IDs are sent as charge IDs.
+	 */
+	public function test_refund_payment_treats_py_id_as_charge(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$refund  = Mockery::mock( \Stripe\Refund::class );
+		$refund->shouldReceive( 'toArray' )->andReturn( array( 'id' => 're_py' ) );
+		$refunds = Mockery::mock();
+		$refunds->shouldReceive( 'create' )->with( array( 'charge' => 'py_123' ), array() )->once()->andReturn( $refund );
+		$stripe          = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->refunds = $refunds;
+		$service->set_stripe_client( $stripe );
+
+		$this->assertSame( array( 'id' => 're_py' ), $service->refund_payment( 'py_123' ) );
+	}
+
+	/**
+	 * Test Stripe refund exceptions are converted to WP_Error.
+	 */
+	public function test_refund_payment_returns_wp_error_for_stripe_exception(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$refunds = Mockery::mock();
+		$refunds->shouldReceive( 'create' )->andThrow(
+			\Stripe\Exception\InvalidRequestException::factory( 'Refund failed.', 400 )
+		);
+		$stripe          = Mockery::mock( \Stripe\StripeClient::class );
+		$stripe->refunds = $refunds;
+		$service->set_stripe_client( $stripe );
+
+		$result = $service->refund_payment( 'ch_error' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'refund_payment_error', $result->get_error_data()['context'] );
+	}
+
 	// -----------------------------------------------------------------------
 	// create_payment_intent — currency validation tests
 	// -----------------------------------------------------------------------
