@@ -520,12 +520,17 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 		$order->add_order_note( $order_note );
-		if ( 'succeeded' !== $refund['status'] ) {
+
+		// Pending refunds are normal asynchronous processing (e.g. Stripe holds the
+		// refund until the available balance covers it) — only failed/canceled means
+		// the money will not move. Erroring on pending would make WooCommerce discard
+		// its refund record while Stripe still completes the refund.
+		if ( \in_array( $refund['status'], array( 'failed', 'canceled' ), true ) ) {
 			return new \WP_Error(
 				'refund_not_succeeded',
 				\sprintf(
 					/* translators: 1: Refund ID, 2: refund status. */
-					__( 'Stripe refund %1$s has status "%2$s" and has not completed.', 'stripe-terminal-for-woocommerce' ),
+					__( 'Stripe refund %1$s has status "%2$s" and did not complete.', 'stripe-terminal-for-woocommerce' ),
 					$refund['id'],
 					$refund['status']
 				)

@@ -585,7 +585,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5, $reason ) );
 		}
 
-		public function test_process_refund_returns_error_for_pending_refund(): void {
+		public function test_process_refund_accepts_pending_refund_as_success(): void {
 			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_pending' ) );
 			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
 			$service->shouldReceive( 'refund_payment' )->once()->andReturn(
@@ -599,10 +599,37 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			Functions\when( 'wc_get_order' )->justReturn( $order );
 			Functions\when( '__' )->returnArg();
 
+			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5 ) );
+		}
+
+		/**
+		 * @dataProvider refund_terminal_failure_status_provider
+		 */
+		public function test_process_refund_returns_error_for_terminal_failure_statuses( string $status ): void {
+			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_failed' ) );
+			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$service->shouldReceive( 'refund_payment' )->once()->andReturn(
+				array(
+					'id'     => 're_failed',
+					'amount' => 500,
+					'status' => $status,
+				)
+			);
+			$order->shouldReceive( 'add_order_note' )->with( \Mockery::on( fn( $note ) => false !== strpos( $note, $status ) ) )->once();
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+
 			$result = $this->make_refund_gateway( $service )->process_refund( 42, 5 );
 
 			$this->assertInstanceOf( \WP_Error::class, $result );
 			$this->assertSame( 'refund_not_succeeded', $result->get_error_code() );
+		}
+
+		public function refund_terminal_failure_status_provider(): array {
+			return array(
+				'failed'   => array( 'failed' ),
+				'canceled' => array( 'canceled' ),
+			);
 		}
 
 		public function test_process_refund_selects_key_for_original_payment_mode(): void {
