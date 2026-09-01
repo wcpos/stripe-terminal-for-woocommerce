@@ -48,3 +48,29 @@ if ( ! function_exists( 'is_wp_error' ) ) {
 		return $thing instanceof WP_Error;
 	}
 }
+
+// Stub WC_Order_Item_Fee for tip-reconciliation tests.
+if ( ! class_exists( 'WC_Order_Item_Fee' ) ) {
+	class WC_Order_Item_Fee {
+		public $name;
+		public $amount;
+		public $total;
+		public $tax_status;
+
+		public function set_name( $name ): void {
+			$this->name = $name;
+		}
+
+		public function set_amount( $amount ): void {
+			$this->amount = $amount;
+		}
+
+		public function set_total( $total ): void {
+			$this->total = $total;
+		}
+
+		public function set_tax_status( $tax_status ): void {
+			$this->tax_status = $tax_status;
+		}
+	}
+}

@@ -1,7 +1,7 @@
 # On-reader tip reconciliation — design
 
 **Date:** 2026-09-01
-**Status:** Proposed (not yet implemented)
+**Status:** Implemented (PR #97)
 
 ## Problem report
 
@@ -34,12 +34,18 @@ The tip is never read back from Stripe. Verified in code (v0.0.28) and Stripe do
 When a succeeded PI is retrieved **server-side**, reconcile the tip into the order as a
 fee line item before/at payment completion:
 
-- **Where:** a single shared helper (e.g. `maybe_add_tip_to_order( $order, $payment_intent )`)
-  called from all three server-side touchpoints that hold an authoritative PI:
-  `capture_payment_intent()` (primary — runs before checkout submits), and both webhook
-  handlers (safety net for flows where the capture endpoint is skipped).
-  `update_order_with_charge` needs the PI (it already retrieves it) since
-  `amount_details` lives there.
+- **Where:** a single shared helper, `Utils\TipReconciler::maybe_add_tip_to_order( $order, $payment_intent )`
+  (static utility, same pattern as `CurrencyConverter`), called from every server-side
+  touchpoint that holds an authoritative PI:
+  - `StripeTerminalService::update_order_from_payment_intent()` — the choke point for the
+    **primary AJAX checkout flow** (confirm-payment polling, payment-status checks, and
+    gateway recovery all funnel through it, each before `payment_complete()`). Review
+    finding on the first cut: the REST capture endpoint is not called by the active
+    jQuery/AJAX checkout, so hooking only the API paths would have left the immediate
+    receipt pre-tip whenever the webhook lagged.
+  - `API::capture_payment_intent()` and both webhook handlers (safety net; the webhook
+    `update_order_with_charge` needs the PI — it already retrieves it — since
+    `amount_details` lives there).
 - **What:**
   - Read `$payment_intent->amount_details->tip->amount ?? 0`; bail if `<= 0`.
   - Convert back to decimal via `CurrencyConverter` (zero-decimal currency support —

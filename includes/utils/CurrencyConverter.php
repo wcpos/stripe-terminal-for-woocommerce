@@ -111,4 +111,25 @@ class CurrencyConverter {
 		// Default to two-decimal currency.
 		return \floatval( $amount / 100 );
 	}
+
+	/**
+	 * Get the number of decimal places used to display an amount in a currency.
+	 *
+	 * @param string $currency The ISO 4217 currency code.
+	 *
+	 * @return int The number of decimal places.
+	 */
+	public static function get_decimal_places( $currency ) {
+		$currency = strtoupper( $currency );
+
+		if ( \in_array( $currency, self::$zero_decimal_currencies, true ) ) {
+			return 0;
+		}
+
+		if ( isset( self::$special_cases[ $currency ] ) ) {
+			return self::$special_cases[ $currency ];
+		}
+
+		return 2;
+	}
 }
