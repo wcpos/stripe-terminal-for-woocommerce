@@ -41,6 +41,20 @@ class UpdatePotWorkflowTest extends TestCase {
 	}
 
 	/**
+	 * Main only accepts changes through pull requests (repository ruleset), so
+	 * the workflow must propose the regenerated catalog as a PR; a direct push
+	 * from the runner is rejected with GH013 and fails the run.
+	 */
+	public function test_workflow_opens_a_pull_request_instead_of_pushing_to_main(): void {
+		$workflow = file_get_contents( self::WORKFLOW );
+
+		$this->assertIsString( $workflow );
+		$this->assertStringContainsString( 'uses: peter-evans/create-pull-request@', $workflow );
+		$this->assertStringContainsString( 'pull-requests: write', $workflow );
+		$this->assertStringNotContainsString( 'git-auto-commit-action', $workflow );
+	}
+
+	/**
 	 * Ensures only the volatile creation date is ignored.
 	 */
 	public function test_pot_comparison_ignores_only_the_creation_date(): void {
