@@ -11,6 +11,7 @@ use Exception;
 use WC_Order;
 use WCPOS\WooCommercePOS\StripeTerminal\Abstracts\StripeErrorHandler;
 use WCPOS\WooCommercePOS\StripeTerminal\Utils\CurrencyConverter;
+use WCPOS\WooCommercePOS\StripeTerminal\Utils\TipReconciler;
 use WP_Error;
 
 /**
@@ -618,6 +619,10 @@ class StripeTerminalService {
 	 * @return void
 	 */
 	public function update_order_from_payment_intent( WC_Order $order, \Stripe\PaymentIntent $payment_intent ): void {
+		// Reconcile an on-reader tip before the order is completed, even when
+		// the charge is not expanded on the intent.
+		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
+
 		// Extract charge data.
 		$charge = $payment_intent->charges->data[0] ?? null;
 

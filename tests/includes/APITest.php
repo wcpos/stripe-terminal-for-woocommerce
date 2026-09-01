@@ -56,9 +56,10 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					'order_id'       => 42,
 					// Client-supplied payment data beyond the ID must be ignored.
 					'payment_intent' => array(
-						'id'       => 'pi_capture',
-						'livemode' => false,
-						'charges'  => array(
+						'id'             => 'pi_capture',
+						'livemode'       => false,
+						'amount_details' => array( 'tip' => array( 'amount' => 9999 ) ),
+						'charges'        => array(
 							'data' => array( array( 'id' => 'ch_client_forged' ) ),
 						),
 					),

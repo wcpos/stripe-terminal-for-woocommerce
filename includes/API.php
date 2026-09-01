@@ -10,6 +10,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal;
 
 use Exception;
 use WCPOS\WooCommercePOS\StripeTerminal\Utils\CurrencyConverter;
+use WCPOS\WooCommercePOS\StripeTerminal\Utils\TipReconciler;
 use WP_Error;
 use WP_REST_Request;
 use WP_REST_Response;
@@ -326,6 +327,8 @@ class API extends Abstracts\APIController {
 				);
 			}
 
+			TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
+
 			$charge = $payment_intent->charges->data[0] ?? $this->retrieve_latest_charge( $payment_intent->id );
 
 			// Save immediate metadata.
@@ -500,6 +503,7 @@ class API extends Abstracts\APIController {
 			$order->delete_meta_data( '_stripe_terminal_moto' );
 		}
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
+		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
 		$order->save();
 
 		// Add detailed order note.
@@ -573,6 +577,7 @@ class API extends Abstracts\APIController {
 			$order->delete_meta_data( '_stripe_terminal_moto' );
 		}
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
+		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
 		$order->save();
 
 		// Add detailed order note.
