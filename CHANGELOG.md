@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- On-reader tips (WisePOS E and other smart readers) are now written back to the WooCommerce order as a non-taxable "Tip" fee line, so the order total and POS receipt match the amount charged to the card. Previously the tip was charged by Stripe but never recorded on the order
+
 ## 0.0.28 - 2026-08-17
 
 ### Added
