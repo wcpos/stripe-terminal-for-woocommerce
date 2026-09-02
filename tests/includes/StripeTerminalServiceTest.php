@@ -66,6 +66,7 @@ class StripeTerminalServiceTest extends TestCase {
 				},
 				'get_transient' => false,
 				'set_transient' => true,
+				'delete_transient' => true,
 				'wp_json_encode' => function ( $value ) {
 					return json_encode( $value );
 				},
@@ -345,41 +346,111 @@ class StripeTerminalServiceTest extends TestCase {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Test create_payment_intent rejects unsupported currency.
+	 * Build a mocked order in the given currency.
+	 */
+	private function order_in_currency( string $currency, string $total = '25.00' ) {
+		$order = Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_total' )->andReturn( $total );
+		$order->shouldReceive( 'get_currency' )->andReturn( $currency );
+
+		return $order;
+	}
+
+	/**
+	 * Fake Stripe response for GET /v1/account.
+	 */
+	private function account_response( ?string $country ): array {
+		$body = array(
+			'id'     => 'acct_test',
+			'object' => 'account',
+		);
+		if ( null !== $country ) {
+			$body['country'] = $country;
+		}
+
+		return array( 'body' => $body, 'status' => 200 );
+	}
+
+	/**
+	 * Fake Stripe error response (e.g. a restricted key without Account read).
+	 */
+	private function stripe_error_response( int $status, string $type, string $message ): array {
+		return array(
+			'body'   => array(
+				'error' => array(
+					'type'    => $type,
+					'message' => $message,
+				),
+			),
+			'status' => $status,
+		);
+	}
+
+	/**
+	 * Fake Stripe response for POST /v1/payment_intents.
+	 */
+	private function payment_intent_response( string $currency ): array {
+		return array(
+			'body'   => array(
+				'id'       => 'pi_test',
+				'object'   => 'payment_intent',
+				'amount'   => 2500,
+				'currency' => $currency,
+				'status'   => 'requires_payment_method',
+			),
+			'status' => 200,
+		);
+	}
+
+	/**
+	 * Install a queue-backed Stripe HTTP client and return it.
 	 *
-	 * With a fake API key, get_supported_currencies() will fail to reach
-	 * Stripe and default to country 'US', which only supports 'usd'.
-	 * Passing 'eur' should be rejected.
+	 * Must run after the service is constructed: the constructor installs
+	 * its own CurlClient with the plugin's timeouts.
+	 *
+	 * @param array $responses Queued fake responses.
+	 */
+	private function install_fake_stripe_client( array $responses ): StripeHttpClientFake {
+		$client = new StripeHttpClientFake( $responses );
+		\Stripe\ApiRequestor::setHttpClient( $client );
+
+		return $client;
+	}
+
+	/**
+	 * Test create_payment_intent rejects a currency the account country cannot take.
+	 *
+	 * The account lookup succeeds and reports a US account, which only
+	 * supports USD, so a EUR order is rejected before Stripe is asked to
+	 * create an intent.
 	 */
 	public function test_create_payment_intent_rejects_unsupported_currency(): void {
 		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$client = $this->install_fake_stripe_client( array( $this->account_response( 'US' ) ) );
 
-		$order = Mockery::mock( 'WC_Order' );
-		$order->shouldReceive( 'get_id' )->andReturn( 42 );
-		$order->shouldReceive( 'get_total' )->andReturn( '25.00' );
-		$order->shouldReceive( 'get_currency' )->andReturn( 'EUR' );
-
-		$result = $service->create_payment_intent( $order );
+		$result = $service->create_payment_intent( $this->order_in_currency( 'EUR' ) );
 
 		$this->assertInstanceOf( WP_Error::class, $result );
 		$this->assertSame( 'unsupported_currency', $result->get_error_code() );
 		$this->assertStringContainsString( 'EUR', $result->get_error_message() );
+		$this->assertStringContainsString( 'registered in US', $result->get_error_message() );
+		$this->assertStringContainsString( 'USD', $result->get_error_message() );
+		$this->assertSame( 400, $result->get_error_data()['status'] );
+		$this->assertCount( 1, $client->requests );
+		$this->assertStringEndsWith( '/v1/account', $client->requests[0]['url'] );
 	}
 
 	/**
-	 * Test create_payment_intent rejects various non-USD currencies when defaulting to US.
+	 * Test create_payment_intent rejects various non-USD currencies for a US account.
 	 *
 	 * @dataProvider unsupported_currency_provider
 	 */
 	public function test_create_payment_intent_rejects_various_unsupported_currencies( string $currency ): void {
 		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$this->install_fake_stripe_client( array( $this->account_response( 'US' ) ) );
 
-		$order = Mockery::mock( 'WC_Order' );
-		$order->shouldReceive( 'get_id' )->andReturn( 1 );
-		$order->shouldReceive( 'get_total' )->andReturn( '10.00' );
-		$order->shouldReceive( 'get_currency' )->andReturn( $currency );
-
-		$result = $service->create_payment_intent( $order );
+		$result = $service->create_payment_intent( $this->order_in_currency( $currency, '10.00' ) );
 
 		$this->assertInstanceOf( WP_Error::class, $result );
 		$this->assertSame( 'unsupported_currency', $result->get_error_code() );
@@ -396,37 +467,147 @@ class StripeTerminalServiceTest extends TestCase {
 	}
 
 	/**
-	 * Test create_payment_intent error message lists supported currencies.
+	 * Test the currency check is skipped when the account lookup fails.
+	 *
+	 * A restricted key without the Account read permission cannot resolve
+	 * the account country. Rather than guessing US and rejecting every
+	 * non-USD order, the check is skipped and Stripe validates the currency
+	 * when the intent is created.
 	 */
-	public function test_create_payment_intent_unsupported_currency_lists_supported(): void {
-		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+	public function test_create_payment_intent_skips_currency_check_when_account_lookup_fails(): void {
+		$service = new StripeTerminalService( 'rk_test_fake_key_123' );
+		$client = $this->install_fake_stripe_client(
+			array(
+				$this->stripe_error_response( 403, 'invalid_request_error', 'This API key does not have the required permissions.' ),
+				$this->payment_intent_response( 'eur' ),
+			)
+		);
 
-		$order = Mockery::mock( 'WC_Order' );
-		$order->shouldReceive( 'get_id' )->andReturn( 42 );
-		$order->shouldReceive( 'get_total' )->andReturn( '25.00' );
-		$order->shouldReceive( 'get_currency' )->andReturn( 'GBP' );
+		$result = $service->create_payment_intent( $this->order_in_currency( 'EUR' ) );
 
-		$result = $service->create_payment_intent( $order );
-
-		$this->assertInstanceOf( WP_Error::class, $result );
-		$this->assertStringContainsString( 'USD', $result->get_error_message() );
+		$this->assertIsArray( $result );
+		$this->assertSame( 'pi_test', $result['id'] );
+		$this->assertCount( 2, $client->requests );
+		$this->assertStringEndsWith( '/v1/account', $client->requests[0]['url'] );
+		$this->assertStringEndsWith( '/v1/payment_intents', $client->requests[1]['url'] );
+		$this->assertSame( 'eur', $client->requests[1]['params']['currency'] );
 	}
 
 	/**
-	 * Test create_payment_intent unsupported currency error has status 400.
+	 * Test a failed account lookup is not cached, so the next attempt retries it.
 	 */
-	public function test_create_payment_intent_unsupported_currency_status_400(): void {
+	public function test_create_payment_intent_does_not_cache_failed_account_lookup(): void {
+		$stored = array();
+		Functions\when( 'set_transient' )->alias(
+			function ( $key, $value, $ttl ) use ( &$stored ) {
+				$stored[] = $key;
+
+				return true;
+			}
+		);
 		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$this->install_fake_stripe_client(
+			array(
+				$this->stripe_error_response( 401, 'invalid_request_error', 'Invalid API Key provided' ),
+				$this->payment_intent_response( 'eur' ),
+			)
+		);
 
-		$order = Mockery::mock( 'WC_Order' );
-		$order->shouldReceive( 'get_id' )->andReturn( 42 );
-		$order->shouldReceive( 'get_total' )->andReturn( '25.00' );
-		$order->shouldReceive( 'get_currency' )->andReturn( 'EUR' );
+		$service->create_payment_intent( $this->order_in_currency( 'EUR' ) );
 
-		$result = $service->create_payment_intent( $order );
+		$this->assertSame( array(), $stored );
+	}
 
-		$data = $result->get_error_data();
-		$this->assertSame( 400, $data['status'] );
+	/**
+	 * Test an account response without a country skips the check rather than assuming US.
+	 */
+	public function test_create_payment_intent_skips_currency_check_when_account_has_no_country(): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$client = $this->install_fake_stripe_client(
+			array(
+				$this->account_response( null ),
+				$this->payment_intent_response( 'eur' ),
+			)
+		);
+
+		$result = $service->create_payment_intent( $this->order_in_currency( 'EUR' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertCount( 2, $client->requests );
+	}
+
+	/**
+	 * Test a stale cached country is re-fetched before a currency is rejected.
+	 *
+	 * The cache says US but Stripe now reports IE (key rotated to a different
+	 * account); the EUR order must go through and the cache must be refreshed.
+	 */
+	public function test_create_payment_intent_refetches_stale_cached_country_before_rejecting(): void {
+		$cache_key = 'stwc_account_country_' . substr( md5( 'sk_test_fake_key_123' ), 0, 8 );
+		$deleted   = array();
+		$stored    = array();
+		Functions\when( 'get_transient' )->justReturn( 'US' );
+		Functions\when( 'delete_transient' )->alias(
+			function ( $key ) use ( &$deleted ) {
+				$deleted[] = $key;
+
+				return true;
+			}
+		);
+		Functions\when( 'set_transient' )->alias(
+			function ( $key, $value, $ttl ) use ( &$stored ) {
+				$stored[] = array( $key, $value, $ttl );
+
+				return true;
+			}
+		);
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$client = $this->install_fake_stripe_client(
+			array(
+				$this->account_response( 'IE' ),
+				$this->payment_intent_response( 'eur' ),
+			)
+		);
+
+		$result = $service->create_payment_intent( $this->order_in_currency( 'EUR' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( array( $cache_key ), $deleted );
+		$this->assertSame( array( array( $cache_key, 'IE', 604800 ) ), $stored );
+		$this->assertCount( 2, $client->requests );
+		$this->assertStringEndsWith( '/v1/account', $client->requests[0]['url'] );
+		$this->assertStringEndsWith( '/v1/payment_intents', $client->requests[1]['url'] );
+	}
+
+	/**
+	 * Test a cached country that supports the currency is used without an account request.
+	 */
+	public function test_create_payment_intent_uses_cached_country_without_account_request(): void {
+		Functions\when( 'get_transient' )->justReturn( 'IE' );
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$client = $this->install_fake_stripe_client( array( $this->payment_intent_response( 'eur' ) ) );
+
+		$result = $service->create_payment_intent( $this->order_in_currency( 'EUR' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertCount( 1, $client->requests );
+		$this->assertStringEndsWith( '/v1/payment_intents', $client->requests[0]['url'] );
+	}
+
+	/**
+	 * Test a stale cache whose re-fetch confirms the country still rejects the currency.
+	 */
+	public function test_create_payment_intent_rejects_after_refetch_confirms_country(): void {
+		Functions\when( 'get_transient' )->justReturn( 'US' );
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$client = $this->install_fake_stripe_client( array( $this->account_response( 'US' ) ) );
+
+		$result = $service->create_payment_intent( $this->order_in_currency( 'EUR' ) );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'unsupported_currency', $result->get_error_code() );
+		$this->assertCount( 1, $client->requests );
+		$this->assertStringEndsWith( '/v1/account', $client->requests[0]['url'] );
 	}
 
 	// -----------------------------------------------------------------------
@@ -1432,12 +1613,12 @@ class StripeTerminalServiceTest extends TestCase {
 		);
 
 		$service = new StripeTerminalService( 'sk_test_cache_key' );
-		$method  = new \ReflectionMethod( StripeTerminalService::class, 'get_supported_currencies' );
+		$method  = new \ReflectionMethod( StripeTerminalService::class, 'resolve_account_country' );
 		if ( PHP_VERSION_ID < 80100 ) {
 			$method->setAccessible( true );
 		}
 
-		$this->assertSame( array( 'cad' ), $method->invoke( $service ) );
+		$this->assertSame( 'CA', $method->invoke( $service, 'cad' ) );
 		$this->assertSame( $cache_key, $requested_key );
 	}
 
@@ -1471,12 +1652,12 @@ class StripeTerminalServiceTest extends TestCase {
 		);
 		\Stripe\ApiRequestor::setHttpClient( $client );
 
-		$method = new \ReflectionMethod( StripeTerminalService::class, 'get_supported_currencies' );
+		$method = new \ReflectionMethod( StripeTerminalService::class, 'resolve_account_country' );
 		if ( PHP_VERSION_ID < 80100 ) {
 			$method->setAccessible( true );
 		}
 
-		$this->assertSame( array( 'gbp' ), $method->invoke( $service ) );
+		$this->assertSame( 'GB', $method->invoke( $service, 'gbp' ) );
 		$this->assertSame( array( $cache_key, 'GB', 604800 ), $stored_transient );
 		$this->assertCount( 1, $client->requests );
 		$this->assertStringEndsWith( '/v1/account', $client->requests[0]['url'] );

@@ -170,18 +170,37 @@ class StripeTerminalService {
 			$currency             = strtolower( $order->get_currency() );
 			$description          = \sprintf( 'Order #%s', $order_id );
 
-				// Check if currency is supported by Stripe Terminal.
-			$supported_currencies = $this->get_supported_currencies();
-			if ( ! \in_array( $currency, $supported_currencies, true ) ) {
-				return new WP_Error(
-					'unsupported_currency',
-					\sprintf(
-						'Currency %s is not supported by Stripe Terminal. Supported currencies: %s',
-						strtoupper( $currency ),
-						implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
-					),
-					array( 'status' => 400 )
-				);
+			// Check if currency is supported by Stripe Terminal for the account's country.
+			// When the country cannot be determined the check is skipped and Stripe
+			// validates the currency itself when the intent is created.
+			$country = $this->resolve_account_country( $currency );
+			if ( null === $country ) {
+				Logger::log( 'create_payment_intent: Stripe account country unknown; skipping local currency check for ' . strtoupper( $currency ) . ' and letting Stripe validate it.' );
+			} else {
+				$supported_currencies = $this->currencies_for_country( $country );
+				if ( ! \in_array( $currency, $supported_currencies, true ) ) {
+					Logger::log(
+						\sprintf(
+							'create_payment_intent: rejected %s for Order #%s. Stripe account country is %s (key %s), which supports: %s. If the account country is wrong, check the API key belongs to the intended Stripe account.',
+							strtoupper( $currency ),
+							$order_id,
+							$country,
+							$this->api_key_type(),
+							implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
+						)
+					);
+
+					return new WP_Error(
+						'unsupported_currency',
+						\sprintf(
+							'Currency %s is not supported by Stripe Terminal for a Stripe account registered in %s. Supported currencies: %s',
+							strtoupper( $currency ),
+							$country,
+							implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
+						),
+						array( 'status' => 400 )
+					);
+				}
 			}
 
 			if ( $moto ) {
@@ -1137,40 +1156,113 @@ class StripeTerminalService {
 	}
 
 	/**
-	 * Get supported currencies for Stripe Terminal based on account region.
+	 * Describe the API key without exposing it (e.g. "rk_live", "sk_test").
 	 *
-	 * @return array Array of supported currency codes.
+	 * @return string The key prefix.
 	 */
-	private function get_supported_currencies(): array {
-		$cache_key = 'stwc_account_country_' . substr( md5( $this->api_key ), 0, 8 );
-		$country   = get_transient( $cache_key );
+	private function api_key_type(): string {
+		return substr( $this->api_key, 0, 7 );
+	}
 
-		if ( false === $country ) {
-			try {
-				\Stripe\Stripe::setApiKey( $this->api_key );
-				$account = $this->with_read_timeout(
-					function () {
-						return $this->timed(
-							'Account::retrieve',
-							function () {
-								return \Stripe\Account::retrieve();
-							}
-						);
-					}
-				);
-				$country = $account->country ?? 'US';
-				if ( ! empty( $account->country ) ) {
-					set_transient( $cache_key, $country, 604800 );
-				}
-			} catch ( Exception $e ) {
-				// If we can't get account info, default to US without caching the fallback.
-				$country = 'US';
-			}
-		} else {
-			Logger::log( '[timing] Account::retrieve (cache) took 0ms' );
+	/**
+	 * Resolve the Stripe account country for a currency check.
+	 *
+	 * A cached country that would reject the currency is re-fetched from
+	 * Stripe before the rejection stands, so a stale cache (rotated key,
+	 * account moved) never blocks a valid payment.
+	 *
+	 * @param string $currency Lowercase currency code the order is in.
+	 *
+	 * @return null|string Two-letter country code, or null if it cannot be determined.
+	 */
+	private function resolve_account_country( string $currency ): ?string {
+		$cache_key      = $this->account_country_cache_key();
+		$cached_country = get_transient( $cache_key );
+
+		if ( false === $cached_country ) {
+			return $this->fetch_account_country();
 		}
 
-			// Return supported currencies based on country.
+		Logger::log( '[timing] Account::retrieve (cache) took 0ms' );
+
+		if ( \in_array( $currency, $this->currencies_for_country( $cached_country ), true ) ) {
+			return $cached_country;
+		}
+
+		Logger::log( \sprintf( 'resolve_account_country: cached country %s does not support %s; re-checking with Stripe.', $cached_country, strtoupper( $currency ) ) );
+		delete_transient( $cache_key );
+
+		return $this->fetch_account_country();
+	}
+
+	/**
+	 * Cache key for the account country, scoped to the API key in use.
+	 *
+	 * @return string The transient key.
+	 */
+	private function account_country_cache_key(): string {
+		return 'stwc_account_country_' . substr( md5( $this->api_key ), 0, 8 );
+	}
+
+	/**
+	 * Fetch the account country from Stripe and cache it for a week.
+	 *
+	 * @return null|string Two-letter country code, or null if the lookup failed.
+	 */
+	private function fetch_account_country(): ?string {
+		try {
+			\Stripe\Stripe::setApiKey( $this->api_key );
+			$account = $this->with_read_timeout(
+				function () {
+					return $this->timed(
+						'Account::retrieve',
+						function () {
+							return \Stripe\Account::retrieve();
+						}
+					);
+				}
+			);
+		} catch ( Exception $e ) {
+			Logger::log(
+				\sprintf(
+					'fetch_account_country: Account::retrieve failed with %s: %s (key %s). The account country cannot be determined, so the local currency check is skipped. A restricted key needs the "Account" read permission for this lookup.',
+					\get_class( $e ),
+					$e->getMessage(),
+					$this->api_key_type()
+				)
+			);
+
+			return null;
+		}
+
+		if ( empty( $account->country ) ) {
+			Logger::log( 'fetch_account_country: Stripe returned an account without a country (account ' . ( $account->id ?? 'unknown' ) . '); skipping local currency check.' );
+
+			return null;
+		}
+
+		$country = (string) $account->country;
+		set_transient( $this->account_country_cache_key(), $country, 604800 );
+		Logger::log(
+			\sprintf(
+				'fetch_account_country: Stripe account %s is registered in %s; supported Terminal currencies: %s (cached for 7 days).',
+				$account->id ?? 'unknown',
+				$country,
+				strtoupper( implode( ', ', $this->currencies_for_country( $country ) ) )
+			)
+		);
+
+		return $country;
+	}
+
+	/**
+	 * Get supported Stripe Terminal currencies for an account country.
+	 *
+	 * @param string $country Two-letter ISO country code.
+	 *
+	 * @return array Array of lowercase supported currency codes.
+	 */
+	private function currencies_for_country( string $country ): array {
 		switch ( $country ) {
 			case 'US':
 				return array( 'usd' );
@@ -1260,27 +1352,8 @@ class StripeTerminalService {
 				return array( 'bbd' );
 			case 'BS':
 				return array( 'bsd' );
-			case 'BMD':
-				return array( 'bmd' );
-			case 'KYD':
-				return array( 'kyd' );
-			case 'XCD':
-				return array( 'xcd' );
-			case 'AWG':
-				return array( 'awg' );
-			case 'ANG':
-				return array( 'ang' );
-			case 'SRD':
-				return array( 'srd' );
-			case 'GYD':
-				return array( 'gyd' );
-			case 'FKP':
-				return array( 'fkp' );
-			case 'SHP':
-				return array( 'shp' );
-			case 'EUR':
 			default:
-					// For European countries and others, support EUR and common currencies.
+				// European countries and everything else: EUR plus the common regional currencies.
 				return array( 'eur', 'gbp', 'chf', 'nok', 'sek', 'dkk', 'pln', 'czk', 'huf', 'ron', 'bgn', 'hrk', 'rsd', 'isk' );
 		}
 	}
