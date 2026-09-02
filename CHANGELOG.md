@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.30 - 2026-09-02
+
+### Fixed
+
+- Stop rejecting non-USD orders with "Currency X is not supported by Stripe Terminal" when the Stripe account lookup fails. The currency check compared the order currency against the account's registered country, but silently assumed a US account whenever `Account::retrieve` failed (typically a restricted API key without the Account read permission), so every EUR/GBP/etc. payment was blocked before Stripe was asked. The check is now skipped when the country is unknown and Stripe validates the currency itself
+- Re-check the account country with Stripe before rejecting a currency that a cached country would not support, so a rotated key or a moved account cannot leave a stale seven-day cache blocking payments
+- The rejection message now names the account country ("…for a Stripe account registered in US"), and the log records why the country lookup failed (exception, key type) and which country and currencies were resolved, so the next step is visible without guesswork
+- Remove dead currency-code branches from the country-to-currency table
+
 ## 0.0.29 - 2026-09-01
 
 ### Fixed
