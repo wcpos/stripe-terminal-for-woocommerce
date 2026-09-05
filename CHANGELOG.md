@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.31 - 2026-09-05
+
+### Fixed
+
+- The `charge.succeeded` webhook handler could never run: it called `Settings::get_secret_key()`, a method that does not exist, so PHP raised a fatal error before the handler reached its own error handling. It now uses `Settings::get_api_key()` like every other Stripe call
+- The six terminal REST routes (`connection-token`, `list-locations`, `register-reader`, `create-payment-intent`, `capture-payment-intent`, `attach-payment-method-to-customer`) accepted anonymous requests. They now require `manage_woocommerce` (terminal management) or `publish_shop_orders` (payment intents). The `webhook` route is unchanged; it is authenticated by the Stripe signature check
+
 ## 0.0.30 - 2026-09-02
 
 ### Fixed

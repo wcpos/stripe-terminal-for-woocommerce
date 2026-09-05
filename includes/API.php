@@ -53,7 +53,7 @@ class API extends Abstracts\APIController {
 			array(
 				'methods'             => 'POST',
 				'callback'            => array( $this, 'get_connection_token' ),
-				'permission_callback' => '__return_true', // Allow all users to access this endpoint.
+				'permission_callback' => array( $this, 'can_manage_terminal' ),
 			)
 		);
 
@@ -63,7 +63,7 @@ class API extends Abstracts\APIController {
 			array(
 				'methods'             => 'GET',
 				'callback'            => array( $this, 'list_locations' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( $this, 'can_manage_terminal' ),
 			)
 		);
 
@@ -73,7 +73,7 @@ class API extends Abstracts\APIController {
 			array(
 				'methods'             => 'POST',
 				'callback'            => array( $this, 'register_reader' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( $this, 'can_manage_terminal' ),
 			)
 		);
 
@@ -84,7 +84,7 @@ class API extends Abstracts\APIController {
 			array(
 				'methods'             => 'POST',
 				'callback'            => array( $this, 'create_payment_intent' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( $this, 'can_process_payments' ),
 			)
 		);
 
@@ -95,7 +95,7 @@ class API extends Abstracts\APIController {
 			array(
 				'methods'             => 'POST',
 				'callback'            => array( $this, 'capture_payment_intent' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( $this, 'can_process_payments' ),
 			)
 		);
 
@@ -106,11 +106,12 @@ class API extends Abstracts\APIController {
 			array(
 				'methods'             => 'POST',
 				'callback'            => array( $this, 'attach_payment_method_to_customer' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( $this, 'can_manage_terminal' ),
 			)
 		);
 
-		// Add the webhook route.
+		// Add the webhook route. Public by design: the handler authenticates
+		// every request with the Stripe signature check before acting on it.
 		register_rest_route(
 			$this->namespace,
 			'/webhook',
@@ -119,6 +120,45 @@ class API extends Abstracts\APIController {
 				'callback'            => array( $this, 'handle_webhook' ),
 				'permission_callback' => '__return_true',
 			)
+		);
+	}
+
+	/**
+	 * Permission callback for terminal management routes (connection tokens,
+	 * locations, reader registration, saved payment methods).
+	 *
+	 * @return bool|WP_Error
+	 */
+	public function can_manage_terminal() {
+		return $this->require_capability( 'manage_woocommerce' );
+	}
+
+	/**
+	 * Permission callback for the payment-intent routes.
+	 *
+	 * @return bool|WP_Error
+	 */
+	public function can_process_payments() {
+		return $this->require_capability( 'publish_shop_orders' );
+	}
+
+	/**
+	 * Allow the request when the current user has the capability, otherwise
+	 * answer with the standard REST forbidden error.
+	 *
+	 * @param string $capability Capability to require.
+	 *
+	 * @return bool|WP_Error
+	 */
+	private function require_capability( string $capability ) {
+		if ( current_user_can( $capability ) ) {
+			return true;
+		}
+
+		return new WP_Error(
+			'rest_forbidden',
+			__( 'Sorry, you are not allowed to do that.', 'stripe-terminal-for-woocommerce' ),
+			array( 'status' => rest_authorization_required_code() )
 		);
 	}
 
@@ -540,7 +580,7 @@ class API extends Abstracts\APIController {
 
 		// Retrieve the payment intent to get order metadata.
 		try {
-			\Stripe\Stripe::setApiKey( Settings::get_secret_key() );
+			\Stripe\Stripe::setApiKey( Settings::get_api_key() );
 			$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
 			$order_id       = $payment_intent->metadata->order_id ?? null;
 		} catch ( Exception $e ) {

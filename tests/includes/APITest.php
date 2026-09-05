@@ -145,6 +145,86 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
 		}
 
+		/**
+		 * @runInSeparateProcess
+		 * @preserveGlobalState disabled
+		 */
+		public function test_charge_webhook_logs_missing_api_key_without_throwing(): void {
+			Functions\when( 'get_option' )->justReturn( array() );
+			$logger = \Mockery::mock( 'alias:WCPOS\WooCommercePOS\StripeTerminal\Logger' );
+			$logger->shouldReceive( 'log' )->once()->with(
+				\Mockery::pattern( '/^Charge webhook: Failed to retrieve payment intent/' ),
+				'error'
+			);
+			$charge = (object) array( 'payment_intent' => 'pi_missing_key' );
+			$api    = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+			$method = new \ReflectionMethod( API::class, 'update_order_with_charge' );
+			if ( 80100 > PHP_VERSION_ID ) {
+				$method->setAccessible( true );
+			}
+
+			$this->assertNull( $method->invoke( $api, $charge ) );
+		}
+
+		public function test_permission_callbacks_reject_users_without_capability(): void {
+			Functions\when( 'current_user_can' )->justReturn( false );
+			Functions\when( 'rest_authorization_required_code' )->justReturn( 401 );
+			Functions\when( '__' )->returnArg();
+			$api = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+
+			foreach ( array( 'can_manage_terminal', 'can_process_payments' ) as $callback ) {
+				$method = new \ReflectionMethod( API::class, $callback );
+				if ( 80100 > PHP_VERSION_ID ) {
+					$method->setAccessible( true );
+				}
+				$result = $method->invoke( $api );
+
+				$this->assertInstanceOf( \WP_Error::class, $result );
+				$this->assertSame( 'rest_forbidden', $result->get_error_code() );
+				$this->assertSame( 401, $result->get_error_data()['status'] );
+			}
+		}
+
+		public function test_permission_callbacks_allow_users_with_capability(): void {
+			Functions\when( 'current_user_can' )->justReturn( true );
+			$api = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+
+			foreach ( array( 'can_manage_terminal', 'can_process_payments' ) as $callback ) {
+				$method = new \ReflectionMethod( API::class, $callback );
+				if ( 80100 > PHP_VERSION_ID ) {
+					$method->setAccessible( true );
+				}
+
+				$this->assertTrue( $method->invoke( $api ) );
+			}
+		}
+
+		public function test_routes_register_callable_permissions_for_the_required_capabilities(): void {
+			$routes = array();
+			Functions\when( 'register_rest_route' )->alias(
+				function ( $namespace, $route, $args ) use ( &$routes ) {
+					$routes[ $route ] = $args;
+				}
+			);
+			$api = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+			$api->register_routes();
+			$capabilities = array(
+				'/connection-token'                  => 'manage_woocommerce',
+				'/list-locations'                    => 'manage_woocommerce',
+				'/register-reader'                   => 'manage_woocommerce',
+				'/create-payment-intent'             => 'publish_shop_orders',
+				'/capture-payment-intent'            => 'publish_shop_orders',
+				'/attach-payment-method-to-customer' => 'manage_woocommerce',
+			);
+			foreach ( $capabilities as $route => $capability ) {
+				Functions\expect( 'current_user_can' )->once()->with( $capability )->andReturn( true );
+				$callback = $routes[ $route ]['permission_callback'];
+				$this->assertTrue( is_callable( $callback ) );
+				$this->assertTrue( call_user_func( $callback ) );
+			}
+			$this->assertSame( '__return_true', $routes['/webhook']['permission_callback'] );
+		}
+
 		private function mock_order() {
 			$order = \Mockery::mock();
 			$order->shouldReceive( 'update_meta_data' )->byDefault();
