@@ -120,6 +120,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 		public function test_payment_intent_webhook_records_livemode(): void {
 			$order = $this->mock_order();
+			$order->shouldReceive( 'needs_payment' )->andReturn( false );
 			$order->shouldReceive( 'update_meta_data' )->with( '_stripe_terminal_livemode', 'no' )->once();
 			$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
 			$order->shouldReceive( 'add_order_note' )->once();
@@ -141,6 +142,69 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				$method->setAccessible( true );
 			}
 
+			$method->invoke( $api, $payment_intent );
+			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+		}
+
+		/**
+		 * @dataProvider webhook_transaction_provider
+		 */
+		public function test_succeeded_webhook_completes_unpaid_order( ?string $charge_id, string $transaction_id ): void {
+			$order = $this->mock_order();
+			$order->shouldReceive( 'needs_payment' )->once()->andReturn( true );
+			$order->shouldReceive( 'set_transaction_id' )->once()->with( $transaction_id );
+			$order->shouldReceive( 'payment_complete' )->once()->with( $transaction_id );
+			$order->shouldReceive( 'add_order_note' )->once()->with( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.' );
+			$this->invoke_payment_intent_webhook( $order, 'succeeded', $charge_id );
+		}
+
+		public function webhook_transaction_provider(): array {
+			return array(
+				'charge ID' => array( 'ch_webhook', 'ch_webhook' ),
+				'intent ID when charge absent' => array( null, 'pi_webhook' ),
+			);
+		}
+
+		/**
+		 * @dataProvider webhook_no_completion_provider
+		 */
+		public function test_webhook_does_not_complete_paid_or_unsucceeded_order( string $status, bool $needs_payment ): void {
+			$order = $this->mock_order();
+			$order->shouldReceive( 'needs_payment' )->andReturn( $needs_payment );
+			$order->shouldNotReceive( 'set_transaction_id' );
+			$order->shouldNotReceive( 'payment_complete' );
+			$this->invoke_payment_intent_webhook( $order, $status, 'ch_webhook' );
+		}
+
+		public function webhook_no_completion_provider(): array {
+			return array(
+				'already paid' => array( 'succeeded', false ),
+				'processing' => array( 'processing', true ),
+				'uncaptured' => array( 'requires_capture', true ),
+				'canceled' => array( 'canceled', true ),
+			);
+		}
+
+		private function invoke_payment_intent_webhook( $order, string $status, ?string $charge_id ): void {
+			$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
+			$order->shouldReceive( 'add_order_note' )->once()->with( \Mockery::pattern( '/^Stripe Terminal: Payment Intent succeeded/' ) );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+			$payment_intent = (object) array(
+				'id'                   => 'pi_webhook',
+				'latest_charge'        => $charge_id,
+				'livemode'             => false,
+				'metadata'             => (object) array( 'order_id' => 42 ),
+				'amount'               => 1000,
+				'currency'             => 'usd',
+				'status'               => $status,
+				'payment_method_types' => array( 'card_present' ),
+			);
+			$api    = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+			$method = new \ReflectionMethod( API::class, 'update_order_with_payment_intent' );
+			if ( 80100 > PHP_VERSION_ID ) {
+				$method->setAccessible( true );
+			}
 			$method->invoke( $api, $payment_intent );
 			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
 		}

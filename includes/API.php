@@ -529,7 +529,7 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
-		// Save payment metadata instead of completing the order immediately.
+		// Save payment metadata before completing the order.
 		$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
 		$order->update_meta_data( '_stripe_terminal_payment_amount', $payment_intent->amount );
@@ -545,6 +545,13 @@ class API extends Abstracts\APIController {
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
 		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
 		$order->save();
+
+		if ( 'succeeded' === $payment_intent->status && $order->needs_payment() ) {
+			$transaction_id = $payment_intent->latest_charge ?? $payment_intent->id;
+			$order->set_transaction_id( $transaction_id );
+			$order->payment_complete( $transaction_id );
+			$order->add_order_note( __( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', 'stripe-terminal-for-woocommerce' ) );
+		}
 
 		// Add detailed order note.
 		/* translators: 1: Payment intent ID, 2: payment amount, 3: payment currency, 4: payment status. */

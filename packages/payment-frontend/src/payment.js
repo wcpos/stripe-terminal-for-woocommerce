@@ -888,10 +888,11 @@ class StripeTerminalPayment {
       const response = await jQuery.ajax({
         url: this.ajaxUrl,
         type: 'POST',
-        data: {
+        data: this.addPaymentRequestData({
           action: 'stripe_terminal_get_readers',
-          nonce: this.nonce
-        }
+          nonce: this.nonce,
+          order_id: this.config.orderId
+        })
       });
       
       console.log('Fetch readers response:', response);

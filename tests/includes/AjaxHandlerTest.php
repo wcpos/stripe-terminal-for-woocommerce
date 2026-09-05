@@ -443,7 +443,65 @@ class AjaxHandlerTest extends TestCase {
 		$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
 	}
 
+	/**
+	 * @dataProvider invalid_reader_order_provider
+	 */
+	public function test_get_readers_rejects_invalid_order_context( array $request, string $expected ): void {
+		$_POST = $request;
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( false );
+		Functions\when( 'wc_get_order' )->justReturn( isset( $request['order_key'] ) ? $order : false );
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldNotReceive( 'get_reader_status' );
+		$this->handler = new AjaxHandler( $service );
+
+		$this->assertSame( $expected, $this->call_and_capture_error( 'get_readers', false ) );
+	}
+
+	public function test_get_readers_accepts_order_key_without_nonce(): void {
+		$_POST = array( 'order_id' => 42, 'order_key' => 'wc_order_current' );
+		Functions\when( 'check_ajax_referer' )->justReturn( false );
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( true );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldReceive( 'get_reader_status' )->once()->withNoArgs()->andReturn( array( 'data' => array() ) );
+		Functions\when( 'wp_send_json_success' )->alias(
+			function ( $data ) {
+				throw new JsonSuccessSentinel( $data );
+			}
+		);
+
+		try {
+			( new AjaxHandler( $service ) )->get_readers();
+			$this->fail( 'Expected wp_send_json_success to be called' );
+		} catch ( JsonSuccessSentinel $e ) {
+			$this->assertSame( array( 'readers' => array(), 'count' => 0 ), $e->data );
+		}
+	}
+
+	public function invalid_reader_order_provider(): array {
+		return array(
+			'missing ID' => array( array(), 'Missing order ID' ),
+			'unknown order' => array( array( 'order_id' => 999 ), 'Order not found' ),
+			'invalid credentials' => array( array( 'order_id' => 42, 'order_key' => 'wrong' ), 'Security token missing. Please refresh or reopen the POS checkout and try again.' ),
+			'paid order' => array( array( 'order_id' => 42, 'order_key' => 'wc_order_current' ), 'Access denied - invalid order key or order does not need payment' ),
+		);
+	}
+
+	public function test_validate_service_rejects_user_without_management_capability(): void {
+		Functions\when( 'current_user_can' )->justReturn( false );
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldNotReceive( 'list_locations' );
+		$this->handler = new AjaxHandler( $service );
+
+		$this->assertSame( 'Access denied', $this->call_and_capture_error( 'validate_service', false ) );
+	}
+
 	public function test_validate_service_fails_without_service(): void {
+		Functions\when( 'current_user_can' )->justReturn( true );
 		$error = $this->call_and_capture_error( 'validate_service' );
 		$this->assertSame(
 			'Stripe service not initialized - check API key configuration',
@@ -452,6 +510,11 @@ class AjaxHandlerTest extends TestCase {
 	}
 
 	public function test_get_readers_fails_without_service(): void {
+		$_POST = array( 'order_id' => 42, 'order_key' => 'wc_order_current' );
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( true );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
 		$error = $this->call_and_capture_error( 'get_readers' );
 		$this->assertSame(
 			'Stripe service not initialized - check API key configuration',

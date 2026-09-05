@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.32 - 2026-09-05
+
+### Fixed
+
+- Orders now complete from the `payment_intent.succeeded` webhook when they still need payment
+- `get_readers` now requires the order context and `validate_service` requires `manage_woocommerce`
+- HUF and TWD charge amounts now use two decimal places
+
 ## 0.0.31 - 2026-09-05
 
 ### Fixed

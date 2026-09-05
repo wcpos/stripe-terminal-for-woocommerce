@@ -93,17 +93,19 @@ class CurrencyConverterTest extends TestCase {
 			'ISK zero'              => array( 0.0, 'ISK', 0 ),
 			'ISK large amount'      => array( 9999.99, 'ISK', 999999 ),
 
-			// HUF: special_cases decimal = 0, returned as-is (rounded integer)
-			'HUF whole forint'      => array( 3000.0, 'HUF', 3000 ),
-			'HUF rounded up'        => array( 3000.6, 'HUF', 3001 ),
-			'HUF rounded down'      => array( 3000.4, 'HUF', 3000 ),
+			// HUF charges use two decimals; manual payout restrictions do not apply.
+			'HUF whole forint'      => array( 3000.0, 'HUF', 300000 ),
+			'HUF rounded up'        => array( 3000.006, 'HUF', 300001 ),
+			'HUF rounded down'      => array( 3000.004, 'HUF', 300000 ),
 			'HUF zero'              => array( 0.0, 'HUF', 0 ),
+			'HUF 100.00 charge'     => array( 100.00, 'HUF', 10000 ),
 
-			// TWD: special_cases decimal = 0, returned as-is (rounded integer)
-			'TWD whole dollar'      => array( 150.0, 'TWD', 150 ),
-			'TWD rounded up'        => array( 150.7, 'TWD', 151 ),
-			'TWD rounded down'      => array( 150.3, 'TWD', 150 ),
+			// TWD charges use two decimals; manual payout restrictions do not apply.
+			'TWD whole dollar'      => array( 150.0, 'TWD', 15000 ),
+			'TWD rounded up'        => array( 150.007, 'TWD', 15001 ),
+			'TWD rounded down'      => array( 150.003, 'TWD', 15000 ),
 			'TWD zero'              => array( 0.0, 'TWD', 0 ),
+			'TWD 800.45 charge'     => array( 800.45, 'TWD', 80045 ),
 		);
 	}
 
@@ -166,9 +168,9 @@ class CurrencyConverterTest extends TestCase {
 			'ISK 50000 -> 500.0'    => array( 50000, 'ISK', 500.0 ),
 			'ISK 1234 -> 12.34'     => array( 1234, 'ISK', 12.34 ),
 			'ISK zero'              => array( 0, 'ISK', 0.0 ),
-			'HUF 3000 -> 3000.0'    => array( 3000, 'HUF', 3000.0 ),
+			'HUF 300000 -> 3000.0'  => array( 300000, 'HUF', 3000.0 ),
 			'HUF zero'              => array( 0, 'HUF', 0.0 ),
-			'TWD 150 -> 150.0'      => array( 150, 'TWD', 150.0 ),
+			'TWD 15000 -> 150.0'    => array( 15000, 'TWD', 150.0 ),
 			'TWD zero'              => array( 0, 'TWD', 0.0 ),
 		);
 	}
@@ -225,8 +227,8 @@ class CurrencyConverterTest extends TestCase {
 			'JPY rounds half up'             => array( 100.5, 'JPY', 101 ),
 			'JPY rounds down'                => array( 100.4, 'JPY', 100 ),
 			'ISK rounds half up'             => array( 10.005, 'ISK', 1001 ),
-			'HUF rounds half up'             => array( 100.5, 'HUF', 101 ),
-			'HUF rounds down'                => array( 100.4, 'HUF', 100 ),
+			'HUF rounds half up'             => array( 100.005, 'HUF', 10001 ),
+			'HUF rounds down'                => array( 100.004, 'HUF', 10000 ),
 		);
 	}
 
