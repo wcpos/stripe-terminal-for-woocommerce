@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-09-02T09:17:34+00:00\n"
+"POT-Creation-Date: 2026-09-05T19:33:56+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: stripe-terminal-for-woocommerce\n"
@@ -46,20 +46,32 @@ msgstr ""
 msgid "An unexpected error occurred."
 msgstr ""
 
+#: includes/API.php:160
+msgid "Sorry, you are not allowed to do that."
+msgstr ""
+
+#: includes/API.php:569
+msgid "Stripe Terminal: Order completed from the payment_intent.succeeded webhook."
+msgstr ""
+
+#: includes/API.php:572
+msgid "Stripe Terminal: Payment Intent succeeded but its amount does not match the order total; the order was not completed. Check the payment in Stripe."
+msgstr ""
+
 #. translators: 1: Payment intent ID, 2: payment amount, 3: payment currency, 4: payment status.
-#: includes/API.php:511
+#: includes/API.php:578
 #, php-format
 msgid "Stripe Terminal: Payment Intent succeeded - ID: %1$s, Amount: %2$s %3$s, Status: %4$s. Order ready for processing."
 msgstr ""
 
 #. translators: 1: Payment intent ID, 2: charge ID, 3: payment amount, 4: payment currency, 5: payment status.
-#: includes/API.php:585
+#: includes/API.php:662
 #, php-format
 msgid "Stripe Terminal: Charge succeeded - Payment Intent: %1$s, Charge: %2$s, Amount: %3$s %4$s, Status: %5$s. Order ready for processing."
 msgstr ""
 
 #. translators: 1: error message, 2: error code, 3: decline code, 4: payment intent ID
-#: includes/API.php:638
+#: includes/API.php:715
 #, php-format
 msgid "Stripe Terminal: Payment declined - %1$s (code: %2$s, decline_code: %3$s). Payment Intent: %4$s"
 msgstr ""
@@ -493,12 +505,4 @@ msgstr ""
 
 #: packages/blocks-payment/src/index.js:26
 msgid "After placing your order you will complete payment on the card reader."
-msgstr ""
-
-#: includes/API.php:561
-msgid "Stripe Terminal: Order completed from the payment_intent.succeeded webhook."
-msgstr ""
-
-#: includes/API.php:565
-msgid "Stripe Terminal: Payment Intent succeeded but its amount does not match the order total; the order was not completed. Check the payment in Stripe."
 msgstr ""
