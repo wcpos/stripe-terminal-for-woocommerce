@@ -185,6 +185,50 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 		}
 
+		public function test_webhook_ignores_intent_that_is_not_the_recorded_attempt(): void {
+			$order = \Mockery::mock();
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_current_attempt' );
+			$order->shouldNotReceive( 'update_meta_data' );
+			$order->shouldNotReceive( 'save' );
+			$order->shouldNotReceive( 'payment_complete' );
+			$order->shouldNotReceive( 'add_order_note' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+			$payment_intent = (object) array(
+				'id'       => 'pi_stale',
+				'status'   => 'succeeded',
+				'metadata' => (object) array( 'order_id' => 42 ),
+				'amount'   => 1000,
+				'currency' => 'usd',
+			);
+			$api    = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+			$method = new \ReflectionMethod( API::class, 'update_order_with_payment_intent' );
+			if ( 80100 > PHP_VERSION_ID ) {
+				$method->setAccessible( true );
+			}
+			$method->invoke( $api, $payment_intent );
+			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+		}
+
+		/**
+		 * @dataProvider webhook_amount_mismatch_provider
+		 */
+		public function test_webhook_does_not_complete_when_amount_or_currency_differs( string $total, string $currency ): void {
+			$order = $this->mock_order( '', $total, $currency );
+			$order->shouldReceive( 'needs_payment' )->andReturn( true );
+			$order->shouldNotReceive( 'set_transaction_id' );
+			$order->shouldNotReceive( 'payment_complete' );
+			$order->shouldReceive( 'add_order_note' )->once()->with( \Mockery::pattern( '/amount does not match the order total/' ) );
+			$this->invoke_payment_intent_webhook( $order, 'succeeded', 'ch_webhook' );
+		}
+
+		public function webhook_amount_mismatch_provider(): array {
+			return array(
+				'total differs'    => array( '12.50', 'usd' ),
+				'currency differs' => array( '10.00', 'eur' ),
+			);
+		}
+
 		private function invoke_payment_intent_webhook( $order, string $status, ?string $charge_id ): void {
 			$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
 			$order->shouldReceive( 'add_order_note' )->once()->with( \Mockery::pattern( '/^Stripe Terminal: Payment Intent succeeded/' ) );
@@ -289,10 +333,13 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( '__return_true', $routes['/webhook']['permission_callback'] );
 		}
 
-		private function mock_order() {
+		private function mock_order( string $recorded_intent = '', string $total = '10.00', string $currency = 'usd' ) {
 			$order = \Mockery::mock();
 			$order->shouldReceive( 'update_meta_data' )->byDefault();
 			$order->shouldReceive( 'save' )->once();
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( $recorded_intent )->byDefault();
+			$order->shouldReceive( 'get_total' )->andReturn( $total )->byDefault();
+			$order->shouldReceive( 'get_currency' )->andReturn( $currency )->byDefault();
 
 			return $order;
 		}

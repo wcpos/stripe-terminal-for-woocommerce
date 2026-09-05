@@ -529,6 +529,15 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
+		// A stale or unrelated intent must not overwrite or complete the order:
+		// when a Terminal attempt is recorded, only that intent is accepted.
+		$recorded_intent = (string) $order->get_meta( '_stripe_terminal_payment_intent_id' );
+		if ( '' !== $recorded_intent && $recorded_intent !== $payment_intent->id ) {
+			Logger::log( 'Payment intent webhook: ignoring intent ' . $payment_intent->id . ' for order ' . $order_id . '; the recorded Terminal intent is ' . $recorded_intent, 'warning' );
+
+			return;
+		}
+
 		// Save payment metadata before completing the order.
 		$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
@@ -547,10 +556,21 @@ class API extends Abstracts\APIController {
 		$order->save();
 
 		if ( 'succeeded' === $payment_intent->status && $order->needs_payment() ) {
-			$transaction_id = $payment_intent->latest_charge ?? $payment_intent->id;
-			$order->set_transaction_id( $transaction_id );
-			$order->payment_complete( $transaction_id );
-			$order->add_order_note( __( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', 'stripe-terminal-for-woocommerce' ) );
+			// The tip fee (if any) is on the order by now, so the intent must carry
+			// exactly the order total in the order's currency to complete it.
+			$expected_amount = CurrencyConverter::convert_to_stripe_amount( $order->get_total(), $order->get_currency() );
+			$amount_matches  = (int) $payment_intent->amount === (int) $expected_amount
+				&& strtolower( (string) $payment_intent->currency ) === strtolower( (string) $order->get_currency() );
+
+			if ( $amount_matches ) {
+				$transaction_id = $payment_intent->latest_charge ?? $payment_intent->id;
+				$order->set_transaction_id( $transaction_id );
+				$order->payment_complete( $transaction_id );
+				$order->add_order_note( __( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', 'stripe-terminal-for-woocommerce' ) );
+			} else {
+				Logger::log( 'Payment intent webhook: intent ' . $payment_intent->id . ' amount ' . $payment_intent->amount . ' ' . $payment_intent->currency . ' does not match order ' . $order_id . ' total ' . $expected_amount . ' ' . $order->get_currency() . '; order left unpaid', 'warning' );
+				$order->add_order_note( __( 'Stripe Terminal: Payment Intent succeeded but its amount does not match the order total; the order was not completed. Check the payment in Stripe.', 'stripe-terminal-for-woocommerce' ) );
+			}
 		}
 
 		// Add detailed order note.

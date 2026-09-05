@@ -862,7 +862,16 @@ class StripeTerminalPayment {
     try {
       // Show loading state
       this.showLoading();
-      
+
+      // On the classic checkout page no order exists yet, and the reader list
+      // is order-gated. Show the interface without readers; the gateway
+      // redirects to order-pay, where the list loads with the order context.
+      if (!this.config.orderId) {
+        this.readers = [];
+        this.showInterface();
+        return;
+      }
+
       // Fetching readers also validates the Stripe service connection.
       const readers = await this.fetchReaders();
       if (readers === null) {
