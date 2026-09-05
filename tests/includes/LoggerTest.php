@@ -36,6 +36,23 @@ class LoggerTest extends TestCase {
 	// WC_LOG_FILENAME constant
 	// -------------------------------------------------------------------
 
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_log_forwards_a_per_call_level_and_falls_back_to_the_configured_level(): void {
+		\Mockery::mock( 'alias:WC_Logger' ); // Makes class_exists( 'WC_Logger' ) true in this process.
+		$wc_logger = \Mockery::mock();
+		$wc_logger->shouldReceive( 'log' )->once()->with( 'warning', 'careful', array( 'source' => Logger::WC_LOG_FILENAME ) );
+		$wc_logger->shouldReceive( 'log' )->once()->with( 'info', 'plain', array( 'source' => Logger::WC_LOG_FILENAME ) );
+		Functions\when( 'wc_get_logger' )->justReturn( $wc_logger );
+
+		Logger::log( 'careful', 'warning' );
+		Logger::log( 'plain' );
+
+		$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+	}
+
 	public function test_log_filename_constant_equals_plugin_slug(): void {
 		$this->assertSame( 'stripe-terminal-for-woocommerce', Logger::WC_LOG_FILENAME );
 	}

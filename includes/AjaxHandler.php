@@ -53,7 +53,6 @@ class AjaxHandler {
 
 		// Service validation and reader listing.
 		add_action( 'wp_ajax_stripe_terminal_validate_service', array( $this, 'validate_service' ) );
-		add_action( 'wp_ajax_nopriv_stripe_terminal_validate_service', array( $this, 'validate_service' ) );
 		add_action( 'wp_ajax_stripe_terminal_get_readers', array( $this, 'get_readers' ) );
 		add_action( 'wp_ajax_nopriv_stripe_terminal_get_readers', array( $this, 'get_readers' ) );
 
@@ -406,6 +405,12 @@ class AjaxHandler {
 	 * Validate the Stripe Terminal service.
 	 */
 	public function validate_service(): void {
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			wp_send_json_error( 'Access denied' );
+
+			return;
+		}
+
 		try {
 			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
@@ -440,6 +445,31 @@ class AjaxHandler {
 	 */
 	public function get_readers(): void {
 		try {
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- AJAX request is verified by the existing order-scoped check below.
+			$order_id = isset( $_POST['order_id'] ) ? absint( $_POST['order_id'] ) : 0;
+			if ( ! $order_id ) {
+				wp_send_json_error( 'Missing order ID' );
+
+				return;
+			}
+
+			$order = wc_get_order( $order_id );
+			if ( ! $order ) {
+				wp_send_json_error( 'Order not found' );
+
+				return;
+			}
+
+			if ( ! $this->verify_order_ajax_request( $order ) ) {
+				return;
+			}
+
+			if ( ! $this->can_access_order( $order ) ) {
+				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+
+				return;
+			}
+
 			// Check if service is initialized.
 			if ( ! $this->stripe_service ) {
 				wp_send_json_error( 'Stripe service not initialized - check API key configuration' );
@@ -548,8 +578,11 @@ class AjaxHandler {
 				return;
 			}
 
-			if ( ! $this->can_access_order( $order ) ) {
-				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+			// A read-only status check must still answer once the order is paid:
+			// the payment_intent.succeeded webhook can complete the order between
+			// two polls, and the browser has to learn that rather than time out.
+			if ( ! $this->can_read_order( $order ) ) {
+				wp_send_json_error( 'Access denied - invalid order key' );
 				return;
 			}
 
@@ -1068,15 +1101,24 @@ class AjaxHandler {
 	 * @param WC_Order $order Order being accessed.
 	 */
 	private function can_access_order( WC_Order $order ): bool {
+		// Verify the order key matches and order needs payment.
+		return $this->can_read_order( $order ) && $order->needs_payment();
+	}
+
+	/**
+	 * Whether the request holds the order key. Unlike can_access_order() this
+	 * does not require the order to still need payment, so read-only checks
+	 * keep working after a webhook has completed the order.
+	 *
+	 * @param WC_Order $order Order being read.
+	 */
+	private function can_read_order( WC_Order $order ): bool {
 		// Always verify using order key - this works for both logged in and guest users.
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce is verified by calling AJAX handlers.
 		$provided_order_key = isset( $_POST['order_key'] ) ? sanitize_text_field( wp_unslash( $_POST['order_key'] ) ) : '';
 		$order_key          = $order->get_order_key();
 
-		// Verify the order key matches and order needs payment.
-		return ! empty( $provided_order_key ) &&
-			   $provided_order_key === $order_key &&
-			   $order->needs_payment();
+		return ! empty( $provided_order_key ) && $provided_order_key === $order_key;
 	}
 
 	/**

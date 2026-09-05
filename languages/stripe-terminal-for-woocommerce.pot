@@ -2,7 +2,7 @@
 # This file is distributed under the GPL v3 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: Stripe Terminal for WooCommerce 0.0.31\n"
+"Project-Id-Version: Stripe Terminal for WooCommerce 0.0.32\n"
 "Report-Msgid-Bugs-To: https://github.com/wcpos/stripe-terminal-for-woocommerce/issues\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -493,4 +493,12 @@ msgstr ""
 
 #: packages/blocks-payment/src/index.js:26
 msgid "After placing your order you will complete payment on the card reader."
+msgstr ""
+
+#: includes/API.php:561
+msgid "Stripe Terminal: Order completed from the payment_intent.succeeded webhook."
+msgstr ""
+
+#: includes/API.php:565
+msgid "Stripe Terminal: Payment Intent succeeded but its amount does not match the order total; the order was not completed. Check the payment in Stripe."
 msgstr ""

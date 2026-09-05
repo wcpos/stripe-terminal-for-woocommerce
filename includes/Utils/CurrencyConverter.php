@@ -44,8 +44,8 @@ class CurrencyConverter {
 	 */
 	private static $special_cases = array(
 		'ISK' => 2, // Always treat as two-decimal but no fractional amounts allowed.
-		'HUF' => 0, // Payouts in HUF require integer amounts divisible by 100.
-		'TWD' => 0, // Payouts in TWD require integer amounts divisible by 100.
+		'HUF' => 2, // Charges use two decimals; only manual payouts must be divisible by 100.
+		'TWD' => 2, // Charges use two decimals; only manual payouts must be divisible by 100.
 	);
 
 	/**
