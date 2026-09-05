@@ -578,8 +578,11 @@ class AjaxHandler {
 				return;
 			}
 
-			if ( ! $this->can_access_order( $order ) ) {
-				wp_send_json_error( 'Access denied - invalid order key or order does not need payment' );
+			// A read-only status check must still answer once the order is paid:
+			// the payment_intent.succeeded webhook can complete the order between
+			// two polls, and the browser has to learn that rather than time out.
+			if ( ! $this->can_read_order( $order ) ) {
+				wp_send_json_error( 'Access denied - invalid order key' );
 				return;
 			}
 
@@ -1098,15 +1101,24 @@ class AjaxHandler {
 	 * @param WC_Order $order Order being accessed.
 	 */
 	private function can_access_order( WC_Order $order ): bool {
+		// Verify the order key matches and order needs payment.
+		return $this->can_read_order( $order ) && $order->needs_payment();
+	}
+
+	/**
+	 * Whether the request holds the order key. Unlike can_access_order() this
+	 * does not require the order to still need payment, so read-only checks
+	 * keep working after a webhook has completed the order.
+	 *
+	 * @param WC_Order $order Order being read.
+	 */
+	private function can_read_order( WC_Order $order ): bool {
 		// Always verify using order key - this works for both logged in and guest users.
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce is verified by calling AJAX handlers.
 		$provided_order_key = isset( $_POST['order_key'] ) ? sanitize_text_field( wp_unslash( $_POST['order_key'] ) ) : '';
 		$order_key          = $order->get_order_key();
 
-		// Verify the order key matches and order needs payment.
-		return ! empty( $provided_order_key ) &&
-			   $provided_order_key === $order_key &&
-			   $order->needs_payment();
+		return ! empty( $provided_order_key ) && $provided_order_key === $order_key;
 	}
 
 	/**

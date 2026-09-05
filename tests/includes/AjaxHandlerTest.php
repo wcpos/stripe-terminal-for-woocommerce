@@ -139,6 +139,37 @@ class AjaxHandlerTest extends TestCase {
 	// create_payment_intent — missing parameters
 	// -------------------------------------------------------------------
 
+	public function test_check_payment_status_answers_after_the_webhook_completed_the_order(): void {
+		$_POST = array( 'order_id' => 42, 'order_key' => 'wc_order_current' );
+		Functions\when( 'check_ajax_referer' )->justReturn( false );
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( false );
+		$order->shouldReceive( 'is_paid' )->andReturn( true );
+		$order->shouldReceive( 'get_status' )->andReturn( 'processing' );
+		$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( 'succeeded' );
+		$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
+		$order->shouldReceive( 'get_transaction_id' )->andReturn( 'ch_webhook' );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+		$gateways = \Mockery::mock();
+		$gateways->shouldReceive( 'payment_gateways' )->andReturn( array() );
+		$wc = \Mockery::mock();
+		$wc->shouldReceive( 'payment_gateways' )->andReturn( $gateways );
+		Functions\when( 'WC' )->justReturn( $wc );
+		Functions\when( 'wp_send_json_success' )->alias(
+			function ( $data ) {
+				throw new JsonSuccessSentinel( $data );
+			}
+		);
+		try {
+			( new AjaxHandler( \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class ) ) )->check_payment_status();
+			$this->fail( 'Expected wp_send_json_success to be called' );
+		} catch ( JsonSuccessSentinel $e ) {
+			$this->assertTrue( $e->data['is_paid'] );
+			$this->assertSame( 'ch_webhook', $e->data['transaction_id'] );
+		}
+	}
+
 	public function test_create_payment_intent_reports_missing_nonce(): void {
 		$_POST = array(
 			'order_id'  => '42',

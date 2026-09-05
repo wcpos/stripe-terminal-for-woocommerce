@@ -185,6 +185,32 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 		}
 
+		/**
+		 * @runInSeparateProcess
+		 * @preserveGlobalState disabled
+		 */
+		public function test_charge_webhook_ignores_charge_for_intent_that_is_not_the_recorded_attempt(): void {
+			Functions\when( 'get_option' )->justReturn( array( 'secret_key' => 'sk_test_x', 'test_mode' => 'no' ) );
+			$intent_class = \Mockery::mock( 'alias:Stripe\PaymentIntent' );
+			$intent_class->shouldReceive( 'retrieve' )->once()->with( 'pi_old' )->andReturn(
+				(object) array( 'id' => 'pi_old', 'metadata' => (object) array( 'order_id' => 42 ), 'livemode' => false )
+			);
+			$order = \Mockery::mock();
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_current_attempt' );
+			$order->shouldNotReceive( 'update_meta_data' );
+			$order->shouldNotReceive( 'save' );
+			$order->shouldNotReceive( 'add_order_note' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			$charge = (object) array( 'id' => 'ch_old', 'payment_intent' => 'pi_old', 'amount' => 1000, 'currency' => 'usd' );
+			$api    = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+			$method = new \ReflectionMethod( API::class, 'update_order_with_charge' );
+			if ( 80100 > PHP_VERSION_ID ) {
+				$method->setAccessible( true );
+			}
+			$method->invoke( $api, $charge );
+			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+		}
+
 		public function test_webhook_ignores_intent_that_is_not_the_recorded_attempt(): void {
 			$order = \Mockery::mock();
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_current_attempt' );

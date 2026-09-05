@@ -629,6 +629,16 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
+		// Webhooks are not delivered in order: a delayed charge for an earlier
+		// intent must not overwrite the current attempt's intent id, or the
+		// stale intent's own succeeded event could later complete the order.
+		$recorded_intent = (string) $order->get_meta( '_stripe_terminal_payment_intent_id' );
+		if ( '' !== $recorded_intent && $recorded_intent !== $payment_intent_id ) {
+			Logger::log( 'Charge webhook: ignoring charge ' . $charge->id . ' for intent ' . $payment_intent_id . ' on order ' . $order_id . '; the recorded Terminal intent is ' . $recorded_intent, 'warning' );
+
+			return;
+		}
+
 		// Save payment metadata instead of completing the order immediately.
 		$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
 		$order->update_meta_data( '_stripe_terminal_charge_id', $charge->id );

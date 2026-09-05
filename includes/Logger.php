@@ -41,9 +41,10 @@ class Logger {
 	/**
 	 * Utilize WC logger class.
 	 *
-	 * @param mixed $message Message to log.
+	 * @param mixed  $message Message to log.
+	 * @param string $level   Optional severity for this entry (debug, info, notice, warning, error, …); defaults to the configured level.
 	 */
-	public static function log( $message ): void {
+	public static function log( $message, string $level = '' ): void {
 		if ( ! class_exists( 'WC_Logger' ) ) {
 			return;
 		}
@@ -61,7 +62,7 @@ class Logger {
 				$message = print_r( $message, true );
 			}
 
-			self::$logger->log( self::$log_level, $message, array( 'source' => self::WC_LOG_FILENAME ) );
+			self::$logger->log( '' !== $level ? $level : self::$log_level, $message, array( 'source' => self::WC_LOG_FILENAME ) );
 		}
 	}
 }

@@ -7,6 +7,9 @@
 - Orders now complete from the `payment_intent.succeeded` webhook when they still need payment
 - `get_readers` now requires the order context and `validate_service` requires `manage_woocommerce`
 - HUF and TWD charge amounts now use two decimal places
+- The webhook completes an order only for the intent recorded for the current Terminal attempt and only when its amount and currency equal the order total; a stale charge webhook no longer overwrites the recorded intent
+- The status poll still answers once the webhook has completed the order, so the checkout redirects instead of timing out; the classic checkout page no longer shows an error before an order exists
+- `Logger::log()` accepts a per-call severity, so warnings and errors are recorded at their own level
 
 ## 0.0.31 - 2026-09-05
 
