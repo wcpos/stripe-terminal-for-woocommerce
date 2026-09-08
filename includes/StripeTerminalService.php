@@ -1006,6 +1006,7 @@ class StripeTerminalService {
 			$this->update_order_from_payment_intent( $order, $payment_intent );
 
 			// Complete the payment.
+		Gateway::claim_order_gateway( $order );
 		$order->payment_complete( $payment_intent->id );
 
 		return array(

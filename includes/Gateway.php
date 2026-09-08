@@ -70,6 +70,23 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Claim terminal orders that bypass the pay form so POS uses this gateway's
+	 * order status during payment_complete() and WooCommerce routes refunds here.
+	 *
+	 * @param \WC_Order $order The order to claim; the caller handles saving.
+	 */
+	public static function claim_order_gateway( \WC_Order $order ): void {
+		if ( self::GATEWAY_ID === $order->get_payment_method() ) {
+			return;
+		}
+
+		$settings = Settings::get_gateway_settings();
+		$title    = ! empty( $settings['title'] ) ? $settings['title'] : __( 'Stripe Terminal', 'stripe-terminal-for-woocommerce' );
+		$order->set_payment_method( self::GATEWAY_ID );
+		$order->set_payment_method_title( $title );
+	}
+
+	/**
 	 * Initialize gateway form fields.
 	 */
 	public function init_form_fields(): void {
