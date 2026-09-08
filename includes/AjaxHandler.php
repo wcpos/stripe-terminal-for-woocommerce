@@ -147,7 +147,6 @@ class AjaxHandler {
 			Logger::log( 'Stripe Terminal AJAX - Payment intent created: ' . $payment_intent_id );
 
 			// Save payment metadata for later use.
-			Gateway::claim_order_gateway( $order );
 			$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
 			if ( $moto ) {
 				$order->update_meta_data( '_stripe_terminal_moto', 'yes' );

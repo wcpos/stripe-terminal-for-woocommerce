@@ -72,11 +72,13 @@ class Gateway extends WC_Payment_Gateway {
 	/**
 	 * Claim terminal orders that bypass the pay form so POS uses this gateway's
 	 * order status during payment_complete() and WooCommerce routes refunds here.
+	 * Claim only at completion so an abandoned terminal attempt cannot leave this
+	 * gateway on an order that is then paid another way.
 	 *
 	 * @param \WC_Order $order The order to claim; the caller handles saving.
 	 */
 	public static function claim_order_gateway( \WC_Order $order ): void {
-		if ( self::GATEWAY_ID === $order->get_payment_method() ) {
+		if ( self::GATEWAY_ID === $order->get_payment_method() && '' !== $order->get_payment_method_title() ) {
 			return;
 		}
 

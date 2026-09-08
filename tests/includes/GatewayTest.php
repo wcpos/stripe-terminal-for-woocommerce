@@ -121,6 +121,20 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 		}
 
+		public function test_claim_order_gateway_sets_empty_title_for_existing_gateway(): void {
+			Functions\when( 'get_option' )->justReturn( array( 'title' => 'Card reader' ) );
+			Functions\when( '__' )->returnArg();
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_payment_method' )->once()->andReturn( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'get_payment_method_title' )->andReturn( '' );
+			$order->shouldReceive( 'set_payment_method' )->once()->with( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'set_payment_method_title' )->once()->with( 'Card reader' );
+			$order->shouldNotReceive( 'save' );
+
+			Gateway::claim_order_gateway( $order );
+			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+		}
+
 		public function test_claim_order_gateway_preserves_existing_gateway_and_custom_title(): void {
 			$order = \Mockery::mock( \WC_Order::class );
 			$order->shouldReceive( 'get_payment_method' )->once()->andReturn( 'stripe_terminal_for_woocommerce' );
