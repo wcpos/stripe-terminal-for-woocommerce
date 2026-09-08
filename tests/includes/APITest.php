@@ -150,12 +150,31 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		 * @dataProvider webhook_transaction_provider
 		 */
 		public function test_succeeded_webhook_completes_unpaid_order( ?string $charge_id, string $transaction_id ): void {
-			$order = $this->mock_order();
+			$order                = $this->mock_order();
+			$payment_method       = 'pos_cash';
+			$method_at_completion = null;
+			Functions\when( 'get_option' )->justReturn( array() );
+			$order->shouldReceive( 'get_payment_method' )->andReturnUsing(
+				function () use ( &$payment_method ) {
+					return $payment_method;
+				}
+			);
+			$order->shouldReceive( 'set_payment_method' )->andReturnUsing(
+				function ( $method ) use ( &$payment_method ) {
+					$payment_method = $method;
+				}
+			);
+			$order->shouldReceive( 'set_payment_method_title' )->with( 'Stripe Terminal' );
 			$order->shouldReceive( 'needs_payment' )->once()->andReturn( true );
 			$order->shouldReceive( 'set_transaction_id' )->once()->with( $transaction_id );
-			$order->shouldReceive( 'payment_complete' )->once()->with( $transaction_id );
+			$order->shouldReceive( 'payment_complete' )->once()->with( $transaction_id )->andReturnUsing(
+				function () use ( &$method_at_completion, &$payment_method ) {
+					$method_at_completion = $payment_method;
+				}
+			);
 			$order->shouldReceive( 'add_order_note' )->once()->with( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.' );
 			$this->invoke_payment_intent_webhook( $order, 'succeeded', $charge_id );
+			$this->assertSame( 'stripe_terminal_for_woocommerce', $method_at_completion );
 		}
 
 		public function webhook_transaction_provider(): array {
@@ -360,7 +379,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		}
 
 		private function mock_order( string $recorded_intent = '', string $total = '10.00', string $currency = 'usd' ) {
-			$order = \Mockery::mock();
+			$order = \Mockery::mock( \WC_Order::class );
 			$order->shouldReceive( 'update_meta_data' )->byDefault();
 			$order->shouldReceive( 'save' )->once();
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( $recorded_intent )->byDefault();

@@ -565,6 +565,7 @@ class API extends Abstracts\APIController {
 			if ( $amount_matches ) {
 				$transaction_id = $payment_intent->latest_charge ?? $payment_intent->id;
 				$order->set_transaction_id( $transaction_id );
+				Gateway::claim_order_gateway( $order );
 				$order->payment_complete( $transaction_id );
 				$order->add_order_note( __( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', 'stripe-terminal-for-woocommerce' ) );
 			} else {

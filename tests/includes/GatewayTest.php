@@ -97,6 +97,57 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			parent::tearDown();
 		}
 
+		/**
+		 * @dataProvider gateway_title_provider
+		 */
+		public function test_claim_order_gateway_sets_empty_method_and_title( array $settings, string $title ): void {
+			Functions\when( 'get_option' )->justReturn( $settings );
+			Functions\when( '__' )->returnArg();
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_payment_method' )->once()->andReturn( '' );
+			$order->shouldReceive( 'set_payment_method' )->once()->with( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'set_payment_method_title' )->once()->with( $title );
+			$order->shouldNotReceive( 'save' );
+
+			Gateway::claim_order_gateway( $order );
+			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+		}
+
+		public function gateway_title_provider(): array {
+			return array(
+				'configured' => array( array( 'title' => 'Card reader' ), 'Card reader' ),
+				'empty'      => array( array( 'title' => '' ), 'Stripe Terminal' ),
+				'missing'    => array( array(), 'Stripe Terminal' ),
+			);
+		}
+
+		public function test_claim_order_gateway_sets_empty_title_for_existing_gateway(): void {
+			Functions\when( 'get_option' )->justReturn( array( 'title' => 'Card reader' ) );
+			Functions\when( '__' )->returnArg();
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_payment_method' )->once()->andReturn( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'get_payment_method_title' )->andReturn( '' );
+			$order->shouldReceive( 'set_payment_method' )->once()->with( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'set_payment_method_title' )->once()->with( 'Card reader' );
+			$order->shouldNotReceive( 'save' );
+
+			Gateway::claim_order_gateway( $order );
+			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+		}
+
+		public function test_claim_order_gateway_preserves_existing_gateway_and_custom_title(): void {
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_payment_method' )->once()->andReturn( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'get_payment_method_title' )->andReturn( 'Custom terminal title' );
+			$order->shouldNotReceive( 'set_payment_method' );
+			$order->shouldNotReceive( 'set_payment_method_title' );
+			$order->shouldNotReceive( 'save' );
+			Functions\expect( 'get_option' )->never();
+
+			Gateway::claim_order_gateway( $order );
+			$this->assertSame( 'Custom terminal title', $order->get_payment_method_title() );
+		}
+
 		public function test_enqueue_payment_scripts_uses_pos_cashier_nonce_for_pos_orders(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 

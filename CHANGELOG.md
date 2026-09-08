@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.33 - 2026-09-08
+
+### Fixed
+
+- Orders completed by the `payment_intent.succeeded` webhook now record Stripe Terminal as their payment method before completion, so the WooCommerce POS per-gateway order status is honoured instead of falling back to "Completed", and refunds route to this gateway. The gateway is deliberately not recorded when a payment merely starts, so an abandoned terminal attempt cannot leave Stripe Terminal on an order that is then paid another way.
+
 ## 0.0.32 - 2026-09-05
 
 ### Fixed

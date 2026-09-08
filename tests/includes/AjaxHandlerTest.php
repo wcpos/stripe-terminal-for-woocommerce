@@ -222,6 +222,9 @@ class AjaxHandlerTest extends TestCase {
 		$order->shouldReceive( 'needs_payment' )->andReturn( true );
 		$order->shouldReceive( 'get_total' )->andReturn( '30.00' );
 		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+		$order->shouldReceive( 'get_payment_method' )->andReturn( '' );
+		$order->shouldNotReceive( 'set_payment_method' );
+		$order->shouldNotReceive( 'set_payment_method_title' );
 		$order->shouldReceive( 'update_meta_data' )->with( '_stripe_terminal_payment_intent_id', 'pi_current_total' )->once();
 		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
 		$order->shouldReceive( 'save' )->once();
@@ -305,6 +308,9 @@ class AjaxHandlerTest extends TestCase {
 		$order->shouldReceive( 'needs_payment' )->andReturn( true );
 		$order->shouldReceive( 'get_total' )->andReturn( '30.00' );
 		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+		$order->shouldReceive( 'get_payment_method' )->andReturn( '' );
+		$order->shouldNotReceive( 'set_payment_method' );
+		$order->shouldNotReceive( 'set_payment_method_title' );
 		$order->shouldReceive( 'update_meta_data' )->with( '_stripe_terminal_payment_intent_id', 'pi_current_total' )->once();
 		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
 		$order->shouldReceive( 'save' )->once();
@@ -614,6 +620,9 @@ class AjaxHandlerTest extends TestCase {
 		$order->shouldReceive( 'needs_payment' )->andReturn( true );
 		$order->shouldReceive( 'get_total' )->andReturn( '30.00' );
 		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+		$order->shouldReceive( 'get_payment_method' )->andReturn( '' );
+		$order->shouldNotReceive( 'set_payment_method' );
+		$order->shouldNotReceive( 'set_payment_method_title' );
 		$order->shouldReceive( 'update_meta_data' )->with( '_stripe_terminal_payment_intent_id', 'pi_token_ok' )->once();
 		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
 		$order->shouldReceive( 'save' )->once();
@@ -668,6 +677,9 @@ class AjaxHandlerTest extends TestCase {
 		$order->shouldReceive( 'needs_payment' )->andReturn( true );
 		$order->shouldReceive( 'get_total' )->andReturn( '30.00' );
 		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+		$order->shouldReceive( 'get_payment_method' )->andReturn( '' );
+		$order->shouldNotReceive( 'set_payment_method' );
+		$order->shouldNotReceive( 'set_payment_method_title' );
 		$order->shouldReceive( 'update_meta_data' )->with( '_stripe_terminal_payment_intent_id', 'pi_pos_key_ok' )->once();
 		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' )->once();
 		$order->shouldReceive( 'save' )->once();
