@@ -247,6 +247,17 @@ class Gateway extends WC_Payment_Gateway {
 							<?php } ?>
 					</td>
 			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'WooCommerce POS checkout', 'stripe-terminal-for-woocommerce' ); ?></th>
+				<td>
+					<?php if ( Server\Registration::pro_supported() ) { ?>
+						<code><?php echo esc_html( Server\Stripe_Server_Provider::webhook_url() ); ?></code>
+						<?php echo esc_html( Settings::get_pos_webhook_secret() ? __( 'Signing secret stored.', 'stripe-terminal-for-woocommerce' ) : __( 'Signing secret missing; enter a Stripe secret key for the selected mode and save settings to register.', 'stripe-terminal-for-woocommerce' ) ); ?>
+					<?php } else { ?>
+						<?php esc_html_e( 'Requires WooCommerce POS Pro 1.11.0 or newer (legacy checkout only)', 'stripe-terminal-for-woocommerce' ); ?>
+					<?php } ?>
+				</td>
+			</tr>
 		</table>
 		<?php
 	}
@@ -330,7 +341,14 @@ class Gateway extends WC_Payment_Gateway {
 			}
 		}
 
-		return parent::process_admin_options();
+		$saved = parent::process_admin_options();
+		if ( Server\Registration::pro_supported() && Settings::get_api_key() ) {
+			Server\Pos_Webhook::ensure( Settings::get_api_key(), Settings::is_test_mode() ? 'test' : 'live' );
+			if ( class_exists( '\WCPOS\WooCommercePOSPro\Payments\Server\Reader_Curation' ) ) {
+				\WCPOS\WooCommercePOSPro\Payments\Server\Reader_Curation::forget( Settings::GATEWAY_ID );
+			}
+		}
+		return $saved;
 	}
 
 	/**

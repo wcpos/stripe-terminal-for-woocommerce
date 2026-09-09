@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a Stripe Terminal smart-reader checkout tile for WooCommerce POS 1.11 through WooCommerce POS Pro 1.11.0 or newer; legacy checkout remains unchanged.
+- Automatically register the separate POS webhook endpoint when gateway settings are saved with a Stripe key and supported Pro installed.
+- Key POS PaymentIntent creation idempotently by payment attempt to prevent duplicate intents on retries.
+- Report Dashboard-configured on-reader tips to POS, which records them as a Tip order fee.
+
 ## 0.0.33 - 2026-09-08
 
 ### Fixed

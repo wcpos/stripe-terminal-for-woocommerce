@@ -516,6 +516,10 @@ class API extends Abstracts\APIController {
 	 */
 	private function update_order_with_payment_intent( $payment_intent ): void {
 		$order_id = $payment_intent->metadata->order_id ?? null;
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+			// A WooCommerce POS 1.11 ledger leg: Pro settles it through wcpos_settle_payment(); the legacy path must not complete the order or add its tip a second time.
+			return;
+		}
 		if ( ! $order_id ) {
 			Logger::log( 'Payment intent webhook: No order_id found in metadata', 'warning' );
 
@@ -611,6 +615,10 @@ class API extends Abstracts\APIController {
 			\Stripe\Stripe::setApiKey( Settings::get_api_key() );
 			$payment_intent = \Stripe\PaymentIntent::retrieve( $payment_intent_id );
 			$order_id       = $payment_intent->metadata->order_id ?? null;
+			if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+				// A WooCommerce POS 1.11 ledger leg: Pro settles it through wcpos_settle_payment(); the legacy path must not complete the order or add its tip a second time.
+				return;
+			}
 		} catch ( Exception $e ) {
 			Logger::log( 'Charge webhook: Failed to retrieve payment intent: ' . $e->getMessage(), 'error' );
 
@@ -683,6 +691,10 @@ class API extends Abstracts\APIController {
 	 */
 	private function update_order_with_failed_payment( $payment_intent ): void {
 		$order_id = $payment_intent->metadata->order_id ?? null;
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+			// A WooCommerce POS 1.11 ledger leg: Pro settles it through wcpos_settle_payment(); the legacy path must not complete the order or add its tip a second time.
+			return;
+		}
 		if ( ! $order_id ) {
 			Logger::log( 'Payment failed webhook: No order_id found in metadata', 'warning' );
 			return;

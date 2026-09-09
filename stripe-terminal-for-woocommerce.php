@@ -88,6 +88,14 @@ function init(): void {
 	( new ReaderWarmer() )->register();
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 11 );
+add_action( 'plugins_loaded', array( Server\Registration::class, 'register' ), 30 );
+register_activation_hook(
+	__FILE__,
+	static function (): void {
+		Server\Registration::activation_check( __FILE__ );
+	}
+);
+
 
 /**
  * Declare compatibility with the WooCommerce Cart and Checkout blocks.

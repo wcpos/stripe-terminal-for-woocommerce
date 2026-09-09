@@ -13,6 +13,15 @@
 5. Go to `WP Admin > WooCommerce POS > Settings > Checkout > enable` the Stripe Terminal gateway.
 <img width="739" alt="Enable in POS" src="https://github.com/user-attachments/assets/cadf6c97-27c7-4197-8783-2ba05ffee9ad" />
 
+### WooCommerce POS 1.11 checkout
+
+WooCommerce POS Pro 1.11.0 or newer adds a native Stripe Terminal checkout tile for smart readers: WisePOS E, S700, S710 and P400 (plus simulated readers).
+With supported Pro installed, an administrator saves the Stripe Terminal gateway settings with a Stripe key to auto-register `wcpos/v2/payments/webhook?provider=stripe` and store its separate signing secret for the selected test/live mode.
+The gateway settings show the POS webhook URL and whether its signing secret is stored; the legacy webhook is not replaced.
+Dashboard-configured on-reader tips are recorded by POS as a Tip order fee.
+Bluetooth and mobile readers (Stripe Reader M2, WisePad 3, Tap to Pay) are not supported by either checkout mode yet: they need a Terminal mobile SDK, which neither the tile nor the legacy order-pay page has. They arrive with the app-side `device` mode.
+Without supported Pro, the existing legacy checkout remains available.
+
 ### Web checkout (classic + Blocks)
 
 To accept Terminal payments from the online store checkout (in addition to POS):
