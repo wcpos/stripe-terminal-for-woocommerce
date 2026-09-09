@@ -58,9 +58,51 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 
 	public function test_dispatch_failure_cancels_intent(): void {
 		$this->order();
-		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error(), $this->ok( $this->intent( array( 'status' => 'canceled' ) ) ) ) );
+		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error(), $this->ok( array( 'id' => 'tmr_test', 'action' => null ) ), $this->ok( $this->intent( array( 'status' => 'canceled' ) ) ) ) );
 		$this->assert_provider_error( $provider->create_reader_action( $this->row(), 'tmr_test' ), 'card_declined' );
-		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[2]['url'] );
+		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[3]['url'] );
+		$this->assertSame( 'get', $this->http->requests[2]['method'] );
+		$this->assertStringEndsWith( '/terminal/readers/tmr_test', $this->http->requests[2]['url'] );
+		$this->assertCount( 4, $this->http->requests );
+	}
+
+	/** @dataProvider active_action_statuses */
+	public function test_dispatch_error_preserves_intent_held_by_reader( string $status ): void {
+		$this->order();
+		$this->options['stwc_payment_dispatch_at'] = 1;
+		$provider = $this->provider(
+			array(
+				$this->ok( $this->intent() ),
+				$this->error( 'reader_busy' ),
+				$this->ok(
+					array(
+						'id' => 'tmr_test',
+						'action' => array(
+							'status' => $status,
+							'process_payment_intent' => array( 'payment_intent' => 'pi_test' ),
+						),
+					)
+				),
+			)
+		);
+		$this->assertSame( array( 'ref' => 'pi_test', 'expires_at' => null ), $provider->create_reader_action( $this->row(), 'tmr_test' ) );
+		$this->assertCount( 3, $this->http->requests );
+		$this->assertSame( 'get', $this->http->requests[2]['method'] );
+		$this->assertStringEndsWith( '/terminal/readers/tmr_test', $this->http->requests[2]['url'] );
+		$this->assertEqualsWithDelta( time(), $this->options['stwc_payment_dispatch_at'], 1 );
+	}
+
+	public function active_action_statuses(): array {
+		return array( array( 'in_progress' ), array( 'succeeded' ) );
+	}
+
+	public function test_dispatch_error_and_reader_read_error_do_not_cancel(): void {
+		$this->order();
+		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'reader_busy' ), $this->error( 'resource_missing' ) ) );
+		$this->assert_provider_error( $provider->create_reader_action( $this->row(), 'tmr_test' ), 'reader_busy' );
+		$this->assertCount( 3, $this->http->requests );
+		$this->assertSame( 'get', $this->http->requests[2]['method'] );
+		$this->assertStringEndsWith( '/terminal/readers/tmr_test', $this->http->requests[2]['url'] );
 	}
 
 	public function test_missing_order(): void {

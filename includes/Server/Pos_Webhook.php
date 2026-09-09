@@ -14,6 +14,8 @@ use WCPOS\WooCommercePOS\StripeTerminal\Settings;
 final class Pos_Webhook {
 	/** Stripe's maximum page size covers this store's endpoint discovery in one request. */
 	private const ENDPOINT_LIMIT = 100;
+	/** Events required by the POS server payment handler. */
+	private const REQUIRED_EVENTS = array( 'payment_intent.succeeded', 'payment_intent.payment_failed', 'payment_intent.canceled', 'terminal.reader.action_succeeded', 'terminal.reader.action_failed' );
 
 	/**
 	 * Ensure the current account/mode has a verifiable POS endpoint.
@@ -26,28 +28,40 @@ final class Pos_Webhook {
 			\Stripe\Stripe::setApiKey( $api_key );
 			$url      = Stripe_Server_Provider::webhook_url();
 			$key      = 'test' === $mode ? 'test_pos_webhook_secret' : 'pos_webhook_secret';
+			$id_key   = 'test' === $mode ? 'test_pos_webhook_endpoint_id' : 'pos_webhook_endpoint_id';
 			$settings = Settings::get_gateway_settings();
 			$webhooks = \Stripe\WebhookEndpoint::all( array( 'limit' => self::ENDPOINT_LIMIT ) );
 			foreach ( $webhooks->data as $webhook ) {
 				if ( $webhook->url !== $url ) {
 					continue;
 				}
-				if ( ! empty( $settings[ $key ] ) ) {
+				if ( ( $settings[ $id_key ] ?? '' ) === $webhook->id && ! empty( $settings[ $key ] ) ) {
+					$updates = array();
+					if ( array_diff( self::REQUIRED_EVENTS, $webhook->enabled_events ) ) {
+						$updates['enabled_events'] = self::REQUIRED_EVENTS;
+					}
+					if ( 'disabled' === $webhook->status ) {
+						$updates['status'] = 'enabled';
+					}
+					if ( $updates ) {
+						\Stripe\WebhookEndpoint::update( $webhook->id, $updates );
+					}
 					Logger::log( 'POS webhook already configured (' . $mode . ').' );
 					return;
 				}
 				// Stripe reveals a signing secret only at creation; replace this POS endpoint only.
 				$webhook->delete();
-				Logger::log( 'Recreating POS webhook with missing signing secret (' . $mode . ').' );
+				Logger::log( 'Recreating POS webhook with mismatched identity or missing signing secret (' . $mode . ').' );
 				break;
 			}
 			$webhook = \Stripe\WebhookEndpoint::create(
 				array(
 					'url'            => $url,
-					'enabled_events' => array( 'payment_intent.succeeded', 'payment_intent.payment_failed', 'payment_intent.canceled', 'terminal.reader.action_succeeded', 'terminal.reader.action_failed' ),
+					'enabled_events' => self::REQUIRED_EVENTS,
 				)
 			);
-			$settings[ $key ] = $webhook->secret;
+			$settings[ $key ]    = $webhook->secret;
+			$settings[ $id_key ] = $webhook->id;
 			update_option( 'woocommerce_' . Settings::GATEWAY_ID . '_settings', $settings );
 			Logger::log( 'POS webhook created (' . $mode . ').' );
 		} catch ( \Throwable $e ) {

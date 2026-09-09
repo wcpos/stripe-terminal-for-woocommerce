@@ -836,6 +836,24 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * List readers across all pages for the server provider.
+	 *
+	 * @return array|WP_Error Reader arrays or error.
+	 */
+	public function list_all_readers() {
+		try {
+			$collection = $this->get_stripe_client()->terminal->readers->all( array( 'limit' => 100 ) );
+			$readers    = array();
+			foreach ( $collection->autoPagingIterator() as $reader ) {
+				$readers[] = $reader->toArray();
+			}
+			return $readers;
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'list_all_readers_error' );
+		}
+	}
+
+	/**
 	 * Get reader status.
 	 *
 	 * @param null|string $reader_id Optional reader ID to get status for specific reader.

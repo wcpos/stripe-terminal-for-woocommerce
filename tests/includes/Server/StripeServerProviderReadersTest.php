@@ -17,8 +17,10 @@ class StripeServerProviderReadersTest extends ServerTestCase {
 			array(
 				$this->ok(
 					array(
-						'object' => 'list',
-						'data'   => $readers,
+						'object'   => 'list',
+						'url'      => '/v1/terminal/readers',
+						'has_more' => false,
+						'data'     => $readers,
 					)
 				),
 			)
@@ -41,6 +43,37 @@ class StripeServerProviderReadersTest extends ServerTestCase {
 			$result[1]
 		);
 		$this->assertSame( 'tmr_2', $result[2]['label'] );
+	}
+
+	public function test_all_reader_pages_are_filtered_and_returned(): void {
+		$pages = array(
+			array(
+				array( 'id' => 'tmr_smart_first', 'object' => 'terminal.reader', 'device_type' => 'stripe_s700', 'label' => 'First', 'status' => 'online' ),
+				array( 'id' => 'tmr_mobile_first', 'object' => 'terminal.reader', 'device_type' => 'stripe_m2', 'status' => 'online' ),
+			),
+			array(
+				array( 'id' => 'tmr_smart_second', 'object' => 'terminal.reader', 'device_type' => 'simulated_wisepos_e', 'label' => 'Second', 'status' => 'offline' ),
+				array( 'id' => 'tmr_mobile_second', 'object' => 'terminal.reader', 'device_type' => 'bbpos_wisepad3', 'status' => 'online' ),
+			),
+		);
+		$provider = $this->provider(
+			array(
+				$this->ok( array( 'object' => 'list', 'url' => '/v1/terminal/readers', 'has_more' => true, 'data' => $pages[0] ) ),
+				$this->ok( array( 'object' => 'list', 'url' => '/v1/terminal/readers', 'has_more' => false, 'data' => $pages[1] ) ),
+			)
+		);
+		$this->assertSame(
+			array(
+				array( 'id' => 'tmr_smart_first', 'label' => 'First', 'status' => 'online' ),
+				array( 'id' => 'tmr_smart_second', 'label' => 'Second', 'status' => 'offline' ),
+			),
+			$provider->list_readers()
+		);
+		$this->assertCount( 2, $this->http->requests );
+		$this->assertSame( array( 'limit' => 100 ), $this->http->requests[0]['params'] );
+		$this->assertSame( array( 'limit' => 100, 'starting_after' => 'tmr_mobile_first' ), $this->http->requests[1]['params'] );
+		$this->assertSame( 'get', $this->http->requests[1]['method'] );
+		$this->assertStringEndsWith( '/terminal/readers', $this->http->requests[1]['url'] );
 	}
 
 	public function test_service_error_is_normalized(): void {

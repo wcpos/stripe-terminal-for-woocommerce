@@ -57,12 +57,12 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	/** {@inheritDoc} */
 	public function list_readers() {
 		try {
-			$response = $this->service->get_reader_status();
+			$response = $this->service->list_all_readers();
 			if ( is_wp_error( $response ) ) {
 				return self::error( $response );
 			}
 			$readers = array();
-			foreach ( $response['data'] as $reader ) {
+			foreach ( $response as $reader ) {
 				$type = $reader['device_type'] ?? '';
 				if ( ! in_array( $type, array( 'bbpos_wisepos_e', 'stripe_s700', 'stripe_s710', 'verifone_P400' ), true ) && 0 !== strpos( $type, 'simulated_' ) ) {
 					continue;
@@ -108,8 +108,17 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			}
 			$result = $this->service->process_payment_intent( $reader_id, $intent['id'], array( 'enable_customer_cancellation' => true ) );
 			if ( is_wp_error( $result ) ) {
-				$this->cancel_best_effort( $intent['id'] );
-				return self::error( $result );
+				$reader = $this->service->get_reader( $reader_id );
+				if ( is_wp_error( $reader ) ) {
+					return self::error( $result );
+				}
+				// Dispatch may have succeeded despite the error; let polling resolve this intent.
+				$action = $reader['action'] ?? array();
+				if ( ( $action['process_payment_intent']['payment_intent'] ?? null ) !== $intent['id']
+					|| ! in_array( $action['status'] ?? '', array( 'in_progress', 'succeeded' ), true ) ) {
+					$this->cancel_best_effort( $intent['id'] );
+					return self::error( $result );
+				}
 			}
 			update_option( 'stwc_payment_dispatch_at', time(), false );
 			return array(
@@ -146,7 +155,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			if ( in_array( $result['status'], array( 'pending', 'in_progress' ), true ) ) {
 				update_option( 'stwc_payment_dispatch_at', time(), false );
 			}
-			if ( 'failed' === $result['status'] && 'superseded' !== $result['failure_reason'] ) {
+			// A declined or superseded intent can never be charged again by us; retire it so nothing else can.
+			if ( 'failed' === $result['status'] ) {
 				$this->cancel_best_effort( $ref );
 			}
 			return $result;
@@ -288,7 +298,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 */
 	public function refund( array $row, int $refund_id, string $amount ) {
 		try {
-			$ref = $row['provider_refs']['action'] ?? '';
+			// Pro stores the intent under `action`; the fetch/webhook refs carry it too, for a row restored without one.
+			$ref = $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? '';
 			if ( '' === $ref ) {
 				return self::error( __( 'No Stripe payment found for refund.', 'stripe-terminal-for-woocommerce' ), 'missing_payment_ref' );
 			}

@@ -25,6 +25,12 @@ class Settings {
 		return (string) ( $settings[ self::is_test_mode() ? 'test_pos_webhook_secret' : 'pos_webhook_secret' ] ?? '' );
 	}
 
+	/** Retrieve the POS endpoint identity for the current mode. */
+	public static function get_pos_webhook_endpoint_id(): string {
+		$settings = self::get_gateway_settings();
+		return (string) ( $settings[ self::is_test_mode() ? 'test_pos_webhook_endpoint_id' : 'pos_webhook_endpoint_id' ] ?? '' );
+	}
+
 	/**
 	 * Get the Gateway settings.
 	 */

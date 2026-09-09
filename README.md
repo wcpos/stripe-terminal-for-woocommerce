@@ -19,7 +19,7 @@ WooCommerce POS Pro 1.11.0 or newer adds a native Stripe Terminal checkout tile 
 With supported Pro installed, an administrator saves the Stripe Terminal gateway settings with a Stripe key to auto-register `wcpos/v2/payments/webhook?provider=stripe` and store its separate signing secret for the selected test/live mode.
 The gateway settings show the POS webhook URL and whether its signing secret is stored; the legacy webhook is not replaced.
 Dashboard-configured on-reader tips are recorded by POS as a Tip order fee.
-M2/Bluetooth app integration comes later; Bluetooth readers remain on the legacy path for now and are not offered by this server-mode tile.
+Bluetooth and mobile readers (Stripe Reader M2, WisePad 3, Tap to Pay) are not supported by either checkout mode yet: they need a Terminal mobile SDK, which neither the tile nor the legacy order-pay page has. They arrive with the app-side `device` mode.
 Without supported Pro, the existing legacy checkout remains available.
 
 ### Web checkout (classic + Blocks)
