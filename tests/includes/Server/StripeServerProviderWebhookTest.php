@@ -101,7 +101,7 @@ class StripeServerProviderWebhookTest extends ServerTestCase {
 	}
 
 	public function rejected(): array {
-		return array( array( 'bad', 401, 'stripe_webhook_bad_signature' ), array( 'missing', 500, 'stripe_pos_webhook_unconfigured' ), array( 'uuid', 404, 'stripe_webhook_unknown_payment' ), array( 'mode', 403, 'stripe_webhook_mode_mismatch' ), array( 'ignored', 200, 'stripe_webhook_ignored' ), array( 'reader', 404, 'stripe_webhook_no_intent' ) );
+		return array( array( 'bad', 401, 'stripe_webhook_bad_signature' ), array( 'missing', 500, 'stripe_pos_webhook_unconfigured' ), array( 'uuid', 200, 'stripe_webhook_unknown_payment' ), array( 'mode', 200, 'stripe_webhook_mode_mismatch' ), array( 'ignored', 200, 'stripe_webhook_ignored' ), array( 'reader', 404, 'stripe_webhook_no_intent' ) );
 	}
 
 	/** @dataProvider non_money */

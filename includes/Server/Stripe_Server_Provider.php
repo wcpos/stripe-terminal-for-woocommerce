@@ -106,6 +106,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			if ( is_wp_error( $intent ) ) {
 				return self::error( $intent );
 			}
+			// Written BEFORE the dispatch: a warm scheduled during this request must not replace the action.
+			update_option( 'stwc_payment_dispatch_at', time(), false );
 			$result = $this->service->process_payment_intent( $reader_id, $intent['id'], array( 'enable_customer_cancellation' => true ) );
 			if ( is_wp_error( $result ) ) {
 				$reader = $this->service->get_reader( $reader_id );
@@ -120,7 +122,6 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 					return self::error( $result );
 				}
 			}
-			update_option( 'stwc_payment_dispatch_at', time(), false );
 			return array(
 				'ref' => $intent['id'],
 				'expires_at' => null,
@@ -152,6 +153,16 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				}
 			}
 			$result = self::normalize( $intent, $reader['action'] ?? null );
+			if ( 'failed' === $result['status'] && 'superseded' === ( $result['failure_reason'] ?? '' ) ) {
+				// The intent and reader reads are not atomic: the card may have been approved between them.
+				$again = $this->service->retrieve_payment_intent( $ref );
+				if ( is_wp_error( $again ) ) {
+					return self::error( $again );
+				}
+				if ( 'requires_payment_method' !== $again['status'] ) {
+					$result = self::normalize( $again, null );
+				}
+			}
 			if ( in_array( $result['status'], array( 'pending', 'in_progress' ), true ) ) {
 				update_option( 'stwc_payment_dispatch_at', time(), false );
 			}
@@ -375,10 +386,11 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			}
 			$id = $intent['metadata']['wcpos_payment_id'] ?? '';
 			if ( ! is_string( $id ) || ! preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $id ) ) {
-				return new \WP_Error( 'stripe_webhook_unknown_payment', __( 'Unknown POS payment.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 404 ) );
+				// Not ours (a legacy or online intent on the same account): a 2xx so Stripe stops redelivering it.
+				return new \WP_Error( 'stripe_webhook_unknown_payment', __( 'Unknown POS payment.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 200 ) );
 			}
 			if ( ( $intent['livemode'] ?? null ) !== ! Settings::is_test_mode() ) {
-				return new \WP_Error( 'stripe_webhook_mode_mismatch', __( 'Stripe payment mode mismatch.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 403 ) );
+				return new \WP_Error( 'stripe_webhook_mode_mismatch', __( 'Stripe payment mode mismatch.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 200 ) );
 			}
 			return array(
 				'payment_id' => strtolower( $id ),
