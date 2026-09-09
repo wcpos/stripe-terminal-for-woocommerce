@@ -11,6 +11,20 @@ namespace WCPOS\WooCommercePOS\StripeTerminal;
  * Settings.
  */
 class Settings {
+	/** Stable gateway ID used by the Pro provider registry. */
+	public const GATEWAY_ID = 'stripe_terminal_for_woocommerce';
+
+	/** Whether the currently selected API mode is test. */
+	public static function is_test_mode(): bool {
+		return 'yes' === ( self::get_gateway_settings()['test_mode'] ?? 'no' );
+	}
+
+	/** Retrieve only the POS route secret for the current mode. */
+	public static function get_pos_webhook_secret(): string {
+		$settings = self::get_gateway_settings();
+		return (string) ( $settings[ self::is_test_mode() ? 'test_pos_webhook_secret' : 'pos_webhook_secret' ] ?? '' );
+	}
+
 	/**
 	 * Get the Gateway settings.
 	 */

@@ -170,37 +170,9 @@ class StripeTerminalService {
 			$currency             = strtolower( $order->get_currency() );
 			$description          = \sprintf( 'Order #%s', $order_id );
 
-			// Check if currency is supported by Stripe Terminal for the account's country.
-			// When the country cannot be determined the check is skipped and Stripe
-			// validates the currency itself when the intent is created.
-			$country = $this->resolve_account_country( $currency );
-			if ( null === $country ) {
-				Logger::log( 'create_payment_intent: Stripe account country unknown; skipping local currency check for ' . strtoupper( $currency ) . ' and letting Stripe validate it.' );
-			} else {
-				$supported_currencies = $this->currencies_for_country( $country );
-				if ( ! \in_array( $currency, $supported_currencies, true ) ) {
-					Logger::log(
-						\sprintf(
-							'create_payment_intent: rejected %s for Order #%s. Stripe account country is %s (key %s), which supports: %s. If the account country is wrong, check the API key belongs to the intended Stripe account.',
-							strtoupper( $currency ),
-							$order_id,
-							$country,
-							$this->api_key_type(),
-							implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
-						)
-					);
-
-					return new WP_Error(
-						'unsupported_currency',
-						\sprintf(
-							'Currency %s is not supported by Stripe Terminal for a Stripe account registered in %s. Supported currencies: %s',
-							strtoupper( $currency ),
-							$country,
-							implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
-						),
-						array( 'status' => 400 )
-					);
-				}
+			$currency_error = $this->assert_currency_supported( $currency );
+			if ( is_wp_error( $currency_error ) ) {
+				return $currency_error;
 			}
 
 			if ( $moto ) {
@@ -235,6 +207,147 @@ class StripeTerminalService {
 			return $payment_intent->toArray();
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'create_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Share the legacy account-country check with POS legs.
+	 *
+	 * @param string $currency Lowercase ISO currency code.
+	 * @return WP_Error|null Unsupported currency error, or null.
+	 */
+	private function assert_currency_supported( string $currency ) {
+		// Check if currency is supported by Stripe Terminal for the account's country.
+		// When the country cannot be determined the check is skipped and Stripe
+		// validates the currency itself when the intent is created.
+		$country = $this->resolve_account_country( $currency );
+		if ( null === $country ) {
+			Logger::log( 'create_payment_intent: Stripe account country unknown; skipping local currency check for ' . strtoupper( $currency ) . ' and letting Stripe validate it.' );
+		} else {
+			$supported_currencies = $this->currencies_for_country( $country );
+			if ( ! \in_array( $currency, $supported_currencies, true ) ) {
+				Logger::log(
+					\sprintf(
+						'create_payment_intent: rejected %s. Stripe account country is %s (key %s), which supports: %s. If the account country is wrong, check the API key belongs to the intended Stripe account.',
+						strtoupper( $currency ),
+						$country,
+						$this->api_key_type(),
+						implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
+					)
+				);
+
+				return new WP_Error(
+					'unsupported_currency',
+					\sprintf(
+						'Currency %s is not supported by Stripe Terminal for a Stripe account registered in %s. Supported currencies: %s',
+						strtoupper( $currency ),
+						$country,
+						implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
+					),
+					array( 'status' => 400 )
+				);
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Create an automatically captured POS leg without order mutations.
+	 *
+	 * @param int    $amount          Amount in minor units.
+	 * @param string $currency        Lowercase currency code.
+	 * @param string $description     Order display reference.
+	 * @param array  $metadata        POS payment and reader references.
+	 * @param string $idempotency_key Ledger row UUID.
+	 * @param bool   $interac         Include Interac for CAD.
+	 * @return array|WP_Error Intent or error.
+	 */
+	public function create_server_payment_intent( int $amount, string $currency, string $description, array $metadata, string $idempotency_key, bool $interac ) {
+		try {
+			$currency_error = $this->assert_currency_supported( $currency );
+			if ( is_wp_error( $currency_error ) ) {
+				return $currency_error;
+			}
+			$intent = $this->timed(
+				'create_server_payment_intent',
+				function () use ( $amount, $currency, $description, $metadata, $idempotency_key, $interac ) {
+					return $this->get_stripe_client()->paymentIntents->create(
+						array(
+							'amount'               => $amount,
+							'currency'             => $currency,
+							'description'          => $description,
+							'metadata'             => $metadata,
+							'capture_method'       => 'automatic',
+							'payment_method_types' => $interac ? array( 'card_present', 'interac_present' ) : array( 'card_present' ),
+						),
+						array( 'idempotency_key' => $idempotency_key )
+					);
+				}
+			);
+			return $intent->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'create_server_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Retrieve a POS intent without order mutations.
+	 *
+	 * @param string $id PaymentIntent ID.
+	 * @return array|WP_Error Intent or error.
+	 */
+	public function retrieve_payment_intent( string $id ) {
+		try {
+			$intent = $this->timed(
+				'retrieve_payment_intent',
+				function () use ( $id ) {
+					return $this->get_stripe_client()->paymentIntents->retrieve( $id, array( 'expand' => array( 'latest_charge' ) ) );
+				}
+			);
+			return $intent->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'retrieve_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Cancel a POS intent without order mutations.
+	 *
+	 * @param string $id PaymentIntent ID.
+	 * @return array|WP_Error Intent or error.
+	 */
+	public function cancel_payment_intent_by_id( string $id ) {
+		try {
+			$intent = $this->timed(
+				'cancel_payment_intent_by_id',
+				function () use ( $id ) {
+					return $this->get_stripe_client()->paymentIntents->cancel( $id );
+				}
+			);
+			return $intent->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'cancel_payment_intent_by_id_error' );
+		}
+	}
+
+	/**
+	 * Capture a POS intent without order mutations.
+	 *
+	 * @param string $id PaymentIntent ID.
+	 * @return array|WP_Error Intent or error.
+	 */
+	public function capture_payment_intent( string $id ) {
+		try {
+			$intent = $this->timed(
+				'capture_payment_intent',
+				function () use ( $id ) {
+					return $this->get_stripe_client()->paymentIntents->capture( $id );
+				}
+			);
+			return $intent->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'capture_payment_intent_error' );
 		}
 	}
 
@@ -984,6 +1097,13 @@ class StripeTerminalService {
 	 */
 	private function handle_payment_intent_succeeded( \Stripe\PaymentIntent $payment_intent ) {
 		$order_id = $payment_intent->metadata->order_id ?? null;
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
+			return array(
+				'success' => true,
+				'message' => 'POS ledger intent; handled by WooCommerce POS Pro.',
+			);
+		}
 
 		if ( ! $order_id ) {
 			return new WP_Error(
@@ -1042,6 +1162,13 @@ class StripeTerminalService {
 			}
 		);
 		$order_id       = $payment_intent->metadata->order_id ?? null;
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
+			return array(
+				'success' => true,
+				'message' => 'POS ledger intent; handled by WooCommerce POS Pro.',
+			);
+		}
 
 		if ( ! $order_id ) {
 			return new WP_Error(
@@ -1114,6 +1241,13 @@ class StripeTerminalService {
 	 */
 	private function handle_payment_intent_failed( \Stripe\PaymentIntent $payment_intent ) {
 		$order_id = $payment_intent->metadata->order_id ?? null;
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
+			return array(
+				'success' => true,
+				'message' => 'POS ledger intent; handled by WooCommerce POS Pro.',
+			);
+		}
 
 		if ( ! $order_id ) {
 			return new WP_Error(

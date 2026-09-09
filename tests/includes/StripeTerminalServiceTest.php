@@ -22,7 +22,7 @@ class StripeHttpClientFake implements \Stripe\HttpClient\ClientInterface {
 	private $responses;
 
 	/**
-	 * @var array<int, array{method:string,url:string,params:array}>
+	 * @var array<int, array{method:string,url:string,params:array,headers:array}>
 	 */
 	public $requests = array();
 
@@ -32,9 +32,10 @@ class StripeHttpClientFake implements \Stripe\HttpClient\ClientInterface {
 
 	public function request( $method, $abs_url, $headers, $params, $has_file, $api_mode = 'v1', $max_network_retries = null ) {
 		$this->requests[] = array(
-			'method' => $method,
-			'url'    => $abs_url,
-			'params' => $params,
+			'method'  => $method,
+			'url'     => $abs_url,
+			'params'  => $params,
+			'headers' => $headers,
 		);
 
 		$response = array_shift( $this->responses );
