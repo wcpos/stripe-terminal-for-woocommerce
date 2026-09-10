@@ -74,7 +74,7 @@ class PosReaderSettingsTest extends ServerTestCase {
 	public function test_fields_reuse_provider_projection_and_cache_for_five_minutes(): void {
 		$this->options[ self::GATEWAY_OPTION ]['test_secret_key'] = 'sk_test_fake';
 		$service = \Mockery::mock( 'overload:' . StripeTerminalService::class );
-		$service->shouldReceive( 'list_locations' )->andReturn( array( 'data' => array() ) );
+		$service->shouldReceive( 'list_all_locations' )->andReturn( array() );
 		$service->shouldReceive( 'list_all_readers' )->andReturn(
 			array(
 				array(
@@ -130,7 +130,7 @@ class PosReaderSettingsTest extends ServerTestCase {
 	public function test_unavailable_list_uses_text_and_omits_multiselect( string $context ): void {
 		$this->options[ self::GATEWAY_OPTION ]['test_secret_key'] = 'sk_test_fake';
 		$service = \Mockery::mock( 'overload:' . StripeTerminalService::class );
-		$service->shouldReceive( 'list_locations' )->andReturn( array( 'data' => array() ) );
+		$service->shouldReceive( 'list_all_locations' )->andReturn( array() );
 		if ( 'error' === $context ) {
 			$service->shouldReceive( 'list_all_readers' )->andReturn( new \WP_Error( 'offline', 'Unavailable' ) );
 		} else {
@@ -216,7 +216,7 @@ class PosReaderSettingsTest extends ServerTestCase {
 		$this->options[ self::GATEWAY_OPTION ]['test_secret_key'] = 'sk_test_fake';
 		$this->options[ self::GATEWAY_OPTION ]['allowed_readers'] = array( 'tmr_saved' );
 		$service = \Mockery::mock( 'overload:' . StripeTerminalService::class );
-		$service->shouldReceive( 'list_locations' )->andReturn( array( 'data' => array() ) );
+		$service->shouldReceive( 'list_all_locations' )->andReturn( array() );
 		$service->shouldReceive( 'list_all_readers' )->andReturn( new \WP_Error( 'offline', 'Unavailable' ) );
 		$gateway = $this->gateway();
 		$gateway->init_form_fields();

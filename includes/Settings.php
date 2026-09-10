@@ -20,9 +20,15 @@ class Settings {
 		return (string) ( $settings['wcpos_connection'] ?? ( ! empty( $settings['default_reader'] ) ? 'server' : 'device' ) );
 	}
 
-	/** Location where the SDK registers Bluetooth and Tap to Pay readers. */
-	public static function get_wcpos_location(): string {
-		return (string) ( self::get_gateway_settings()['wcpos_location'] ?? '' );
+	/**
+	 * Location where the SDK registers Bluetooth and Tap to Pay readers.
+	 *
+	 * @param bool|null $test_mode Explicit mode, or null for the current mode.
+	 */
+	public static function get_wcpos_location( ?bool $test_mode = null ): string {
+		$settings = self::get_gateway_settings();
+		$key      = ( $test_mode ?? self::is_test_mode() ) ? 'wcpos_location_test' : 'wcpos_location_live';
+		return (string) ( ! empty( $settings[ $key ] ) ? $settings[ $key ] : ( $settings['wcpos_location'] ?? '' ) );
 	}
 
 	/** Whether the currently selected API mode is test. */

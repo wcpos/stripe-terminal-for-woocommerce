@@ -71,12 +71,13 @@ class StripeDeviceProviderTest extends ServerTestCase {
 			$this->device->describe( new \WC_Payment_Gateway() )
 		);
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = array(
-			'wcpos_location' => 'tml_test',
+			'wcpos_location_test' => 'tml_test',
+			'wcpos_location_live' => 'tml_live',
 			'test_mode' => 'no',
 		);
 		$this->assertSame(
 			array(
-				'location_id' => 'tml_test',
+				'location_id' => 'tml_live',
 				'test_mode' => false,
 			),
 			$this->device->describe( new \WC_Payment_Gateway() )['provider_data']
@@ -94,7 +95,7 @@ class StripeDeviceProviderTest extends ServerTestCase {
 
 	/** Return the ephemeral SDK token, never a made-up expiry. */
 	public function test_bootstrap_handoff_and_error(): void {
-		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['wcpos_location'] = 'tml_test';
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['wcpos_location_test'] = 'tml_test';
 		$error = new \WP_Error( 'stripe_token_error', 'Unavailable' );
 		$this->service->shouldReceive( 'get_connection_token' )->twice()->andReturn( array( 'secret' => 'pst_test' ), $error );
 		$this->assertSame(

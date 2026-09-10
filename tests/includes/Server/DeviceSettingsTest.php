@@ -90,41 +90,148 @@ class DeviceSettingsTest extends ServerTestCase {
 		);
 	}
 
-	/** Stripe IDs map to display names; location getter matches the saved selection. */
+	/** Each select uses its own credentials, independently of the active mode. */
 	public function test_location_options(): void {
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] += array(
 			'test_secret_key' => 'sk_test_fake',
-			'wcpos_location' => 'tml_b',
+			'secret_key' => 'sk_live_fake',
+			'wcpos_location_test' => 'tml_test',
+			'wcpos_location_live' => 'tml_live',
 		);
-		// Keep the unrelated reader list on its existing cache path.
 		Functions\when( 'get_transient' )->justReturn( array() );
+		$key = '';
 		$service = \Mockery::mock( 'overload:' . StripeTerminalService::class );
-		$service->shouldReceive( 'list_locations' )->once()->andReturn(
-			array(
-				'data' => array(
-					array(
-						'id' => 'tml_a',
-						'display_name' => 'Main store',
-					),
-					array(
-						'id' => 'tml_b',
-						'display_name' => 'Pop-up',
-					),
-				),
+		$service->shouldReceive( '__construct' )->with(
+			\Mockery::on(
+				function ( $value ) use ( &$key ) {
+					$key = $value;
+					return in_array( $value, array( 'sk_test_fake', 'sk_live_fake' ), true );
+				}
 			)
+		);
+		$service->shouldReceive( 'list_all_locations' )->andReturnUsing(
+			function () use ( &$key ) {
+				return 'sk_test_fake' === $key
+					? array(
+						array(
+							'id' => 'tml_test',
+							'display_name' => 'Test store',
+						),
+					)
+					: array(
+						array(
+							'id' => 'tml_live',
+							'display_name' => 'Live store',
+						),
+					);
+			}
 		);
 		$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 		$gateway->init_form_fields();
-		$this->assertSame( 'select', $gateway->form_fields['wcpos_location']['type'] );
-		$this->assertEquals(
+		$this->assertArrayNotHasKey( 'wcpos_location', $gateway->form_fields );
+		$this->assertSame( 'select', $gateway->form_fields['wcpos_location_test']['type'] );
+		$this->assertSame( 'select', $gateway->form_fields['wcpos_location_live']['type'] );
+		$this->assertSame(
 			array(
 				'' => 'Select a location',
-				'tml_a' => 'Main store',
-				'tml_b' => 'Pop-up',
+				'tml_test' => 'Test store',
 			),
-			$gateway->form_fields['wcpos_location']['options']
+			$gateway->form_fields['wcpos_location_test']['options']
 		);
-		$this->assertSame( 'tml_b', Settings::get_wcpos_location() );
+		$this->assertSame(
+			array(
+				'' => 'Select a location',
+				'tml_live' => 'Live store',
+			),
+			$gateway->form_fields['wcpos_location_live']['options']
+		);
+		$this->assertSame( 'tml_test', Settings::get_wcpos_location() );
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['test_mode'] = 'no';
+		$this->assertSame( 'tml_live', Settings::get_wcpos_location() );
+	}
+
+	/**
+	 * Legacy values are read only when the current mode has no selection.
+	 *
+	 * @dataProvider location_settings
+	 * @param array  $settings Saved settings.
+	 * @param string $expected Effective location.
+	 */
+	public function test_location_migration_is_read_only( array $settings, string $expected ): void {
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = $settings;
+		Functions\expect( 'update_option' )->never();
+		$this->assertSame( $expected, Settings::get_wcpos_location() );
+		$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+		$gateway->init_form_fields();
+		$field = 'yes' === $settings['test_mode'] ? 'wcpos_location_test' : 'wcpos_location_live';
+		$this->assertSame( $expected, $gateway->form_fields[ $field ]['default'] );
+		$this->assertSame( $settings, $this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] );
+	}
+
+	/** Missing and empty mode values fall back without crossing mode-specific values. */
+	public function location_settings(): array {
+		return array(
+			array(
+				array(
+					'test_mode' => 'yes',
+					'wcpos_location' => 'tml_old',
+				),
+				'tml_old',
+			),
+			array(
+				array(
+					'test_mode' => 'no',
+					'wcpos_location' => 'tml_old',
+				),
+				'tml_old',
+			),
+			array(
+				array(
+					'test_mode' => 'yes',
+					'wcpos_location_test' => '',
+					'wcpos_location' => 'tml_old',
+				),
+				'tml_old',
+			),
+			array(
+				array(
+					'test_mode' => 'no',
+					'wcpos_location_live' => '',
+					'wcpos_location' => 'tml_old',
+				),
+				'tml_old',
+			),
+			array(
+				array(
+					'test_mode' => 'yes',
+					'wcpos_location_test' => 'tml_test',
+					'wcpos_location' => 'tml_old',
+				),
+				'tml_test',
+			),
+			array(
+				array(
+					'test_mode' => 'no',
+					'wcpos_location_live' => 'tml_live',
+					'wcpos_location' => 'tml_old',
+				),
+				'tml_live',
+			),
+			array(
+				array(
+					'test_mode' => 'no',
+					'wcpos_location_test' => 'tml_test',
+				),
+				'',
+			),
+			array(
+				array(
+					'test_mode' => 'yes',
+					'wcpos_location_live' => 'tml_live',
+				),
+				'',
+			),
+		);
 	}
 
 	/**
@@ -135,12 +242,14 @@ class DeviceSettingsTest extends ServerTestCase {
 	 */
 	public function test_unavailable_locations( string $context ): void {
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['test_secret_key'] = 'sk_test_fake';
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['wcpos_location_test'] = 'tml_saved';
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['wcpos_location_live'] = 'tml_live_saved';
 		Functions\when( 'get_transient' )->justReturn( array() );
 		$service = \Mockery::mock( 'overload:' . StripeTerminalService::class );
 		if ( 'error' === $context ) {
-			$service->shouldReceive( 'list_locations' )->once()->andReturn( new \WP_Error( 'offline', 'Unavailable' ) );
+			$service->shouldReceive( 'list_all_locations' )->once()->andReturn( new \WP_Error( 'offline', 'Unavailable' ) );
 		} else {
-			$service->shouldNotReceive( 'list_locations' );
+			$service->shouldNotReceive( 'list_all_locations' );
 		}
 		if ( 'frontend' === $context ) {
 			Functions\when( 'is_admin' )->justReturn( false );
@@ -153,8 +262,21 @@ class DeviceSettingsTest extends ServerTestCase {
 		}
 		$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 		$gateway->init_form_fields();
-		$this->assertSame( array( '' => 'Select a location' ), $gateway->form_fields['wcpos_location']['options'] );
-		$this->assertSame( '', Settings::get_wcpos_location() );
+		$this->assertSame(
+			array(
+				'' => 'Select a location',
+				'tml_saved' => 'tml_saved',
+			),
+			$gateway->form_fields['wcpos_location_test']['options']
+		);
+		$this->assertSame(
+			array(
+				'' => 'Select a location',
+				'tml_live_saved' => 'tml_live_saved',
+			),
+			$gateway->form_fields['wcpos_location_live']['options']
+		);
+		$this->assertSame( 'tml_saved', Settings::get_wcpos_location() );
 	}
 
 	/** Settings contexts where location choices are unavailable. */
