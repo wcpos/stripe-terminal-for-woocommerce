@@ -41,6 +41,13 @@ class Gateway extends WC_Payment_Gateway {
 	protected $stripe_service;
 
 	/**
+	 * Reader choices, null on failure, or false before the first lookup.
+	 *
+	 * @var array|null|false
+	 */
+	private $terminal_options_cache = false;
+
+	/**
 	 * Constructor for the gateway.
 	 */
 	public function __construct() {
@@ -92,6 +99,7 @@ class Gateway extends WC_Payment_Gateway {
 	 * Initialize gateway form fields.
 	 */
 	public function init_form_fields(): void {
+		$terminal_options = $this->fetch_terminal_options();
 		$this->form_fields = array(
 			'enabled' => array(
 				'title'       => __( 'Enable/Disable', 'stripe-terminal-for-woocommerce' ),
@@ -136,6 +144,31 @@ class Gateway extends WC_Payment_Gateway {
 					'autocomplete' => 'off',
 				),
 			),
+			'default_reader' => array(
+				'title'       => __( 'Default terminal', 'stripe-terminal-for-woocommerce' ),
+				'type'        => null === $terminal_options ? 'text' : 'select',
+				'options'     => array( '' => __( '— Select a terminal —', 'stripe-terminal-for-woocommerce' ) ) + ( $terminal_options ?? array() ),
+				'default'     => '',
+				'description' => __( 'Terminal used by default at POS checkout.', 'stripe-terminal-for-woocommerce' ),
+				'desc_tip'    => true,
+			),
+			'allowed_readers' => array(
+				'title'       => __( 'Enabled terminals', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'multiselect',
+				'class'       => 'wc-enhanced-select',
+				'options'     => $terminal_options,
+				'default'     => array(),
+				'description' => __( 'Limit POS checkout to selected terminals, or leave empty to allow all terminals.', 'stripe-terminal-for-woocommerce' ),
+				'desc_tip'    => true,
+			),
+			'lock_to_default' => array(
+				'title'       => __( 'Lock terminal selection', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'label'       => __( 'Cashiers cannot change the terminal at POS checkout.', 'stripe-terminal-for-woocommerce' ),
+				'description' => __( 'Requires a default terminal.', 'stripe-terminal-for-woocommerce' ),
+				'desc_tip'    => true,
+				'default'     => 'no',
+			),
 			'test_mode' => array(
 				'title'       => __( 'Test Mode', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'checkbox',
@@ -158,6 +191,47 @@ class Gateway extends WC_Payment_Gateway {
 				'description' => __( 'Sends a periodic ping to the reader so the first payment after the reader has been idle is not slow. Try this if payments regularly take a long time to appear on the reader. Not recommended when multiple registers share one reader.', 'stripe-terminal-for-woocommerce' ),
 			),
 		);
+		// Omit the field on fetch failure so WooCommerce retains its saved value.
+		if ( null === $terminal_options ) {
+			unset( $this->form_fields['allowed_readers'] );
+		}
+	}
+
+	/**
+	 * Fetch reader choices only on this gateway's settings screen.
+	 *
+	 * @return array|null Reader ID => label choices, or null when unavailable.
+	 */
+	private function fetch_terminal_options(): ?array {
+		if ( false !== $this->terminal_options_cache ) {
+			return $this->terminal_options_cache;
+		}
+		$this->terminal_options_cache = null;
+		if ( ! is_admin() || wp_doing_ajax() ) {
+			return null;
+		}
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only settings screen detection.
+		$section = isset( $_GET['section'] ) ? sanitize_text_field( wp_unslash( $_GET['section'] ) ) : '';
+		if ( Settings::GATEWAY_ID !== $section || ! Settings::get_api_key() || ! class_exists( '\WCPOS\WooCommercePOSPro\Payments\Server\Abstract_Provider_Adapter' ) ) {
+			return null;
+		}
+		$cache_key = 'stwc_terminal_choices_' . md5( Settings::get_api_key() );
+		$cached    = get_transient( $cache_key );
+		if ( is_array( $cached ) ) {
+			$this->terminal_options_cache = $cached;
+			return $cached;
+		}
+		$readers = ( new Server\Stripe_Server_Provider() )->list_readers();
+		if ( is_wp_error( $readers ) ) {
+			return null;
+		}
+		$options = array();
+		foreach ( $readers as $reader ) {
+			$options[ $reader['id'] ] = sprintf( '%s (%s)', $reader['label'], $reader['id'] );
+		}
+		set_transient( $cache_key, $options, 5 * MINUTE_IN_SECONDS );
+		$this->terminal_options_cache = $options;
+		return $options;
 	}
 
 	/**
@@ -342,6 +416,9 @@ class Gateway extends WC_Payment_Gateway {
 		}
 
 		$saved = parent::process_admin_options();
+		if ( Server\Registration::pro_supported() ) {
+			Server\Pos_Reader_Settings::mirror( Settings::get_gateway_settings() );
+		}
 		if ( Server\Registration::pro_supported() && Settings::get_api_key() ) {
 			Server\Pos_Webhook::ensure( Settings::get_api_key(), Settings::is_test_mode() ? 'test' : 'live' );
 			if ( class_exists( '\WCPOS\WooCommercePOSPro\Payments\Server\Reader_Curation' ) ) {

@@ -29,6 +29,20 @@ namespace {
 
 			public function init_settings() {}
 
+			public function get_field_key( $key ) {
+				return 'woocommerce_' . $this->id . '_' . $key;
+			}
+
+			public function process_admin_options() {
+				$settings = get_option( 'woocommerce_' . $this->id . '_settings', array() );
+				foreach ( $this->form_fields as $key => $field ) {
+					$value = $_POST[ $this->get_field_key( $key ) ] ?? null;
+					$settings[ $key ] = 'checkbox' === $field['type'] ? ( $value ? 'yes' : 'no' ) : ( $value ?? ( 'multiselect' === $field['type'] ? array() : '' ) );
+				}
+				return update_option( 'woocommerce_' . $this->id . '_settings', $settings );
+			}
+
+
 			public function supports( $feature ) {
 				return in_array( $feature, $this->supports, true );
 			}
@@ -450,6 +464,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					},
 					'add_action' => true,
 					'is_ssl'     => true,
+					'is_admin'   => false,
 				)
 			);
 
