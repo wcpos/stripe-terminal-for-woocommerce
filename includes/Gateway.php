@@ -180,14 +180,14 @@ class Gateway extends WC_Payment_Gateway {
 				'description' => __( 'Choose whether the POS app or the store controls the reader.', 'stripe-terminal-for-woocommerce' ),
 			),
 			'wcpos_location_test' => array(
-				'title'       => __( 'Terminal location (test mode)', 'stripe-terminal-for-woocommerce' ),
+				'title'       => __( 'Terminal location (testing)', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'select',
 				'options'     => $this->fetch_location_options( true ),
 				'default'     => Settings::get_wcpos_location( true ),
 				'description' => __( 'Bluetooth readers and Tap to Pay register to this location when the app connects.', 'stripe-terminal-for-woocommerce' ),
 			),
 			'wcpos_location_live' => array(
-				'title'       => __( 'Terminal location (live mode)', 'stripe-terminal-for-woocommerce' ),
+				'title'       => __( 'Terminal location (live)', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'select',
 				'options'     => $this->fetch_location_options( false ),
 				'default'     => Settings::get_wcpos_location( false ),
