@@ -14,6 +14,17 @@ class Settings {
 	/** Stable gateway ID used by the Pro provider registry. */
 	public const GATEWAY_ID = 'stripe_terminal_for_woocommerce';
 
+	/** Use device mode for new setups, retaining existing smart-reader defaults. */
+	public static function get_wcpos_connection(): string {
+		$settings = self::get_gateway_settings();
+		return (string) ( $settings['wcpos_connection'] ?? ( ! empty( $settings['default_reader'] ) ? 'server' : 'device' ) );
+	}
+
+	/** Location where the SDK registers Bluetooth and Tap to Pay readers. */
+	public static function get_wcpos_location(): string {
+		return (string) ( self::get_gateway_settings()['wcpos_location'] ?? '' );
+	}
+
 	/** Whether the currently selected API mode is test. */
 	public static function is_test_mode(): bool {
 		return 'yes' === ( self::get_gateway_settings()['test_mode'] ?? 'no' );

@@ -169,6 +169,23 @@ class Gateway extends WC_Payment_Gateway {
 				'desc_tip'    => true,
 				'default'     => 'no',
 			),
+			'wcpos_connection' => array(
+				'title'       => __( 'POS connection', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'select',
+				'options'     => array(
+					'device' => __( 'Bluetooth reader or Tap to Pay (the POS app drives the reader)', 'stripe-terminal-for-woocommerce' ),
+					'server' => __( 'Smart reader (the store drives the reader)', 'stripe-terminal-for-woocommerce' ),
+				),
+				'default'     => Settings::get_wcpos_connection(),
+				'description' => __( 'Choose whether the POS app or the store controls the reader.', 'stripe-terminal-for-woocommerce' ),
+			),
+			'wcpos_location' => array(
+				'title'       => __( 'Terminal location', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'select',
+				'options'     => $this->fetch_location_options(),
+				'default'     => '',
+				'description' => __( 'Bluetooth readers and Tap to Pay register to this location when the app connects.', 'stripe-terminal-for-woocommerce' ),
+			),
 			'test_mode' => array(
 				'title'       => __( 'Test Mode', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'checkbox',
@@ -195,6 +212,35 @@ class Gateway extends WC_Payment_Gateway {
 		if ( null === $terminal_options ) {
 			unset( $this->form_fields['allowed_readers'] );
 		}
+	}
+
+	/**
+	 * Fetch location choices only on this gateway's settings screen.
+	 *
+	 * @return array Location ID => display name choices.
+	 */
+	private function fetch_location_options(): array {
+		$options = array( '' => __( 'Select a location', 'stripe-terminal-for-woocommerce' ) );
+		$saved   = Settings::get_wcpos_location();
+		// Retain the saved choice if Stripe is unavailable during an unrelated settings save.
+		if ( '' !== $saved ) {
+			$options[ $saved ] = $saved;
+		}
+		if ( ! is_admin() || wp_doing_ajax() ) {
+			return $options;
+		}
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only settings screen detection.
+		$section = isset( $_GET['section'] ) ? sanitize_text_field( wp_unslash( $_GET['section'] ) ) : '';
+		if ( Settings::GATEWAY_ID !== $section || ! Settings::get_api_key() ) {
+			return $options;
+		}
+		$locations = ( new StripeTerminalService( Settings::get_api_key() ) )->list_locations();
+		if ( ! is_wp_error( $locations ) ) {
+			foreach ( $locations['data'] as $location ) {
+				$options[ $location['id'] ] = $location['display_name'];
+			}
+		}
+		return $options;
 	}
 
 	/**

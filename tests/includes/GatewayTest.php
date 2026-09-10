@@ -1,8 +1,13 @@
 <?php
 /**
  * Tests for the Gateway class.
+ *
+ * @package WCPOS\WooCommercePOS\StripeTerminal
  */
 
+// phpcs:disable Universal.Namespaces, Generic.Files.OneObjectStructurePerFile -- Shared WordPress test doubles and gateway tests.
+// phpcs:disable WordPress.NamingConventions.PrefixAllGlobals -- WordPress contract names in test doubles.
+// phpcs:disable WordPress.WP.GlobalVariablesOverride -- Simulate WordPress request state in tests.
 namespace {
 	if ( ! defined( 'STWC_PLUGIN_URL' ) ) {
 		define( 'STWC_PLUGIN_URL', 'https://example.test/wp-content/plugins/stripe-terminal-for-woocommerce/' );
@@ -13,29 +18,83 @@ namespace {
 	}
 
 	if ( ! class_exists( 'WC_Payment_Gateway' ) ) {
+		/** Test double for WC_Payment_Gateway. */
 		class WC_Payment_Gateway {
+			/**
+			 * Id.
+			 *
+			 * @var mixed
+			 */
 			public $id;
+			/**
+			 * Method title.
+			 *
+			 * @var mixed
+			 */
 			public $method_title;
+			/**
+			 * Method description.
+			 *
+			 * @var mixed
+			 */
 			public $method_description;
+			/**
+			 * Title.
+			 *
+			 * @var mixed
+			 */
 			public $title;
+			/**
+			 * Description.
+			 *
+			 * @var mixed
+			 */
 			public $description;
+			/**
+			 * Supports.
+			 *
+			 * @var mixed
+			 */
 			public $supports = array( 'products' );
+			/**
+			 * Form fields.
+			 *
+			 * @var mixed
+			 */
 			public $form_fields = array();
+			/**
+			 * Options.
+			 *
+			 * @var mixed
+			 */
 			public $options = array();
 
+			/**
+			 * Read the stub gateway option.
+			 *
+			 * @param string $key Option key.
+			 */
 			public function get_option( $key ) {
 				return 'enable_moto' === $key ? 'no' : ( $this->options[ $key ] ?? null );
 			}
 
+			/** Initialize stub settings. */
 			public function init_settings() {}
 
+			/**
+			 * Build the gateway field key.
+			 *
+			 * @param string $key Field key.
+			 */
 			public function get_field_key( $key ) {
 				return 'woocommerce_' . $this->id . '_' . $key;
 			}
 
+			/** Save test form values. */
 			public function process_admin_options() {
 				$settings = get_option( 'woocommerce_' . $this->id . '_settings', array() );
 				foreach ( $this->form_fields as $key => $field ) {
+					// phpcs:ignore WordPress.Security.NonceVerification, WordPress.Security.ValidatedSanitizedInput -- In-memory form fixture, not an HTTP handler.
 					$value = $_POST[ $this->get_field_key( $key ) ] ?? null;
 					$settings[ $key ] = 'checkbox' === $field['type'] ? ( $value ? 'yes' : 'no' ) : ( $value ?? ( 'multiselect' === $field['type'] ? array() : '' ) );
 				}
@@ -43,6 +102,11 @@ namespace {
 			}
 
 
+			/**
+			 * Check gateway support.
+			 *
+			 * @param string $feature Feature name.
+			 */
 			public function supports( $feature ) {
 				return in_array( $feature, $this->supports, true );
 			}
@@ -50,15 +114,24 @@ namespace {
 	}
 
 	if ( ! class_exists( 'WC_Abstract_Order' ) ) {
+		/** Test double for WC_Abstract_Order. */
 		class WC_Abstract_Order {
+			/** Read the order key. */
 			public function get_order_key() {
 				return 'wc_order_key';
 			}
 
+			/** Read the order ID. */
 			public function get_id() {
 				return 42;
 			}
 
+			/**
+			 * Read order metadata.
+			 *
+			 * @param string $key Metadata key.
+			 * @param bool   $single Whether to return a single value.
+			 */
 			public function get_meta( $key, $single = true ) {
 				return '';
 			}
@@ -66,9 +139,9 @@ namespace {
 	}
 
 	if ( ! class_exists( 'WC_Order' ) ) {
+		/** Test double for WC_Order. */
 		class WC_Order extends WC_Abstract_Order {}
 	}
-
 }
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
@@ -78,14 +151,36 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 	use PHPUnit\Framework\TestCase;
 	use WCPOS\WooCommercePOS\StripeTerminal\Gateway;
 
+	/** Test double for GatewayValidationTestDouble. */
 	class GatewayValidationTestDouble extends Gateway {
+		/**
+		 * Options.
+		 *
+		 * @var mixed
+		 */
 		public $options = array();
+		/**
+		 * Webhook called.
+		 *
+		 * @var mixed
+		 */
 		public $webhook_called = false;
 
+		/**
+		 * Read the stub gateway option.
+		 *
+		 * @param string $key Option key.
+		 */
 		public function get_option( $key ) {
 			return $this->options[ $key ] ?? null;
 		}
 
+		/**
+		 * Validate and set webhook.
+		 *
+		 * @param string $api_key Stripe API key.
+		 * @param string $mode Stripe mode.
+		 */
 		public function validate_and_set_webhook( $api_key, $mode = 'live' ) {
 			$this->webhook_called = true;
 
@@ -94,14 +189,18 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 	}
 
 	/**
+	 * Verify gateway configuration and payment behavior.
+	 *
 	 * @covers \WCPOS\WooCommercePOS\StripeTerminal\Gateway
 	 */
 	class GatewayTest extends TestCase {
+		/** Set up test dependencies. */
 		protected function setUp(): void {
 			parent::setUp();
 			Monkey\setUp();
 		}
 
+		/** Release test dependencies. */
 		protected function tearDown(): void {
 			\Mockery::close();
 			unset( $GLOBALS['wp'] );
@@ -112,7 +211,11 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		}
 
 		/**
+		 * Claim an empty payment method with the configured title.
+		 *
 		 * @dataProvider gateway_title_provider
+		 * @param array  $settings Gateway settings.
+		 * @param string $title Expected gateway title.
 		 */
 		public function test_claim_order_gateway_sets_empty_method_and_title( array $settings, string $title ): void {
 			Functions\when( 'get_option' )->justReturn( $settings );
@@ -127,6 +230,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
 		}
 
+		/** Gateway title provider. */
 		public function gateway_title_provider(): array {
 			return array(
 				'configured' => array( array( 'title' => 'Card reader' ), 'Card reader' ),
@@ -135,6 +239,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 		}
 
+		/** Claim order gateway sets empty title for existing gateway. */
 		public function test_claim_order_gateway_sets_empty_title_for_existing_gateway(): void {
 			Functions\when( 'get_option' )->justReturn( array( 'title' => 'Card reader' ) );
 			Functions\when( '__' )->returnArg();
@@ -149,6 +254,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
 		}
 
+		/** Claim order gateway preserves existing gateway and custom title. */
 		public function test_claim_order_gateway_preserves_existing_gateway_and_custom_title(): void {
 			$order = \Mockery::mock( \WC_Order::class );
 			$order->shouldReceive( 'get_payment_method' )->once()->andReturn( 'stripe_terminal_for_woocommerce' );
@@ -162,6 +268,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( 'Custom terminal title', $order->get_payment_method_title() );
 		}
 
+		/** Enqueue payment scripts uses pos cashier nonce for pos orders. */
 		public function test_enqueue_payment_scripts_uses_pos_cashier_nonce_for_pos_orders(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
@@ -227,6 +334,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( array( 2, 99 ), $switched_users );
 		}
 
+		/** Enqueue payment scripts uses default nonce when order is missing. */
 		public function test_enqueue_payment_scripts_uses_default_nonce_when_order_is_missing(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
@@ -270,6 +378,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertNull( $localized_data['orderKey'] );
 		}
 
+		/** Enqueue payment scripts uses default nonce outside pos requests. */
 		public function test_enqueue_payment_scripts_uses_default_nonce_outside_pos_requests(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
@@ -321,6 +430,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( 'default-nonce', $localized_data['nonce'] );
 		}
 
+		/** Order received url returns default outside pos requests. */
 		public function test_order_received_url_returns_default_outside_pos_requests(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
@@ -340,6 +450,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 		}
 
+		/** Paid pos terminal resubmission redirects to order received url. */
 		public function test_paid_pos_terminal_resubmission_redirects_to_order_received_url(): void {
 			$order = $this->prepare_paid_submission_request();
 			$order->shouldReceive( 'is_paid' )->once()->andReturn( true );
@@ -366,6 +477,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( 'https://example.test/wcpos-checkout/order-received/42?key=wc_order_key', $redirect_url );
 		}
 
+		/** Unpaid pos terminal submission does not redirect. */
 		public function test_unpaid_pos_terminal_submission_does_not_redirect(): void {
 			$order = $this->prepare_paid_submission_request();
 			$order->shouldReceive( 'get_order_key' )->once()->andReturn( 'wc_order_key' );
@@ -377,6 +489,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			Gateway::maybe_redirect_paid_order_submission();
 		}
 
+		/** Paid pos terminal submission with wrong key does not redirect. */
 		public function test_paid_pos_terminal_submission_with_wrong_key_does_not_redirect(): void {
 			$order = $this->prepare_paid_submission_request();
 			$order->shouldReceive( 'get_order_key' )->once()->andReturn( 'wc_order_key' );
@@ -389,6 +502,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			Gateway::maybe_redirect_paid_order_submission();
 		}
 
+		/** Paid non pos terminal submission does not redirect. */
 		public function test_paid_non_pos_terminal_submission_does_not_redirect(): void {
 			$this->prepare_paid_submission_request( false );
 
@@ -398,6 +512,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			Gateway::maybe_redirect_paid_order_submission();
 		}
 
+		/** Paid pos non terminal submission does not redirect. */
 		public function test_paid_pos_non_terminal_submission_does_not_redirect(): void {
 			$this->prepare_paid_submission_request();
 			$_POST['payment_method'] = 'cod';
@@ -408,6 +523,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			Gateway::maybe_redirect_paid_order_submission();
 		}
 
+		/** Check key status does not set webhook for invalid key. */
 		public function test_check_key_status_does_not_set_webhook_for_invalid_key(): void {
 			$gateway = ( new \ReflectionClass( GatewayValidationTestDouble::class ) )->newInstanceWithoutConstructor();
 			$gateway->options = array(
@@ -432,6 +548,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertFalse( $gateway->webhook_called );
 		}
 
+		/** Check key status does not set webhook for restricted key. */
 		public function test_check_key_status_does_not_set_webhook_for_restricted_key(): void {
 			$gateway = ( new \ReflectionClass( GatewayValidationTestDouble::class ) )->newInstanceWithoutConstructor();
 			$gateway->options = array(
@@ -456,6 +573,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertFalse( $gateway->webhook_called );
 		}
 
+		/** Gateway supports refunds. */
 		public function test_gateway_supports_refunds(): void {
 			Functions\stubs(
 				array(
@@ -465,6 +583,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					'add_action' => true,
 					'is_ssl'     => true,
 					'is_admin'   => false,
+					'get_option' => array(),
 				)
 			);
 
@@ -472,7 +591,11 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		}
 
 		/**
+		 * Resolve the refund charge reference in priority order.
+		 *
 		 * @dataProvider refund_charge_id_provider
+		 * @param array  $meta Order metadata.
+		 * @param string $expected_id Expected charge reference.
 		 */
 		public function test_process_refund_resolves_charge_id_in_priority_order( array $meta, string $expected_id ): void {
 			$order   = $this->mock_refund_order( $meta );
@@ -501,6 +624,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 10.50 ) );
 		}
 
+		/** Refund charge id provider. */
 		public function refund_charge_id_provider(): array {
 			return array(
 				'transaction before mutable terminal charge' => array(
@@ -526,6 +650,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 		}
 
+		/** Process refund converts zero decimal currency amount. */
 		public function test_process_refund_converts_zero_decimal_currency_amount(): void {
 			$order   = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_jpy' ), 'JPY' );
 			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
@@ -544,6 +669,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 1250 ) );
 		}
 
+		/** Process refund returns error when order has no stripe payment id. */
 		public function test_process_refund_returns_error_when_order_has_no_stripe_payment_id(): void {
 			$order = $this->mock_refund_order( array() );
 			Functions\when( 'wc_get_order' )->justReturn( $order );
@@ -556,6 +682,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertStringContainsString( 'no Stripe charge', $result->get_error_message() );
 		}
 
+		/** Process refund returns error when service is unavailable. */
 		public function test_process_refund_returns_error_when_service_is_unavailable(): void {
 			$order = $this->mock_refund_order( array() );
 			Functions\when( 'wc_get_order' )->justReturn( $order );
@@ -567,6 +694,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( 'refund_service_unavailable', $result->get_error_code() );
 		}
 
+		/** Process refund returns error when order is missing. */
 		public function test_process_refund_returns_error_when_order_is_missing(): void {
 			Functions\when( 'wc_get_order' )->justReturn( false );
 			Functions\when( '__' )->returnArg();
@@ -578,6 +706,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertStringContainsString( 'could not be found', $result->get_error_message() );
 		}
 
+		/** Process refund propagates service error unchanged. */
 		public function test_process_refund_propagates_service_error_unchanged(): void {
 			$order = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_error' ) );
 			$error = new \WP_Error( 'stripe_error', 'Refund failed.' );
@@ -588,6 +717,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( $error, $this->make_refund_gateway( $service )->process_refund( 42, 10 ) );
 		}
 
+		/** Process refund adds success note and passes accepted reason. */
 		public function test_process_refund_adds_success_note_and_passes_accepted_reason(): void {
 			$order   = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_full' ) );
 			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
@@ -610,6 +740,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, null, 'requested_by_customer' ) );
 		}
 
+		/** Process refund stores free text reason in metadata and note. */
 		public function test_process_refund_stores_free_text_reason_in_metadata_and_note(): void {
 			$order   = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_reason' ) );
 			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
@@ -630,6 +761,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5, 'Damaged item' ) );
 		}
 
+		/** Process refund limits stripe metadata reason but preserves order note. */
 		public function test_process_refund_limits_stripe_metadata_reason_but_preserves_order_note(): void {
 			$reason  = str_repeat( 'a', 501 );
 			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_reason' ) );
@@ -651,6 +783,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertTrue( $this->make_refund_gateway( $service )->process_refund( 42, 5, $reason ) );
 		}
 
+		/** Process refund accepts pending refund as success. */
 		public function test_process_refund_accepts_pending_refund_as_success(): void {
 			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_pending' ) );
 			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
@@ -669,7 +802,10 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		}
 
 		/**
+		 * Reject terminal refund failures.
+		 *
 		 * @dataProvider refund_terminal_failure_status_provider
+		 * @param string $status Stripe refund status.
 		 */
 		public function test_process_refund_returns_error_for_terminal_failure_statuses( string $status ): void {
 			$order   = $this->mock_refund_order( array( '_transaction_id' => 'ch_failed' ) );
@@ -691,6 +827,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( 'refund_not_succeeded', $result->get_error_code() );
 		}
 
+		/** Refund terminal failure status provider. */
 		public function refund_terminal_failure_status_provider(): array {
 			return array(
 				'failed'   => array( 'failed' ),
@@ -698,6 +835,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 		}
 
+		/** Process refund selects key for original payment mode. */
 		public function test_process_refund_selects_key_for_original_payment_mode(): void {
 			$order           = $this->mock_refund_order( array( '_stripe_terminal_livemode' => 'yes' ) );
 			$current_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
@@ -726,6 +864,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( $current_service, $property->getValue( $gateway ) );
 		}
 
+		/** Process refund explains interac reader requirement. */
 		public function test_process_refund_explains_interac_reader_requirement(): void {
 			$order   = $this->mock_refund_order( array( '_stripe_terminal_charge_id' => 'ch_interac' ) );
 			$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
@@ -740,6 +879,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		}
 
 
+		/** Process payment requires strict paid true from stripe api check. */
 		public function test_process_payment_requires_strict_paid_true_from_stripe_api_check(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
@@ -795,6 +935,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
 		}
 
+		/** Process payment redirects to order pay when unpaid from checkout. */
 		public function test_process_payment_redirects_to_order_pay_when_unpaid_from_checkout(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
@@ -842,6 +983,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( 0, $status_checks );
 		}
 
+		/** Process payment fails on order pay without terminal payment. */
 		public function test_process_payment_fails_on_order_pay_without_terminal_payment(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 
@@ -880,12 +1022,19 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
 		}
 
+		/** Process payment completes order when terminal meta succeeded. */
 		public function test_process_payment_completes_order_when_terminal_meta_succeeded(): void {
 			$gateway = new class() extends Gateway {
+				/** Construct the test gateway. */
 				public function __construct() {
 					// Skip parent constructor; only exercise process_payment.
 				}
 
+				/**
+				 * Return the test receipt URL.
+				 *
+				 * @param \WC_Order|null $order Order instance.
+				 */
 				public function get_return_url( $order = null ) {
 					return 'https://example.test/checkout/order-received/42/';
 				}
@@ -969,6 +1118,11 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			return $order;
 		}
 
+		/**
+		 * Make refund gateway.
+		 *
+		 * @param \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService $service Stripe transport.
+		 */
 		private function make_refund_gateway( $service ): Gateway {
 			$gateway  = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
@@ -980,6 +1134,12 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			return $gateway;
 		}
 
+		/**
+		 * Mock refund order.
+		 *
+		 * @param array  $meta Order metadata.
+		 * @param string $currency Currency code.
+		 */
 		private function mock_refund_order( array $meta, string $currency = 'USD' ) {
 			$order = \Mockery::mock( \WC_Order::class );
 			$order->shouldReceive( 'get_meta' )->andReturnUsing( fn( $key ) => $meta[ $key ] ?? '' );
