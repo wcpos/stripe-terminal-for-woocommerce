@@ -817,12 +817,17 @@ class StripeTerminalService {
 	 */
 	public function list_all_locations() {
 		try {
-			$collection = $this->get_stripe_client()->terminal->locations->all( array( 'limit' => 100 ) );
-			$locations  = array();
-			foreach ( $collection->autoPagingIterator() as $location ) {
-				$locations[] = $location->toArray();
-			}
-			return $locations;
+			// The read timeout covers the first page and every lazy page the iterator fetches.
+			return $this->with_read_timeout(
+				function () {
+					$collection = $this->get_stripe_client()->terminal->locations->all( array( 'limit' => 100 ) );
+					$locations  = array();
+					foreach ( $collection->autoPagingIterator() as $location ) {
+						$locations[] = $location->toArray();
+					}
+					return $locations;
+				}
+			);
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'list_all_locations_error' );
 		}
