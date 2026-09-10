@@ -151,24 +151,26 @@ class DeviceSettingsTest extends ServerTestCase {
 	}
 
 	/**
-	 * Legacy values are read only when the current mode has no selection.
+	 * Only the selected mode supplies a location; the unshipped single field is ignored.
 	 *
 	 * @dataProvider location_settings
 	 * @param array  $settings Saved settings.
 	 * @param string $expected Effective location.
 	 */
-	public function test_location_migration_is_read_only( array $settings, string $expected ): void {
+	public function test_location_is_mode_specific( array $settings, string $expected ): void {
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = $settings;
 		Functions\expect( 'update_option' )->never();
 		$this->assertSame( $expected, Settings::get_wcpos_location() );
 		$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 		$gateway->init_form_fields();
-		$field = 'yes' === $settings['test_mode'] ? 'wcpos_location_test' : 'wcpos_location_live';
-		$this->assertSame( $expected, $gateway->form_fields[ $field ]['default'] );
+		foreach ( array( 'wcpos_location_test', 'wcpos_location_live' ) as $field ) {
+			$this->assertSame( '', $gateway->form_fields[ $field ]['default'] );
+			$this->assertArrayNotHasKey( 'tml_old', $gateway->form_fields[ $field ]['options'] );
+		}
 		$this->assertSame( $settings, $this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] );
 	}
 
-	/** Missing and empty mode values fall back without crossing mode-specific values. */
+	/** Missing and empty mode values stay empty, ignoring single-field and other-mode values. */
 	public function location_settings(): array {
 		return array(
 			array(
@@ -176,14 +178,14 @@ class DeviceSettingsTest extends ServerTestCase {
 					'test_mode' => 'yes',
 					'wcpos_location' => 'tml_old',
 				),
-				'tml_old',
+				'',
 			),
 			array(
 				array(
 					'test_mode' => 'no',
 					'wcpos_location' => 'tml_old',
 				),
-				'tml_old',
+				'',
 			),
 			array(
 				array(
@@ -191,7 +193,7 @@ class DeviceSettingsTest extends ServerTestCase {
 					'wcpos_location_test' => '',
 					'wcpos_location' => 'tml_old',
 				),
-				'tml_old',
+				'',
 			),
 			array(
 				array(
@@ -199,7 +201,7 @@ class DeviceSettingsTest extends ServerTestCase {
 					'wcpos_location_live' => '',
 					'wcpos_location' => 'tml_old',
 				),
-				'tml_old',
+				'',
 			),
 			array(
 				array(

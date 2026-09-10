@@ -167,6 +167,12 @@ class Stripe_Device_Provider extends \WCPOS\WooCommercePOSPro\Payments\Device\Ab
 	 * @param string $amount Decimal major units.
 	 */
 	public function refund( array $row, int $refund_id, string $amount ) {
-		return ( new Stripe_Server_Provider( $this->service ) )->refund( $row, $refund_id, $amount );
+		$service = $this->service;
+		$mode    = $row['provider_refs']['stripe_mode'] ?? null;
+		if ( null !== $mode ) {
+			$settings = Settings::get_gateway_settings();
+			$service  = new StripeTerminalService( $settings[ 'test' === $mode ? 'test_secret_key' : 'secret_key' ] ?? '' );
+		}
+		return ( new Stripe_Server_Provider( $service ) )->refund( $row, $refund_id, $amount );
 	}
 }

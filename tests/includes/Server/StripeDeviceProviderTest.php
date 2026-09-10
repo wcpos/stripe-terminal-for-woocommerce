@@ -278,6 +278,75 @@ class StripeDeviceProviderTest extends ServerTestCase {
 		$this->assertSame( array( 'status' => 501 ), $error->get_error_data() );
 	}
 
+	/**
+	 * Refund credentials follow the recorded mode, not the current setting.
+	 *
+	 * @dataProvider refund_modes
+	 * @param string      $selected_mode Current test-mode setting.
+	 * @param string|null $recorded_mode Payment mode, if recorded.
+	 * @param string      $expected_key Expected request credential.
+	 */
+	public function test_refund_uses_payment_mode( string $selected_mode, ?string $recorded_mode, string $expected_key ): void {
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = array(
+			'test_mode' => $selected_mode,
+			'test_secret_key' => 'sk_test_fake',
+			'secret_key' => 'sk_live_fake',
+		);
+		$this->http = new \WCPOS\WooCommercePOS\StripeTerminal\Tests\StripeHttpClientFake(
+			array(
+				$this->ok(
+					array(
+						'id' => 're_test',
+						'object' => 'refund',
+						'status' => 'succeeded',
+					)
+				),
+			)
+		);
+		// Service construction resets the HTTP client, so replace its singleton at the network boundary.
+		$instance = new \ReflectionProperty( \Stripe\HttpClient\CurlClient::class, 'instance' );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$instance->setAccessible( true );
+		}
+		$original = \Stripe\HttpClient\CurlClient::instance();
+		$client = \Mockery::mock( \Stripe\HttpClient\CurlClient::class );
+		$client->shouldReceive( 'setConnectTimeout', 'setTimeout' );
+		$client->shouldReceive( 'getUserAgentInfo' )->andReturn( array() );
+		$client->shouldReceive( 'request' )->once()->andReturnUsing( array( $this->http, 'request' ) );
+		$instance->setValue( null, $client );
+		try {
+			$device = new Stripe_Device_Provider();
+			$row = $this->row();
+			if ( null !== $recorded_mode ) {
+				$row['provider_refs']['stripe_mode'] = $recorded_mode;
+			}
+			$this->assertSame(
+				array(
+					'status' => 'succeeded',
+					'provider_ref' => 're_test',
+				),
+				$device->refund( $row, 123, '2.50' )
+			);
+			$this->assertContains( 'Authorization: Bearer ' . $expected_key, $this->http->requests[0]['headers'] );
+			$this->assertSame( 'pi_test', $this->http->requests[0]['params']['payment_intent'] );
+			$this->assertSame( 250, $this->http->requests[0]['params']['amount'] );
+		} finally {
+			$instance->setValue( null, $original );
+		}
+	}
+
+	/** Recorded modes win; rows without one use the current mode. */
+	public function refund_modes(): array {
+		return array(
+			array( 'no', 'test', 'sk_test_fake' ),
+			array( 'yes', 'live', 'sk_live_fake' ),
+			array( 'yes', 'test', 'sk_test_fake' ),
+			array( 'no', 'live', 'sk_live_fake' ),
+			array( 'yes', null, 'sk_test_fake' ),
+			array( 'no', null, 'sk_live_fake' ),
+		);
+	}
+
 	/** Reuse server refund metadata, idempotency, amount conversion, and status mapping. */
 	public function test_refund_delegation(): void {
 		$this->service->shouldReceive( 'refund_payment' )->once()->with(

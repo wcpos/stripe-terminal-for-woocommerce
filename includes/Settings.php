@@ -28,7 +28,7 @@ class Settings {
 	public static function get_wcpos_location( ?bool $test_mode = null ): string {
 		$settings = self::get_gateway_settings();
 		$key      = ( $test_mode ?? self::is_test_mode() ) ? 'wcpos_location_test' : 'wcpos_location_live';
-		return (string) ( ! empty( $settings[ $key ] ) ? $settings[ $key ] : ( $settings['wcpos_location'] ?? '' ) );
+		return (string) ( $settings[ $key ] ?? '' );
 	}
 
 	/** Whether the currently selected API mode is test. */
