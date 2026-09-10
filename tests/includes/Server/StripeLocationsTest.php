@@ -61,4 +61,18 @@ class StripeLocationsTest extends ServerTestCase {
 			$this->http->requests[1]['params']
 		);
 	}
+
+	/** Return a WordPress error when Stripe rejects a location page. */
+	public function test_list_all_locations_returns_stripe_error(): void {
+		$service    = new StripeTerminalService( 'sk_test_fake' );
+		$this->http = new StripeHttpClientFake( array( $this->error() ) );
+		\Stripe\ApiRequestor::setHttpClient( $this->http );
+
+		$result = $service->list_all_locations();
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'stripe_error', $result->get_error_code() );
+		$this->assertSame( 'list_all_locations_error', $result->get_error_data()['context'] );
+		$this->assertCount( 1, $this->http->requests );
+	}
 }
