@@ -811,6 +811,29 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * List locations across all pages for the settings screen.
+	 *
+	 * @return array|WP_Error Location arrays or error.
+	 */
+	public function list_all_locations() {
+		try {
+			// The read timeout covers the first page and every lazy page the iterator fetches.
+			return $this->with_read_timeout(
+				function () {
+					$collection = $this->get_stripe_client()->terminal->locations->all( array( 'limit' => 100 ) );
+					$locations  = array();
+					foreach ( $collection->autoPagingIterator() as $location ) {
+						$locations[] = $location->toArray();
+					}
+					return $locations;
+				}
+			);
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'list_all_locations_error' );
+		}
+	}
+
+	/**
 	 * Register a Stripe Terminal reader.
 	 *
 	 * @param string $location_id       The location ID.
