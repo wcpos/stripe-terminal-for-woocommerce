@@ -180,7 +180,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertStringContainsString( 'href="https://dashboard.stripe.com/apikeys"', $live );
 			$this->assertStringContainsString( 'Create restricted key', $live );
 			$this->assertStringContainsString( 'sk_live_ or rk_live_', $live );
-			foreach ( array( 'Terminal', 'PaymentIntents', 'Refunds', 'Charges', 'PaymentMethods' ) as $permission ) {
+			foreach ( array( 'Terminal', 'PaymentIntents', 'Refunds', 'Account', 'Charges', 'PaymentMethods' ) as $permission ) {
 				$this->assertStringContainsString( $permission, $live );
 			}
 

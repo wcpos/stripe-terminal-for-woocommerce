@@ -1139,7 +1139,7 @@ class Gateway extends WC_Payment_Gateway {
 				$is_test ? __( 'test', 'stripe-terminal-for-woocommerce' ) : __( 'live', 'stripe-terminal-for-woocommerce' )
 			),
 			__( 'Easiest option: under <strong>Standard keys</strong>, click <strong>Reveal</strong> next to <strong>Secret key</strong> and copy it. This key also lets the plugin set up its Stripe webhook for you.', 'stripe-terminal-for-woocommerce' ),
-			__( 'Prefer a restricted key? Click <strong>Create restricted key</strong>, give it a name such as "WooCommerce POS", then set every <strong>Terminal</strong> permission to Write, <strong>PaymentIntents</strong> to Write, <strong>Refunds</strong> to Write, and <strong>Charges</strong> and <strong>PaymentMethods</strong> to Read. Click <strong>Create key</strong>. Restricted keys cannot set up the webhook automatically.', 'stripe-terminal-for-woocommerce' ),
+			__( 'Prefer a restricted key? Click <strong>Create restricted key</strong>, give it a name such as "WooCommerce POS", then set every <strong>Terminal</strong> permission to Write, <strong>PaymentIntents</strong> to Write, <strong>Refunds</strong> to Write, and <strong>Account</strong>, <strong>Charges</strong> and <strong>PaymentMethods</strong> to Read. Click <strong>Create key</strong>. Restricted keys cannot set up the webhook automatically.', 'stripe-terminal-for-woocommerce' ),
 			\sprintf(
 				/* translators: %s: the key prefixes expected for this mode. */
 				__( 'Paste the key (it starts with %s) into the field above and click <strong>Save changes</strong>. Stripe shows a new key only once, so copy it straight away.', 'stripe-terminal-for-woocommerce' ),
