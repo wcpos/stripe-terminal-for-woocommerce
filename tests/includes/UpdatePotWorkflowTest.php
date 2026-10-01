@@ -55,6 +55,18 @@ class UpdatePotWorkflowTest extends TestCase {
 	}
 
 	/**
+	 * The enterprise policy forbids GITHUB_TOKEN from creating pull requests,
+	 * so the PR step must authenticate with the POT_PR_TOKEN secret (a
+	 * fine-grained PAT) and only fall back to GITHUB_TOKEN when it is unset.
+	 */
+	public function test_workflow_opens_the_pull_request_with_a_pat_secret(): void {
+		$workflow = file_get_contents( self::WORKFLOW );
+
+		$this->assertIsString( $workflow );
+		$this->assertStringContainsString( 'token: ${{ secrets.POT_PR_TOKEN || secrets.GITHUB_TOKEN }}', $workflow );
+	}
+
+	/**
 	 * Ensures only the volatile creation date is ignored.
 	 */
 	public function test_pot_comparison_ignores_only_the_creation_date(): void {

@@ -54,13 +54,18 @@ jobs:
 
       # Main only accepts changes through pull requests (repository ruleset),
       # so the regenerated catalog is proposed as a PR instead of pushed.
-      # Note: PRs created with GITHUB_TOKEN do not trigger CI workflows; the
-      # diff is POT-only, so merge directly, or close/reopen the PR if checks
-      # are required.
+      # The enterprise policy forbids GITHUB_TOKEN from creating pull requests
+      # (the step fails with "GitHub Actions is not permitted to create or
+      # approve pull requests"), so this uses the POT_PR_TOKEN repository
+      # secret: a fine-grained personal access token scoped to this repo with
+      # Contents and Pull requests set to Read and write. A PR opened with a
+      # PAT also triggers CI, unlike one opened with GITHUB_TOKEN. Without the
+      # secret it falls back to GITHUB_TOKEN and fails as before.
       - name: Open pull request with updated POT file
         if: steps.git-diff.outputs.changes == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
+          token: ${{ secrets.POT_PR_TOKEN || secrets.GITHUB_TOKEN }}
           commit-message: "chore(i18n): update languages/stripe-terminal-for-woocommerce.pot"
           branch: i18n/update-pot
           delete-branch: true
@@ -71,6 +76,6 @@ jobs:
             changed after a merge to main. The diff is limited to
             `languages/stripe-terminal-for-woocommerce.pot`.
 
-            This PR was created with `GITHUB_TOKEN`, so CI workflows do not run
-            on it automatically — merge directly, or close and reopen to
-            trigger checks.
+            Note for releases: the ZIP is built from the release commit, so a
+            release branch must still carry the current POT itself rather than
+            wait for this PR.
