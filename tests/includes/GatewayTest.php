@@ -93,12 +93,16 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 	 * @covers \WCPOS\WooCommercePOS\StripeTerminal\Gateway
 	 */
 	class GatewayTest extends TestCase {
+		private $previous_wpdb;
+
 		protected function setUp(): void {
 			parent::setUp();
 			Monkey\setUp();
+			$this->previous_wpdb = $GLOBALS['wpdb'] ?? null;
 		}
 
 		protected function tearDown(): void {
+			$GLOBALS['wpdb'] = $this->previous_wpdb;
 			\Mockery::close();
 			unset( $GLOBALS['wp'] );
 			$_POST = array();
@@ -1018,6 +1022,10 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		}
 
 		public function test_process_payment_completes_order_when_terminal_meta_succeeded(): void {
+			$GLOBALS['wpdb'] = new \WCPOS\WooCommercePOS\StripeTerminal\Tests\Support\FakeWpdb();
+			Functions\when( 'clean_post_cache' )->justReturn( null );
+			Functions\when( 'wp_generate_uuid4' )->justReturn( 'uuid-test' );
+			Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
 			$gateway = new class() extends Gateway {
 				public function __construct() {
 					// Skip parent constructor; only exercise process_payment.
@@ -1033,6 +1041,9 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_123' );
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( 'ch_123' );
 			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( 'succeeded' );
+			$order->shouldReceive( 'get_id' )->andReturn( 42 );
+			$order->shouldReceive( 'get_payment_method' )->andReturn( 'stripe_terminal_for_woocommerce' );
+			$order->shouldReceive( 'get_payment_method_title' )->andReturn( 'Stripe Terminal' );
 			$order->shouldReceive( 'set_transaction_id' )->with( 'ch_123' )->once();
 			$order->shouldReceive( 'payment_complete' )->with( 'ch_123' )->once();
 			$order->shouldReceive( 'add_order_note' )->once();

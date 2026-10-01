@@ -359,9 +359,9 @@ class Gateway extends WC_Payment_Gateway {
 
 		if ( $payment_intent_id && $charge_id && 'succeeded' === $payment_status ) {
 				// We have successful payment metadata, complete the order.
-				$order->set_transaction_id( $charge_id );
-				$order->payment_complete( $charge_id );
+			$completion = OrderCompletion::complete( $order, $charge_id );
 
+			if ( OrderCompletion::COMPLETED === $completion ) {
 				// Add order note.
 				/* translators: 1: Payment intent ID, 2: charge ID. */
 				$order_note = __( 'Order processed via Stripe Terminal. Payment Intent: %1$s, Charge: %2$s', 'stripe-terminal-for-woocommerce' );
@@ -373,6 +373,7 @@ class Gateway extends WC_Payment_Gateway {
 						$charge_id
 					)
 				);
+			}
 
 			// Return thank-you page URL.
 			return array(
@@ -398,20 +399,21 @@ class Gateway extends WC_Payment_Gateway {
 				$charge_id         = $status_result['charge']['id'];
 				$payment_intent_id = $status_result['payment_intent']['id'];
 
-				$order->set_transaction_id( $charge_id );
-				$order->payment_complete( $charge_id );
+				$completion = OrderCompletion::complete( $order, $charge_id );
 
-				// Add order note.
-				/* translators: 1: Payment intent ID, 2: charge ID. */
-				$order_note = __( 'Order processed via Stripe Terminal (API check). Payment Intent: %1$s, Charge: %2$s', 'stripe-terminal-for-woocommerce' );
+				if ( OrderCompletion::COMPLETED === $completion ) {
+					// Add order note.
+					/* translators: 1: Payment intent ID, 2: charge ID. */
+					$order_note = __( 'Order processed via Stripe Terminal (API check). Payment Intent: %1$s, Charge: %2$s', 'stripe-terminal-for-woocommerce' );
 
-				$order->add_order_note(
-					\sprintf(
-						$order_note,
-						$payment_intent_id,
-						$charge_id
-					)
-				);
+					$order->add_order_note(
+						\sprintf(
+							$order_note,
+							$payment_intent_id,
+							$charge_id
+						)
+					);
+				}
 
 				// Return thank-you page URL.
 				return array(
