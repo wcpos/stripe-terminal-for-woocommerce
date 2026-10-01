@@ -148,6 +148,45 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				strpos( $html, 'class="stripe-terminal-payment-section"' ),
 				strpos( $html, $error_container )
 			);
+
+			// The log section must also be outside the payment section, so the
+			// cashier can still open it after a service error. Every <div> opened
+			// before it has been closed when it is top level.
+			$before_log = substr( $html, 0, strpos( $html, '<div class="stripe-terminal-logging-section"' ) );
+			$this->assertSame( substr_count( $before_log, '<div' ), substr_count( $before_log, '</div>' ) );
+		}
+
+		public function test_key_instructions_link_to_dashboard_and_list_permissions(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+
+			$passthrough = function ( $text ) {
+				return $text;
+			};
+			Functions\stubs(
+				array(
+					'__'         => $passthrough,
+					'esc_html__' => $passthrough,
+					'esc_html'   => $passthrough,
+					'esc_url'    => $passthrough,
+				)
+			);
+
+			$method = new \ReflectionMethod( Gateway::class, 'get_key_instructions_html' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$method->setAccessible( true );
+			}
+
+			$live = $method->invoke( $gateway, 'live' );
+			$this->assertStringContainsString( 'href="https://dashboard.stripe.com/apikeys"', $live );
+			$this->assertStringContainsString( 'Create restricted key', $live );
+			$this->assertStringContainsString( 'sk_live_ or rk_live_', $live );
+			foreach ( array( 'Terminal', 'PaymentIntents', 'Refunds', 'Charges', 'PaymentMethods' ) as $permission ) {
+				$this->assertStringContainsString( $permission, $live );
+			}
+
+			$test = $method->invoke( $gateway, 'test' );
+			$this->assertStringContainsString( 'href="https://dashboard.stripe.com/test/apikeys"', $test );
+			$this->assertStringContainsString( 'sk_test_ or rk_test_', $test );
 		}
 
 		/**
@@ -491,7 +530,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			}
 			$status = $method->invoke( $gateway, 'live' );
 
-			$this->assertStringContainsString( 'Restricted Stripe API key verified with Stripe Terminal', $status );
+			$this->assertStringContainsString( 'Restricted Stripe API key verified: it can list Terminal readers', $status );
 			$this->assertSame( array( 'rk_live_restricted' ), $gateway->probed_keys );
 			$this->assertFalse( $gateway->webhook_called );
 		}
@@ -522,7 +561,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			$this->assertStringContainsString( 'Stripe rejected this restricted key (Invalid API Key provided: rk_live_****UtL3)', $status );
 			$this->assertStringContainsString( 'Create a new restricted key', $status );
-			$this->assertStringNotContainsString( 'verified with Stripe Terminal', $status );
+			$this->assertStringNotContainsString( 'verified: it can list Terminal readers', $status );
 			$this->assertFalse( $gateway->webhook_called );
 		}
 
@@ -550,8 +589,8 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			}
 			$status = $method->invoke( $gateway, 'live' );
 
-			$this->assertStringContainsString( 'This restricted key cannot access Stripe Terminal', $status );
-			$this->assertStringContainsString( 'grant Terminal and PaymentIntent permissions', $status );
+			$this->assertStringContainsString( 'This restricted key cannot list Stripe Terminal readers', $status );
+			$this->assertStringContainsString( 'set every Terminal permission and PaymentIntents to Write', $status );
 			$this->assertFalse( $gateway->webhook_called );
 		}
 
