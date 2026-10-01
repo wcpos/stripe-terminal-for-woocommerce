@@ -582,6 +582,11 @@ class Gateway extends WC_Payment_Gateway {
 		echo '<p>' . esc_html__( 'Loading Stripe Terminal...', 'stripe-terminal-for-woocommerce' ) . '</p>';
 		echo '</div>';
 
+		// Error container. payment.js writes service and payment errors into the
+		// <p> and shows it; without this element a failed reader fetch (bad API
+		// key, rejected nonce) left the cashier with an empty panel.
+		echo '<div class="stripe-terminal-error" style="display: none;"><p></p></div>';
+
 		// Check if we're on the order-pay page.
 		if ( is_checkout_pay_page() ) {
 			// Extract the order ID from the URL.
@@ -1094,6 +1099,22 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Make the cheapest Stripe Terminal call a restricted key must be able to perform.
+	 *
+	 * Lists one location. Throws AuthenticationException for a revoked or
+	 * mistyped key and PermissionException for a key without Terminal access.
+	 * Overridable so tests can simulate Stripe's response.
+	 *
+	 * @param string $api_key The restricted Stripe API key to probe.
+	 *
+	 * @throws \Stripe\Exception\ApiErrorException When Stripe rejects the request.
+	 */
+	protected function probe_restricted_key( $api_key ): void {
+		\Stripe\Stripe::setApiKey( $api_key );
+		\Stripe\Terminal\Location::all( array( 'limit' => 1 ) );
+	}
+
+	/**
 	 * Validate the Stripe API key.
 	 *
 	 * @param string $api_key The Stripe API key to validate.
@@ -1141,11 +1162,50 @@ class Gateway extends WC_Payment_Gateway {
 		}
 
 		if ( 0 === strpos( $api_key, 'rk_' ) ) {
+			// A restricted key may lack the Account permission the check below
+			// relies on, so probe a Terminal endpoint instead. This is the only
+			// place a revoked or mistyped restricted key is reported to the admin.
+			try {
+				$this->probe_restricted_key( $api_key );
+			} catch ( \Stripe\Exception\AuthenticationException $e ) {
+				return array(
+					'valid'      => false,
+					'restricted' => true,
+					'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+					\sprintf(
+						/* translators: %s: error message returned by Stripe. */
+						__( 'Stripe rejected this restricted key (%s). It may have been rolled or deleted. Create a new restricted key in the Stripe Dashboard and paste it here.', 'stripe-terminal-for-woocommerce' ),
+						esc_html( $e->getMessage() )
+					) .
+					'</span>',
+				);
+			} catch ( \Stripe\Exception\PermissionException $e ) {
+				return array(
+					'valid'      => false,
+					'restricted' => true,
+					'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+					\sprintf(
+						/* translators: %s: error message returned by Stripe. */
+						__( 'This restricted key cannot access Stripe Terminal (%s). Edit the key in the Stripe Dashboard and grant Terminal and PaymentIntent permissions.', 'stripe-terminal-for-woocommerce' ),
+						esc_html( $e->getMessage() )
+					) .
+					'</span>',
+				);
+			} catch ( \Stripe\Exception\ApiErrorException $e ) {
+				return array(
+					'valid'      => false,
+					'restricted' => true,
+					'message'    => '<span style="color: #d63638; background-color: #fcf0f1; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✕</span>' .
+					$this->handle_stripe_exception( $e, 'admin' ) .
+					'</span>',
+				);
+			}
+
 			return array(
 				'valid'      => true,
 				'restricted' => true,
 				'message'    => '<span style="color: #00a32a; background-color: #edfaef; padding: 5px 10px; border-radius: 3px; display: inline-block;"><span style="font-weight: bold; margin-right: 5px;">✓</span>' .
-				__( 'Restricted Stripe API key format is valid. Ensure the key has Terminal and PaymentIntent permissions.', 'stripe-terminal-for-woocommerce' ) .
+				__( 'Restricted Stripe API key verified with Stripe Terminal. Ensure the key also has PaymentIntent permissions.', 'stripe-terminal-for-woocommerce' ) .
 				'</span>',
 			);
 		}

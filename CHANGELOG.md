@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The order-pay terminal panel now shows the reason when readers cannot be loaded (for example an invalid restricted API key) instead of hiding "Loading Stripe Terminal..." and leaving an empty panel. The error container was never rendered by `payment_fields()`, and the readers request discarded the server message.
+- The gateway settings page now verifies restricted (`rk_`) keys against Stripe Terminal instead of only checking their prefix, so a rolled, deleted or under-permissioned restricted key shows a red error next to the key field rather than a green "format is valid" tick with the real failure buried under Locations.
+- Non-string log entries (exception context arrays) are written as single-line JSON instead of multi-line `print_r` output, which broke the line-number gutter in WooCommerce > Status > Logs.
+
 ## 0.0.33 - 2026-09-08
 
 ### Fixed
