@@ -67,9 +67,19 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 	class GatewayValidationTestDouble extends Gateway {
 		public $options = array();
 		public $webhook_called = false;
+		public $probe_exception = null;
+		public $probed_keys = array();
 
 		public function get_option( $key ) {
 			return $this->options[ $key ] ?? null;
+		}
+
+		protected function probe_restricted_key( $api_key ): void {
+			$this->probed_keys[] = $api_key;
+
+			if ( $this->probe_exception ) {
+				throw $this->probe_exception;
+			}
 		}
 
 		public function validate_and_set_webhook( $api_key, $mode = 'live' ) {
@@ -95,6 +105,88 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$_GET  = array();
 			Monkey\tearDown();
 			parent::tearDown();
+		}
+
+		public function test_payment_fields_renders_hidden_error_container(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+
+			$GLOBALS['wp'] = (object) array(
+				'query_vars' => array( 'order-pay' => 42 ),
+			);
+
+			$order = \Mockery::mock( \WC_Abstract_Order::class );
+			$order->shouldReceive( 'get_total' )->andReturn( 17.0 );
+
+			$passthrough = function ( $text ) {
+				return $text;
+			};
+
+			Functions\stubs(
+				array(
+					'is_checkout_pay_page' => true,
+					'esc_html__'           => $passthrough,
+					'esc_attr__'           => $passthrough,
+					'esc_attr'             => $passthrough,
+					'wp_kses_post'         => $passthrough,
+					'absint'               => function ( $value ) {
+						return abs( (int) $value );
+					},
+				)
+			);
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+
+			ob_start();
+			$gateway->payment_fields();
+			$html = (string) ob_get_clean();
+
+			$error_container = '<div class="stripe-terminal-error" style="display: none;"><p></p></div>';
+			$this->assertStringContainsString( $error_container, $html );
+
+			// The error container must sit outside the payment section, which
+			// payment.js hides on a service error, so the message stays visible.
+			$this->assertLessThan(
+				strpos( $html, 'class="stripe-terminal-payment-section"' ),
+				strpos( $html, $error_container )
+			);
+
+			// The log section must also be outside the payment section, so the
+			// cashier can still open it after a service error. Every <div> opened
+			// before it has been closed when it is top level.
+			$before_log = substr( $html, 0, strpos( $html, '<div class="stripe-terminal-logging-section"' ) );
+			$this->assertSame( substr_count( $before_log, '<div' ), substr_count( $before_log, '</div>' ) );
+		}
+
+		public function test_key_instructions_link_to_dashboard_and_list_permissions(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+
+			$passthrough = function ( $text ) {
+				return $text;
+			};
+			Functions\stubs(
+				array(
+					'__'         => $passthrough,
+					'esc_html__' => $passthrough,
+					'esc_html'   => $passthrough,
+					'esc_url'    => $passthrough,
+				)
+			);
+
+			$method = new \ReflectionMethod( Gateway::class, 'get_key_instructions_html' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$method->setAccessible( true );
+			}
+
+			$live = $method->invoke( $gateway, 'live' );
+			$this->assertStringContainsString( 'href="https://dashboard.stripe.com/apikeys"', $live );
+			$this->assertStringContainsString( 'Create restricted key', $live );
+			$this->assertStringContainsString( 'sk_live_ or rk_live_', $live );
+			foreach ( array( 'Terminal', 'PaymentIntents', 'Refunds', 'Account', 'Charges', 'PaymentMethods' ) as $permission ) {
+				$this->assertStringContainsString( $permission, $live );
+			}
+
+			$test = $method->invoke( $gateway, 'test' );
+			$this->assertStringContainsString( 'href="https://dashboard.stripe.com/test/apikeys"', $test );
+			$this->assertStringContainsString( 'sk_test_ or rk_test_', $test );
 		}
 
 		/**
@@ -438,7 +530,67 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			}
 			$status = $method->invoke( $gateway, 'live' );
 
-			$this->assertStringContainsString( 'Restricted Stripe API key format is valid', $status );
+			$this->assertStringContainsString( 'Restricted Stripe API key verified: it can list Terminal readers', $status );
+			$this->assertSame( array( 'rk_live_restricted' ), $gateway->probed_keys );
+			$this->assertFalse( $gateway->webhook_called );
+		}
+
+		public function test_check_key_status_reports_restricted_key_rejected_by_stripe(): void {
+			$gateway = ( new \ReflectionClass( GatewayValidationTestDouble::class ) )->newInstanceWithoutConstructor();
+			$gateway->options         = array(
+				'secret_key' => 'rk_live_revoked',
+			);
+			$gateway->probe_exception = \Stripe\Exception\AuthenticationException::factory( 'Invalid API Key provided: rk_live_****UtL3' );
+
+			Functions\stubs(
+				array(
+					'__'       => function ( $text ) {
+						return $text;
+					},
+					'esc_html' => function ( $text ) {
+						return $text;
+					},
+				)
+			);
+
+			$method = new \ReflectionMethod( Gateway::class, 'check_key_status' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$method->setAccessible( true );
+			}
+			$status = $method->invoke( $gateway, 'live' );
+
+			$this->assertStringContainsString( 'Stripe rejected this restricted key (Invalid API Key provided: rk_live_****UtL3)', $status );
+			$this->assertStringContainsString( 'Create a new restricted key', $status );
+			$this->assertStringNotContainsString( 'verified: it can list Terminal readers', $status );
+			$this->assertFalse( $gateway->webhook_called );
+		}
+
+		public function test_check_key_status_reports_restricted_key_without_terminal_permission(): void {
+			$gateway = ( new \ReflectionClass( GatewayValidationTestDouble::class ) )->newInstanceWithoutConstructor();
+			$gateway->options         = array(
+				'secret_key' => 'rk_live_no_terminal',
+			);
+			$gateway->probe_exception = \Stripe\Exception\PermissionException::factory( 'This API key does not have access to the terminal resource.' );
+
+			Functions\stubs(
+				array(
+					'__'       => function ( $text ) {
+						return $text;
+					},
+					'esc_html' => function ( $text ) {
+						return $text;
+					},
+				)
+			);
+
+			$method = new \ReflectionMethod( Gateway::class, 'check_key_status' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$method->setAccessible( true );
+			}
+			$status = $method->invoke( $gateway, 'live' );
+
+			$this->assertStringContainsString( 'This restricted key cannot list Stripe Terminal readers', $status );
+			$this->assertStringContainsString( 'set every Terminal permission and PaymentIntents to Write', $status );
 			$this->assertFalse( $gateway->webhook_called );
 		}
 
