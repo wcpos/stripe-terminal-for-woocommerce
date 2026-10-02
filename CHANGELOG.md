@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.35 - 2026-10-01
+
+### Fixed
+
+- An order paid on a Terminal reader is now completed exactly once. The `payment_intent.succeeded` webhook and the automatic order-pay submit could each complete the same order from a copy loaded while it was still unpaid, so stock was reduced twice and completion notes and emails were duplicated. Completion now takes a per-order claim (one atomic `INSERT IGNORE` on the options table, taken over after two minutes if its request died) and decides from the order re-read with the post and HPOS order caches cleared. A request that finds the claim held leaves the order to the request completing it, and the order-pay form still goes to the thank-you page. (#129)
+
 ## 0.0.34 - 2026-10-01
 
 ### Fixed

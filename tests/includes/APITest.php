@@ -35,12 +35,16 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 	 * @covers \WCPOS\WooCommercePOS\StripeTerminal\API
 	 */
 	class APITest extends TestCase {
+		private $previous_wpdb;
+
 		protected function setUp(): void {
 			parent::setUp();
 			Monkey\setUp();
+			$this->previous_wpdb = $GLOBALS['wpdb'] ?? null;
 		}
 
 		protected function tearDown(): void {
+			$GLOBALS['wpdb'] = $this->previous_wpdb;
 			\Mockery::close();
 			Monkey\tearDown();
 			parent::tearDown();
@@ -150,6 +154,10 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		 * @dataProvider webhook_transaction_provider
 		 */
 		public function test_succeeded_webhook_completes_unpaid_order( ?string $charge_id, string $transaction_id ): void {
+			$GLOBALS['wpdb'] = new \WCPOS\WooCommercePOS\StripeTerminal\Tests\Support\FakeWpdb();
+			Functions\when( 'clean_post_cache' )->justReturn( null );
+			Functions\when( 'wp_generate_uuid4' )->justReturn( 'uuid-test' );
+			Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
 			$order                = $this->mock_order();
 			$payment_method       = 'pos_cash';
 			$method_at_completion = null;
@@ -166,6 +174,8 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 			$order->shouldReceive( 'set_payment_method_title' )->with( 'Stripe Terminal' );
 			$order->shouldReceive( 'needs_payment' )->once()->andReturn( true );
+			$order->shouldReceive( 'get_id' )->andReturn( 42 );
+			$order->shouldReceive( 'is_paid' )->once()->andReturn( false );
 			$order->shouldReceive( 'set_transaction_id' )->once()->with( $transaction_id );
 			$order->shouldReceive( 'payment_complete' )->once()->with( $transaction_id )->andReturnUsing(
 				function () use ( &$method_at_completion, &$payment_method ) {
