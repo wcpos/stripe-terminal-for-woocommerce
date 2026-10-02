@@ -219,6 +219,8 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 	/**
 	 * @covers \WCPOS\WooCommercePOS\StripeTerminal\API
 	 * @covers \WCPOS\WooCommercePOS\StripeTerminal\Gateway
+	 * @covers \WCPOS\WooCommercePOS\StripeTerminal\OrderCompletion
+	 * @covers \WCPOS\WooCommercePOS\StripeTerminal\PaymentLock
 	 */
 	class CompletionRaceTest extends TestCase {
 		const CLAIM_KEY = 'stwc_lock_order_42_complete_payment';
