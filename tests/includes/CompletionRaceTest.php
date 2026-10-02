@@ -70,6 +70,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 	use PHPUnit\Framework\TestCase;
 	use WCPOS\WooCommercePOS\StripeTerminal\API;
 	use WCPOS\WooCommercePOS\StripeTerminal\Gateway;
+	use WCPOS\WooCommercePOS\StripeTerminal\OrderCompletion;
 	use WCPOS\WooCommercePOS\StripeTerminal\Tests\Support\FakeWpdb;
 
 	/**
@@ -119,6 +120,10 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 		public function get_payment_method_title() {
 			return $this->row['payment_method_title'];
+		}
+
+		public function read_meta_data( $force_read = false ) {
+			$this->row['meta'] = $this->db->read_meta( 42, (bool) $force_read );
 		}
 
 		public function get_status() {
@@ -224,6 +229,14 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		public $post_cache = array();
 		/** @var array<string,array> Per-request HPOS OrderCache: request => order id => row snapshot. */
 		public $hpos_cache = array();
+		/** @var array<string,array> Posts store: WC_Data's meta in the 'orders' object-cache group, which clean_post_cache() leaves alone. */
+		public $wc_meta_cache = array();
+		/** @var array<string,array> HPOS data caching: the data store's cached order row (without meta). */
+		public $data_row_cache = array();
+		/** @var array<string,array> HPOS data caching: the meta data store's cached meta. */
+		public $data_meta_cache = array();
+		/** @var bool WooCommerce's opt-in HPOS data caching. */
+		public $data_caching = false;
 		/** @var string The request currently running. */
 		public $request = 'webhook';
 		public $notes                        = array();
@@ -295,17 +308,81 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			if ( 42 !== $id ) {
 				return false;
 			}
-			if ( $this->hpos && isset( $this->hpos_cache[ $this->request ][ $id ] ) ) {
+			if ( $this->hpos ) {
+				if ( ! isset( $this->hpos_cache[ $this->request ][ $id ] ) ) {
+					$this->hpos_cache[ $this->request ][ $id ] = $this->read_hpos_row( $id );
+				}
+
 				return new RaceOrder( $this, $this->hpos_cache[ $this->request ][ $id ] );
 			}
 			if ( ! isset( $this->post_cache[ $this->request ][ $id ] ) ) {
 				$this->post_cache[ $this->request ][ $id ] = $this->row;
 			}
+			$row         = $this->post_cache[ $this->request ][ $id ];
+			$row['meta'] = $this->read_meta( $id, false );
+
+			return new RaceOrder( $this, $row );
+		}
+
+		/** The order's meta as WC_Data::read_meta_data() sees it in the current request. */
+		public function read_meta( int $id, bool $force_read ): array {
 			if ( $this->hpos ) {
-				$this->hpos_cache[ $this->request ][ $id ] = $this->post_cache[ $this->request ][ $id ];
+				// The HPOS meta store reads the database unless data caching is on;
+				// then it serves its cache even for a forced read.
+				if ( ! $this->data_caching ) {
+					return $this->row['meta'];
+				}
+				if ( ! isset( $this->data_meta_cache[ $this->request ][ $id ] ) ) {
+					$this->data_meta_cache[ $this->request ][ $id ] = $this->row['meta'];
+				}
+
+				return $this->data_meta_cache[ $this->request ][ $id ];
+			}
+			if ( $force_read || ! isset( $this->wc_meta_cache[ $this->request ][ $id ] ) ) {
+				$this->wc_meta_cache[ $this->request ][ $id ] = $this->row['meta'];
 			}
 
-			return new RaceOrder( $this, $this->post_cache[ $this->request ][ $id ] );
+			return $this->wc_meta_cache[ $this->request ][ $id ];
+		}
+
+		/** OrdersTableDataStore: the row from the database, or from its cache when data caching is on. */
+		private function read_hpos_row( int $id ): array {
+			if ( ! $this->data_caching ) {
+				return $this->row;
+			}
+			if ( ! isset( $this->data_row_cache[ $this->request ][ $id ] ) ) {
+				$row = $this->row;
+				unset( $row['meta'] );
+				$this->data_row_cache[ $this->request ][ $id ] = $row;
+			}
+			$row         = $this->data_row_cache[ $this->request ][ $id ];
+			$row['meta'] = $this->read_meta( $id, false );
+
+			return $row;
+		}
+
+		/**
+		 * Load WooCommerce's cache classes (separate-process tests only) and
+		 * route their evictions to this request's caches.
+		 */
+		private function use_wc_cache_stubs( bool $data_caching, bool $row_delete_result = true ): void {
+			require_once __DIR__ . '/Support/woocommerce-cache-stubs.php';
+			$test                      = $this;
+			$this->hpos                = true;
+			$this->data_caching        = $data_caching;
+			$GLOBALS['stwc_test_cache'] = array(
+				'data_caching'       => $data_caching,
+				'row_delete_result'  => $row_delete_result,
+				'order_cache_remove' => function ( int $id ) use ( $test ) {
+					unset( $test->hpos_cache[ $test->request ][ $id ] );
+				},
+				'data_row_clear'     => function ( int $id ) use ( $test ) {
+					unset( $test->data_row_cache[ $test->request ][ $id ] );
+				},
+				'data_meta_clear'    => function ( int $id ) use ( $test ) {
+					unset( $test->data_meta_cache[ $test->request ][ $id ] );
+				},
+			);
 		}
 
 		public function write( array $copy, array $fields, array $meta ): void {
@@ -426,25 +503,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		 * @preserveGlobalState disabled
 		 */
 		public function test_hpos_order_cache_is_cleared_before_completion(): void {
-			$test       = $this;
-			$this->hpos = true;
-			if ( ! class_exists( 'Automattic\WooCommerce\Caches\OrderCache' ) ) {
-				eval( 'namespace Automattic\WooCommerce\Caches; class OrderCache { public static $remove; public function remove( $id ) { ( self::$remove )( $id ); } }' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Separate-process test double for a WooCommerce class.
-			}
-			\Automattic\WooCommerce\Caches\OrderCache::$remove = function ( $id ) use ( $test ) {
-				unset( $test->hpos_cache[ $test->request ][ (int) $id ] );
-			};
-			Functions\when( 'wc_get_container' )->alias(
-				function () {
-					return new class() {
-						public function get( $id ) {
-							TestCase::assertSame( 'Automattic\WooCommerce\Caches\OrderCache', $id );
-
-							return new \Automattic\WooCommerce\Caches\OrderCache();
-						}
-					};
-				}
-			);
+			$this->use_wc_cache_stubs( false );
 
 			$this->in_request( 'order-pay' );
 			wc_get_order( 42 );
@@ -456,6 +515,62 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->run_order_pay();
 
 			$this->assert_completed_once();
+		}
+
+		/**
+		 * With WooCommerce's opt-in HPOS data caching, the data store serves the
+		 * order row from its own cache, which the reload must clear too (#131).
+		 *
+		 * @runInSeparateProcess
+		 * @preserveGlobalState disabled
+		 */
+		public function test_hpos_data_cache_is_cleared_before_completion(): void {
+			$this->use_wc_cache_stubs( true );
+
+			$this->in_request( 'order-pay' );
+			wc_get_order( 42 );
+
+			$this->in_request( 'webhook' );
+			$this->run_webhook();
+
+			$this->in_request( 'order-pay' );
+			$this->run_order_pay();
+
+			$this->assert_completed_once();
+		}
+
+		/**
+		 * WooCommerce clears the HPOS meta cache only when the row-cache delete
+		 * succeeds; when the row entry has already expired, the reload must
+		 * still read fresh meta (square-terminal-for-woocommerce #34).
+		 *
+		 * @runInSeparateProcess
+		 * @preserveGlobalState disabled
+		 */
+		public function test_reload_reads_fresh_meta_when_the_hpos_row_cache_entry_is_gone(): void {
+			$this->use_wc_cache_stubs( true, false );
+			$order = wc_get_order( 42 );
+			// Another request writes the order; this request's row entry has expired.
+			$this->row['meta']['_stripe_terminal_payment_intent_id'] = 'pi_newer';
+			unset( $this->data_row_cache[ $this->request ][42] );
+
+			$fresh = OrderCompletion::reload_order( $order );
+
+			$this->assertSame( 'pi_newer', $fresh->get_meta( '_stripe_terminal_payment_intent_id' ) );
+		}
+
+		/**
+		 * On the posts store, WC_Data serves meta from the 'orders' object-cache
+		 * group, which clean_post_cache() leaves alone.
+		 */
+		public function test_reload_reads_fresh_meta_on_the_posts_store(): void {
+			$order = wc_get_order( 42 );
+			// Another request writes the order after this request loaded it.
+			$this->row['meta']['_stripe_terminal_payment_intent_id'] = 'pi_newer';
+
+			$fresh = OrderCompletion::reload_order( $order );
+
+			$this->assertSame( 'pi_newer', $fresh->get_meta( '_stripe_terminal_payment_intent_id' ) );
 		}
 
 		private function in_request( string $request ): void {
