@@ -58,6 +58,12 @@ class OrderCompletion {
 	/**
 	 * Reload an order after clearing the posts and HPOS order caches.
 	 *
+	 * On the posts store, WC_Data keeps meta in its own object cache, which
+	 * clean_post_cache() leaves alone, so the meta is re-read.
+	 * With HPOS data caching on, the data store caches the row and its meta;
+	 * the meta is cleared directly as well, because WooCommerce skips it when
+	 * the row-cache delete fails (#131).
+	 *
 	 * @param \WC_Order $order Original order.
 	 * @return \WC_Order Reloaded order, or the original when unavailable.
 	 */
@@ -69,7 +75,29 @@ class OrderCompletion {
 		if ( function_exists( 'wc_get_container' ) && class_exists( \Automattic\WooCommerce\Caches\OrderCache::class ) ) {
 			wc_get_container()->get( \Automattic\WooCommerce\Caches\OrderCache::class )->remove( $id );
 		}
-		$fresh = function_exists( 'wc_get_order' ) ? wc_get_order( $id ) : $order;
+		if (
+			function_exists( 'wc_get_container' )
+			&& class_exists( \Automattic\WooCommerce\Utilities\OrderUtil::class )
+			&& method_exists( \Automattic\WooCommerce\Utilities\OrderUtil::class, 'custom_orders_table_datastore_cache_enabled' )
+			&& \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_datastore_cache_enabled()
+			&& class_exists( \Automattic\WooCommerce\Internal\DataStores\Orders\OrdersTableDataStore::class )
+		) {
+			$data_store = wc_get_container()->get( \Automattic\WooCommerce\Internal\DataStores\Orders\OrdersTableDataStore::class );
+			if ( method_exists( $data_store, 'clear_cached_data' ) ) {
+				$data_store->clear_cached_data( array( $id ) );
+			}
+			if ( class_exists( \Automattic\WooCommerce\Internal\DataStores\Orders\OrdersTableDataStoreMeta::class ) ) {
+				$meta_store = wc_get_container()->get( \Automattic\WooCommerce\Internal\DataStores\Orders\OrdersTableDataStoreMeta::class );
+				if ( method_exists( $meta_store, 'clear_cached_data' ) ) {
+					$meta_store->clear_cached_data( array( $id ) );
+				}
+			}
+		}
+
+		$fresh = function_exists( 'wc_get_order' ) ? wc_get_order( $id ) : null;
+		if ( $fresh instanceof \WC_Order && method_exists( $fresh, 'read_meta_data' ) ) {
+			$fresh->read_meta_data( true );
+		}
 		return $fresh instanceof \WC_Order ? $fresh : $order;
 	}
 }

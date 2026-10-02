@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.36 - 2026-10-02
+
+### Fixed
+
+- With WooCommerce's opt-in HPOS data caching turned on, an order could still be completed twice, and its stock reduced twice, despite the 0.0.35 fix. The re-read of the order now also clears the HPOS data store's cached row and meta. The meta is cleared directly because WooCommerce skips it when the row-cache delete fails. On the posts store, the re-read now also refreshes the order's meta. (#131)
+
 ## 0.0.35 - 2026-10-01
 
 ### Fixed
