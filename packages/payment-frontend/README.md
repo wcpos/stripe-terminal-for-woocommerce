@@ -90,7 +90,7 @@ Built files are output to:
 
 ## Integration with WordPress
 
-The built `payment.js` and `payment.css` files should be enqueued in your WordPress plugin:
+The built files are enqueued through `Assets::url()`, which maps the source name to the hashed filename via `assets/manifest.json`:
 
 ```php
 public function enqueue_payment_scripts(): void {
@@ -104,7 +104,7 @@ public function enqueue_payment_scripts(): void {
     // Enqueue the payment CSS
     wp_enqueue_style(
         'stripe-terminal-payment',
-        SUTWC_PLUGIN_URL . 'assets/css/payment.css',
+        Assets::url( 'css/payment.css' ),
         array(),
         SUTWC_VERSION
     );
@@ -112,7 +112,7 @@ public function enqueue_payment_scripts(): void {
     // Enqueue the payment script
     wp_enqueue_script(
         'stripe-terminal-payment',
-        SUTWC_PLUGIN_URL . 'assets/js/payment.js',
+        Assets::url( 'js/payment.js' ),
         array( 'jquery' ),
         SUTWC_VERSION,
         true
