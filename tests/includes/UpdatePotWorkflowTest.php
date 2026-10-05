@@ -50,8 +50,25 @@ class UpdatePotWorkflowTest extends TestCase {
 
 		$this->assertIsString( $workflow );
 		$this->assertStringContainsString( 'uses: peter-evans/create-pull-request@', $workflow );
-		$this->assertStringContainsString( 'pull-requests: write', $workflow );
+		$this->assertStringContainsString( 'permission-pull-requests: write', $workflow );
 		$this->assertStringNotContainsString( 'git-auto-commit-action', $workflow );
+	}
+
+	/**
+	 * Enterprise policy forbids GITHUB_TOKEN from creating PRs, so the PR step
+	 * must use the wcpos-mini App installation token without a PAT secret.
+	 */
+	public function test_workflow_opens_the_pull_request_with_the_wcpos_mini_app_token(): void {
+		$workflow = file_get_contents( self::WORKFLOW );
+
+		$this->assertIsString( $workflow );
+		$this->assertStringContainsString( 'uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1', $workflow );
+		$this->assertStringContainsString( 'client-id: ${{ vars.WCPOS_MINI_APP_ID }}', $workflow );
+		$this->assertStringContainsString( 'private-key: ${{ secrets.WCPOS_MINI_APP_PRIVATE_KEY }}', $workflow );
+		$this->assertStringContainsString( 'repositories: ${{ github.event.repository.name }}', $workflow );
+		$this->assertStringContainsString( 'token: ${{ steps.app-token.outputs.token }}', $workflow );
+		$this->assertStringNotContainsString( 'POT_PR_TOKEN', $workflow );
+		$this->assertStringNotContainsString( 'secrets.GITHUB_TOKEN', $workflow );
 	}
 
 	/**
