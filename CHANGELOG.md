@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.37 - 2026-10-05
+
+### Fixed
+
+- The order-pay script and stylesheet are now built with a content hash in the filename (`payment.<hash>.js`) and enqueued through a build manifest. Previously they were served as `payment.js?ver=<version>`, and a cache that ignores the query string (a "remove query strings" optimiser setting, a CDN, or the WCPOS desktop app's embedded browser) kept serving a previous release's script against the updated PHP. The stale script failed its first request and showed the generic "Stripe Terminal service is not properly configured" message even though the API keys were fine and the same site worked from a web browser.
+
 ## 0.0.36 - 2026-10-02
 
 ### Fixed

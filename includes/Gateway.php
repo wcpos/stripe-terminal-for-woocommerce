@@ -691,10 +691,12 @@ class Gateway extends WC_Payment_Gateway {
 
 		global $wp;
 
-			// Enqueue the payment CSS.
+			// Enqueue the payment CSS. Built filenames are content-hashed (see
+		// Assets) so caches that ignore the ?ver= query string still see a
+		// new URL after an update.
 		wp_enqueue_style(
 			'stripe-terminal-payment',
-			STWC_PLUGIN_URL . 'assets/css/payment.css',
+			Assets::url( 'css/payment.css' ),
 			array(),
 			STWC_VERSION
 		);
@@ -702,7 +704,7 @@ class Gateway extends WC_Payment_Gateway {
 			// Enqueue the payment script.
 		wp_enqueue_script(
 			'stripe-terminal-payment',
-			STWC_PLUGIN_URL . 'assets/js/payment.js',
+			Assets::url( 'js/payment.js' ),
 			array( 'jquery' ),
 			STWC_VERSION,
 			true

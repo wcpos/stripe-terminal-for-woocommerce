@@ -46,7 +46,7 @@ To build the production version (minified):
 npm run build
 ```
 
-This will create `payment.js` in the `assets/js/` directory and `payment.css` in the `assets/css/` directory that can be included in your WordPress plugin.
+This writes `assets/js/payment.<hash>.js`, `assets/css/payment.<hash>.css` and `assets/manifest.json`. The hash is the file's content hash, so the URL changes whenever the file does and a cache that ignores the `?ver=` query string cannot serve a previous release's script. The plugin resolves the hashed names through the manifest (`includes/Assets.php`); each build removes the previous build's hashed files.
 
 ## Usage
 
@@ -81,10 +81,11 @@ payment-frontend/
 
 Built files are output to:
 ├── assets/
+│   ├── manifest.json       # Maps js/payment.js and css/payment.css to the hashed files
 │   ├── js/
-│   │   └── payment.js      # Built JavaScript file
+│   │   └── payment.<hash>.js
 │   └── css/
-│       └── payment.css     # Built CSS file (production only)
+│       └── payment.<hash>.css
 ```
 
 ## Integration with WordPress
