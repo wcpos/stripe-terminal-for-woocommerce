@@ -19,6 +19,12 @@ use WP_Error;
  * Core service for handling Stripe Terminal operations.
  */
 class StripeTerminalService {
+	/**
+	 * Transient value for a location whose name could not be fetched; retried after an hour.
+	 * An array, so a location literally named like any marker string can never collide with it.
+	 */
+	private const LOCATION_NAME_UNKNOWN = array( 'unknown' => true );
+
 	use StripeErrorHandler;
 
 	/**
@@ -831,6 +837,51 @@ class StripeTerminalService {
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'list_all_locations_error' );
 		}
+	}
+
+	/**
+	 * Resolve a Terminal location's display name for cashier-facing copy.
+	 *
+	 * The POS shows the name beside the reader (an id like tml_… is not something a cashier
+	 * reads). Cached for a week per location; a failed lookup returns null and never blocks a
+	 * descriptor or a bootstrap — the id still travels, the name is a courtesy.
+	 *
+	 * @param string $location_id Terminal location id (tml_…).
+	 *
+	 * @return null|string Display name, or null when unknown.
+	 */
+	public function get_location_display_name( string $location_id ): ?string {
+		if ( '' === $location_id ) {
+			return null;
+		}
+		$cache_key = 'stwc_location_name_' . substr( md5( $this->api_key . '|' . $location_id ), 0, 12 );
+		$cached    = get_transient( $cache_key );
+		if ( \is_array( $cached ) ) {
+			return null;
+		}
+		if ( \is_string( $cached ) && '' !== $cached ) {
+			return $cached;
+		}
+		try {
+			\Stripe\Stripe::setApiKey( $this->api_key );
+			$location = $this->with_read_timeout(
+				function () use ( $location_id ) {
+					return \Stripe\Terminal\Location::retrieve( $location_id );
+				}
+			);
+		} catch ( Exception $e ) {
+			Logger::log( \sprintf( 'get_location_display_name: Location::retrieve(%s) failed with %s: %s; the POS shows the reader without a location name (not retried for an hour).', $location_id, \get_class( $e ), $e->getMessage() ) );
+			// A restricted key or an outage must not cost a Stripe read on every descriptor build.
+			set_transient( $cache_key, self::LOCATION_NAME_UNKNOWN, 3600 );
+			return null;
+		}
+		$name = isset( $location->display_name ) ? trim( (string) $location->display_name ) : '';
+		if ( '' === $name ) {
+			set_transient( $cache_key, self::LOCATION_NAME_UNKNOWN, 3600 );
+			return null;
+		}
+		set_transient( $cache_key, $name, 604800 );
+		return $name;
 	}
 
 	/**

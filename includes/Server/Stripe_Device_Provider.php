@@ -66,8 +66,9 @@ class Stripe_Device_Provider extends \WCPOS\WooCommercePOSPro\Payments\Device\Ab
 				),
 			),
 			'provider_data' => array(
-				'location_id' => '' !== $location ? $location : null,
-				'test_mode'   => Settings::is_test_mode(),
+				'location_id'   => '' !== $location ? $location : null,
+				'location_name' => '' !== $location ? $this->service->get_location_display_name( $location ) : null,
+				'test_mode'     => Settings::is_test_mode(),
 			),
 		);
 	}
@@ -90,7 +91,8 @@ class Stripe_Device_Provider extends \WCPOS\WooCommercePOSPro\Payments\Device\Ab
 		return array(
 			'handoff'    => array(
 				'connection_token' => $token['secret'],
-				'location_id' => $location,
+				'location_id'      => $location,
+				'location_name'    => $this->service->get_location_display_name( $location ),
 			),
 			'expires_at' => null,
 		);
