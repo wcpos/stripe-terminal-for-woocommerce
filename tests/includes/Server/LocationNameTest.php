@@ -18,10 +18,12 @@ class LocationNameTest extends ServerTestCase {
 	/**
 	 * Service bound to a fake Stripe HTTP client.
 	 *
-	 * @param array $responses Queued responses.
+	 * @param array  $responses Queued responses.
+	 * @param string $api_key   API key the service is built with.
 	 */
-	private function service( array $responses ): StripeTerminalService {
-		$service = new StripeTerminalService( 'sk_test_fake' );
+	private function service( array $responses, string $api_key = 'sk_test_fake' ): StripeTerminalService {
+		// The constructor installs the real client, so the fake goes in afterwards.
+		$service    = new StripeTerminalService( $api_key );
 		$this->http = new StripeHttpClientFake( $responses );
 		\Stripe\ApiRequestor::setHttpClient( $this->http );
 		return $service;
@@ -49,6 +51,7 @@ class LocationNameTest extends ServerTestCase {
 			)
 		);
 		$this->assertSame( 'London Shop', $service->get_location_display_name( 'tml_test' ) );
+		$this->assertCount( 1, $this->http->requests );
 		$this->assertCount( 1, $stored );
 		$this->assertSame( 'London Shop', $stored[0][1] );
 		$this->assertSame( 604800, $stored[0][2] );
@@ -60,6 +63,7 @@ class LocationNameTest extends ServerTestCase {
 		$service = $this->service( array() );
 		$this->assertSame( 'Cached Shop', $service->get_location_display_name( 'tml_test' ) );
 		$this->assertNull( $service->get_location_display_name( '' ) );
+		$this->assertCount( 0, $this->http->requests );
 	}
 
 	/**
@@ -77,12 +81,15 @@ class LocationNameTest extends ServerTestCase {
 		);
 		$service = $this->service( array( $this->error( 'resource_missing' ) ) );
 		$this->assertNull( $service->get_location_display_name( 'tml_missing' ) );
+		$this->assertCount( 1, $this->http->requests );
 		$this->assertCount( 1, $stored );
-		$this->assertSame( '__unknown__', $stored[0][1] );
+		// An array marker: a location literally named "__unknown__" can never be mistaken for it.
+		$this->assertSame( array( 'unknown' => true ), $stored[0][1] );
 		$this->assertSame( 3600, $stored[0][2] );
 		// The remembered refusal is served without a request.
-		Functions\when( 'get_transient' )->justReturn( '__unknown__' );
+		Functions\when( 'get_transient' )->justReturn( array( 'unknown' => true ) );
 		$this->assertNull( $this->service( array() )->get_location_display_name( 'tml_missing' ) );
+		$this->assertCount( 0, $this->http->requests );
 	}
 
 	/** One key per API key and location: two shops, or test and live, never share a name. */
@@ -100,12 +107,14 @@ class LocationNameTest extends ServerTestCase {
 			'object'       => 'terminal.location',
 			'display_name' => 'Shop',
 		);
-		$this->service( array( $this->ok( $body ), $this->ok( $body ) ) );
-		$test_key = new StripeTerminalService( 'sk_test_fake' );
+		// Each service is built before its fake is installed, so no lookup reaches the network.
+		$test_key = $this->service( array( $this->ok( $body ), $this->ok( $body ) ) );
 		$test_key->get_location_display_name( 'tml_a' );
 		$test_key->get_location_display_name( 'tml_b' );
-		$this->service( array( $this->ok( $body ) ) );
-		( new StripeTerminalService( 'sk_live_fake' ) )->get_location_display_name( 'tml_a' );
+		$this->assertCount( 2, $this->http->requests );
+		$live_key = $this->service( array( $this->ok( $body ) ), 'sk_live_fake' );
+		$live_key->get_location_display_name( 'tml_a' );
+		$this->assertCount( 1, $this->http->requests );
 		$this->assertCount( 3, $keys );
 		$this->assertCount( 3, array_unique( $keys ) );
 	}

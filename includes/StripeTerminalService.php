@@ -21,8 +21,9 @@ use WP_Error;
 class StripeTerminalService {
 	/**
 	 * Transient value for a location whose name could not be fetched; retried after an hour.
+	 * An array, so a location literally named like any marker string can never collide with it.
 	 */
-	private const LOCATION_NAME_UNKNOWN = '__unknown__';
+	private const LOCATION_NAME_UNKNOWN = array( 'unknown' => true );
 
 	use StripeErrorHandler;
 
@@ -855,7 +856,7 @@ class StripeTerminalService {
 		}
 		$cache_key = 'stwc_location_name_' . substr( md5( $this->api_key . '|' . $location_id ), 0, 12 );
 		$cached    = get_transient( $cache_key );
-		if ( self::LOCATION_NAME_UNKNOWN === $cached ) {
+		if ( \is_array( $cached ) ) {
 			return null;
 		}
 		if ( \is_string( $cached ) && '' !== $cached ) {
