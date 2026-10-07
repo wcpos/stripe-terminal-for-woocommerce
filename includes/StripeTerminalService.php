@@ -19,6 +19,11 @@ use WP_Error;
  * Core service for handling Stripe Terminal operations.
  */
 class StripeTerminalService {
+	/**
+	 * Transient value for a location whose name could not be fetched; retried after an hour.
+	 */
+	private const LOCATION_NAME_UNKNOWN = '__unknown__';
+
 	use StripeErrorHandler;
 
 	/**
@@ -850,6 +855,9 @@ class StripeTerminalService {
 		}
 		$cache_key = 'stwc_location_name_' . substr( md5( $this->api_key . '|' . $location_id ), 0, 12 );
 		$cached    = get_transient( $cache_key );
+		if ( self::LOCATION_NAME_UNKNOWN === $cached ) {
+			return null;
+		}
 		if ( \is_string( $cached ) && '' !== $cached ) {
 			return $cached;
 		}
@@ -861,11 +869,14 @@ class StripeTerminalService {
 				}
 			);
 		} catch ( Exception $e ) {
-			Logger::log( \sprintf( 'get_location_display_name: Location::retrieve(%s) failed with %s: %s; the POS shows the reader without a location name.', $location_id, \get_class( $e ), $e->getMessage() ) );
+			Logger::log( \sprintf( 'get_location_display_name: Location::retrieve(%s) failed with %s: %s; the POS shows the reader without a location name (not retried for an hour).', $location_id, \get_class( $e ), $e->getMessage() ) );
+			// A restricted key or an outage must not cost a Stripe read on every descriptor build.
+			set_transient( $cache_key, self::LOCATION_NAME_UNKNOWN, 3600 );
 			return null;
 		}
 		$name = isset( $location->display_name ) ? trim( (string) $location->display_name ) : '';
 		if ( '' === $name ) {
+			set_transient( $cache_key, self::LOCATION_NAME_UNKNOWN, 3600 );
 			return null;
 		}
 		set_transient( $cache_key, $name, 604800 );

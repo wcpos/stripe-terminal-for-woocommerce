@@ -62,10 +62,51 @@ class LocationNameTest extends ServerTestCase {
 		$this->assertNull( $service->get_location_display_name( '' ) );
 	}
 
-	/** Stripe refusing the lookup is a null name, never an error the bootstrap has to carry. */
-	public function test_failed_lookup_is_null(): void {
+	/**
+	 * Stripe refusing the lookup is a null name, never an error the bootstrap has to carry — and
+	 * the refusal is remembered for an hour so a restricted key does not cost a read per descriptor.
+	 */
+	public function test_failed_lookup_is_null_and_not_retried(): void {
 		Functions\when( 'get_transient' )->justReturn( false );
+		$stored = array();
+		Functions\when( 'set_transient' )->alias(
+			function ( $key, $value, $ttl ) use ( &$stored ) {
+				$stored[] = array( $key, $value, $ttl );
+				return true;
+			}
+		);
 		$service = $this->service( array( $this->error( 'resource_missing' ) ) );
 		$this->assertNull( $service->get_location_display_name( 'tml_missing' ) );
+		$this->assertCount( 1, $stored );
+		$this->assertSame( '__unknown__', $stored[0][1] );
+		$this->assertSame( 3600, $stored[0][2] );
+		// The remembered refusal is served without a request.
+		Functions\when( 'get_transient' )->justReturn( '__unknown__' );
+		$this->assertNull( $this->service( array() )->get_location_display_name( 'tml_missing' ) );
+	}
+
+	/** One key per API key and location: two shops, or test and live, never share a name. */
+	public function test_cache_keys_are_separate_per_key_and_location(): void {
+		Functions\when( 'get_transient' )->justReturn( false );
+		$keys = array();
+		Functions\when( 'set_transient' )->alias(
+			function ( $key ) use ( &$keys ) {
+				$keys[] = $key;
+				return true;
+			}
+		);
+		$body = array(
+			'id'           => 'tml_a',
+			'object'       => 'terminal.location',
+			'display_name' => 'Shop',
+		);
+		$this->service( array( $this->ok( $body ), $this->ok( $body ) ) );
+		$test_key = new StripeTerminalService( 'sk_test_fake' );
+		$test_key->get_location_display_name( 'tml_a' );
+		$test_key->get_location_display_name( 'tml_b' );
+		$this->service( array( $this->ok( $body ) ) );
+		( new StripeTerminalService( 'sk_live_fake' ) )->get_location_display_name( 'tml_a' );
+		$this->assertCount( 3, $keys );
+		$this->assertCount( 3, array_unique( $keys ) );
 	}
 }
