@@ -834,6 +834,45 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Resolve a Terminal location's display name for cashier-facing copy.
+	 *
+	 * The POS shows the name beside the reader (an id like tml_… is not something a cashier
+	 * reads). Cached for a week per location; a failed lookup returns null and never blocks a
+	 * descriptor or a bootstrap — the id still travels, the name is a courtesy.
+	 *
+	 * @param string $location_id Terminal location id (tml_…).
+	 *
+	 * @return null|string Display name, or null when unknown.
+	 */
+	public function get_location_display_name( string $location_id ): ?string {
+		if ( '' === $location_id ) {
+			return null;
+		}
+		$cache_key = 'stwc_location_name_' . substr( md5( $this->api_key . '|' . $location_id ), 0, 12 );
+		$cached    = get_transient( $cache_key );
+		if ( \is_string( $cached ) && '' !== $cached ) {
+			return $cached;
+		}
+		try {
+			\Stripe\Stripe::setApiKey( $this->api_key );
+			$location = $this->with_read_timeout(
+				function () use ( $location_id ) {
+					return \Stripe\Terminal\Location::retrieve( $location_id );
+				}
+			);
+		} catch ( Exception $e ) {
+			Logger::log( \sprintf( 'get_location_display_name: Location::retrieve(%s) failed with %s: %s; the POS shows the reader without a location name.', $location_id, \get_class( $e ), $e->getMessage() ) );
+			return null;
+		}
+		$name = isset( $location->display_name ) ? trim( (string) $location->display_name ) : '';
+		if ( '' === $name ) {
+			return null;
+		}
+		set_transient( $cache_key, $name, 604800 );
+		return $name;
+	}
+
+	/**
 	 * Register a Stripe Terminal reader.
 	 *
 	 * @param string $location_id       The location ID.

@@ -65,11 +65,14 @@ class StripeDeviceProviderTest extends ServerTestCase {
 				),
 				'provider_data' => array(
 					'location_id' => null,
+					'location_name' => null,
 					'test_mode' => true,
 				),
 			),
 			$this->device->describe( new \WC_Payment_Gateway() )
 		);
+		// No location, no lookup: the mock would throw on an unexpected call.
+		$this->service->shouldReceive( 'get_location_display_name' )->once()->with( 'tml_live' )->andReturn( 'London Shop' );
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = array(
 			'wcpos_location_test' => 'tml_test',
 			'wcpos_location_live' => 'tml_live',
@@ -78,6 +81,7 @@ class StripeDeviceProviderTest extends ServerTestCase {
 		$this->assertSame(
 			array(
 				'location_id' => 'tml_live',
+				'location_name' => 'London Shop',
 				'test_mode' => false,
 			),
 			$this->device->describe( new \WC_Payment_Gateway() )['provider_data']
@@ -98,11 +102,14 @@ class StripeDeviceProviderTest extends ServerTestCase {
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['wcpos_location_test'] = 'tml_test';
 		$error = new \WP_Error( 'stripe_token_error', 'Unavailable' );
 		$this->service->shouldReceive( 'get_connection_token' )->twice()->andReturn( array( 'secret' => 'pst_test' ), $error );
+		// The name rides with a good token only; a failed token never asks for it.
+		$this->service->shouldReceive( 'get_location_display_name' )->once()->with( 'tml_test' )->andReturn( 'London Shop' );
 		$this->assertSame(
 			array(
 				'handoff' => array(
 					'connection_token' => 'pst_test',
 					'location_id' => 'tml_test',
+					'location_name' => 'London Shop',
 				),
 				'expires_at' => null,
 			),
