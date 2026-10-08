@@ -1189,7 +1189,7 @@ class StripeTerminalService {
 	 */
 	private function handle_payment_intent_succeeded( \Stripe\PaymentIntent $payment_intent ) {
 		$order_id = $payment_intent->metadata->order_id ?? null;
-		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) ) ) {
 			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
 			return array(
 				'success' => true,
@@ -1253,7 +1253,7 @@ class StripeTerminalService {
 			}
 		);
 		$order_id       = $payment_intent->metadata->order_id ?? null;
-		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) ) ) {
 			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
 			return array(
 				'success' => true,
@@ -1332,7 +1332,7 @@ class StripeTerminalService {
 	 */
 	private function handle_payment_intent_failed( \Stripe\PaymentIntent $payment_intent ) {
 		$order_id = $payment_intent->metadata->order_id ?? null;
-		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) ) ) {
 			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
 			return array(
 				'success' => true,

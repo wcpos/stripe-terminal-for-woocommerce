@@ -325,11 +325,33 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$order   = \Mockery::mock( \WC_Order::class );
 			Functions\when( 'wc_get_order' )->justReturn( $order );
 			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
-				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured' ),
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'server' ),
 			);
 			try {
 				Functions\expect( 'wcpos_pro_order_pay_refund' )->once()->with( $order, 5.0, 'why' )->andReturn( true );
 				$this->assertTrue( $gateway->process_refund( 42, 5.0, 'why' ) );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
+
+		/** A keypad leg plus an old-panel charge: Pro refuses to allocate, so the old path refunds the charge. */
+		public function test_process_refund_falls_back_to_the_old_path_when_pro_cannot_allocate_a_mixed_order(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( 'ch_old' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_livemode' )->andReturn( '' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'server' ),
+			);
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_refund' )->once()->andReturn( new \WP_Error( 'wcpos_refund_not_allocatable' ) );
+				$result = $gateway->process_refund( 42, 50.0, 'why' );
+				// The old path ran: with no Stripe service configured it answers its own error, not Pro's.
+				$this->assertInstanceOf( \WP_Error::class, $result );
+				$this->assertSame( 'refund_service_unavailable', $result->get_error_code() );
 			} finally {
 				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
 			}
@@ -343,8 +365,10 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			Functions\when( 'wc_get_order' )->justReturn( $order );
 			Functions\when( '__' )->returnArg();
 			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
-				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'pending' ),
-				array( 'method_id' => 'other_gateway', 'status' => 'captured' ),
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'pending', 'capture_mode' => 'server' ),
+				array( 'method_id' => 'other_gateway', 'status' => 'captured', 'capture_mode' => 'server' ),
+				// Free mints this one for a sale the old panel completed; Pro cannot refund it.
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'webview' ),
 			);
 			try {
 				Functions\expect( 'wcpos_pro_order_pay_refund' )->never();

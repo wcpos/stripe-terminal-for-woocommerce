@@ -19,8 +19,14 @@ final class Legacy_Adoption {
 	public const META_INTENT = '_stripe_terminal_payment_intent_id';
 	/** The old panel's last observed status. */
 	public const META_STATUS = '_stripe_terminal_payment_status';
-	/** Statuses that are over: nothing to resume. */
-	public const FINAL_STATUSES = array( 'succeeded', 'canceled' );
+	/**
+	 * Whether Pro adopted this intent from the old panel; its events then belong to Pro.
+	 *
+	 * @param string $intent_id Stripe PaymentIntent id.
+	 */
+	public static function is_adopted( string $intent_id ): bool {
+		return '' !== $intent_id && \function_exists( 'wcpos_pro_payment_id_for_action' ) && null !== wcpos_pro_payment_id_for_action( self::PROVIDER, $intent_id );
+	}
 
 	/** Run the next page of adoption, until every eligible order has been seen. */
 	public static function upgrade(): void {
@@ -31,7 +37,12 @@ final class Legacy_Adoption {
 		// when the pass began are candidates, so a sale taken after the upgrade stays on the old
 		// path and never gets a row.
 		$boundary = (int) get_option( 'stwc_adoption_boundary', 0 );
+		$started  = (int) get_option( 'stwc_adoption_started', 0 );
 		if ( 0 === $boundary ) {
+			// An attempt the old panel starts on an older order after this moment moves the
+			// order's modified time past it; such orders are skipped too.
+			$started = time();
+			update_option( 'stwc_adoption_started', $started, false );
 			$latest   = wc_get_orders(
 				array(
 					'type' => 'shop_order',
@@ -57,14 +68,26 @@ final class Legacy_Adoption {
 			)
 		);
 		foreach ( $orders as $order ) {
-			if ( $order->get_id() > $boundary ) {
+			$modified = $order->get_date_modified();
+			if ( $order->get_id() > $boundary || ( $modified && $modified->getTimestamp() > $started ) ) {
 				continue;
 			}
+			// The old panel writes the status meta only at an outcome (`succeeded`, `failed`);
+			// an attempt still in flight has an intent and no status, on an order still
+			// waiting for payment. Anything else is over and gets no row.
 			$intent = (string) $order->get_meta( self::META_INTENT );
-			if ( '' === $intent || in_array( (string) $order->get_meta( self::META_STATUS ), self::FINAL_STATUSES, true ) || wcpos_pro_payment_id_for_action( self::PROVIDER, $intent ) ) {
+			if ( '' === $intent || '' !== (string) $order->get_meta( self::META_STATUS ) || $order->is_paid() || ! $order->needs_payment() ) {
 				continue;
 			}
-			$result = wcpos_pro_adopt_legacy_attempt( $order, Settings::GATEWAY_ID, $intent, (string) $order->get_total(), $order->get_currency() );
+			$result = self::with_order_lock(
+				$order->get_id(),
+				static function () use ( $order, $intent ) {
+					if ( self::is_adopted( $intent ) ) {
+						return null;
+					}
+					return wcpos_pro_adopt_legacy_attempt( $order, Settings::GATEWAY_ID, $intent, (string) $order->get_total(), $order->get_currency() );
+				}
+			);
 			if ( is_wp_error( $result ) ) {
 				wc_get_logger()->error( 'Legacy Stripe Terminal adoption failed for order ' . $order->get_id() . ': ' . $result->get_error_code(), array( 'source' => 'stripe-terminal' ) );
 			}
@@ -73,9 +96,24 @@ final class Legacy_Adoption {
 		if ( count( $orders ) < self::PAGE_SIZE || ( $last && $last->get_id() >= $boundary ) ) {
 			delete_option( 'stwc_adoption_offset' );
 			delete_option( 'stwc_adoption_boundary' );
+			delete_option( 'stwc_adoption_started' );
 			update_option( 'stwc_adoption_version', self::VERSION, false );
 			return;
 		}
 		update_option( 'stwc_adoption_offset', $offset + count( $orders ), false );
+	}
+
+	/**
+	 * Run under Free's per-order lock, the one every ledger write takes.
+	 *
+	 * @param int      $order_id Order id.
+	 * @param callable $callback Work to run while the lock is held.
+	 * @return mixed The callback's result, or a WP_Error when the lock could not be taken.
+	 */
+	private static function with_order_lock( int $order_id, callable $callback ) {
+		if ( ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Order_Lock' ) ) {
+			return new \WP_Error( 'stwc_adoption_no_lock' );
+		}
+		return \WCPOS\WooCommercePOS\Payments\Contract\Order_Lock::instance()->with_lock( $order_id, $callback );
 	}
 }

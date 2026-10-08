@@ -162,6 +162,18 @@ namespace WCPOS\WooCommercePOSPro\Payments\Device {
 
 namespace {
 
+	if ( ! function_exists( 'wcpos_pro_payment_id_for_action' ) ) {
+		/**
+		 * Pro's adopted-action lookup; a test sets $GLOBALS['stwc_payment_id_for_action'] to a map of intent id => row id.
+		 *
+		 * @param string $provider Provider family.
+		 * @param string $ref      Action reference.
+		 */
+		function wcpos_pro_payment_id_for_action( string $provider, string $ref ): ?string {
+			$GLOBALS['stwc_payment_id_lookups'][] = array( $provider, $ref );
+			return $GLOBALS['stwc_payment_id_for_action'][ $ref ] ?? null;
+		}
+	}
 	if ( ! function_exists( 'wcpos_pro_register_device_provider' ) ) {
 		/**
 		 * Record device registrations for integration assertions.
@@ -236,6 +248,31 @@ namespace {
 }
 
 namespace WCPOS\WooCommercePOS\Payments\Contract {
+	if ( ! class_exists( Order_Lock::class ) ) {
+		/** Test double for Free's per-order lock: runs the callback and records the ids locked. */
+		class Order_Lock {
+			/**
+			 * Order ids locked, in order.
+			 *
+			 * @var int[]
+			 */
+			public static $locked = array();
+			/** The single instance. */
+			public static function instance(): self {
+				return new self();
+			}
+			/**
+			 * Run the callback as if the lock were held.
+			 *
+			 * @param int      $order_id Order id.
+			 * @param callable $callback Work.
+			 */
+			public function with_lock( int $order_id, callable $callback ) {
+				self::$locked[] = $order_id;
+				return $callback();
+			}
+		}
+	}
 	if ( ! class_exists( Ledger::class ) ) {
 		/** Test double for Free's ledger: tests set the rows it answers with. */
 		class Ledger {
