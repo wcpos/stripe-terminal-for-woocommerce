@@ -101,17 +101,6 @@ class Gateway extends WC_Payment_Gateway {
 	public function init_form_fields(): void {
 		$terminal_options = $this->fetch_terminal_options();
 		$this->form_fields = array(
-			'enabled' => array(
-				'title'       => __( 'Enable/Disable', 'stripe-terminal-for-woocommerce' ),
-				'type'        => 'checkbox',
-				'label'       => \sprintf(
-					// Translators: Placeholders %s is the link to WooCommerce POS.
-					__( 'Enable Stripe Terminal for web checkout (not necessary for %s)', 'stripe-terminal-for-woocommerce' ),
-					'<a href="https://wcpos.com" target="_blank">WooCommerce POS</a>'
-				),
-				'description' => __( 'This enables the gateway for online store checkout. The POS uses this gateway automatically when configured.', 'stripe-terminal-for-woocommerce' ),
-				'default'     => 'no',
-			),
 			'title' => array(
 				'title'       => __( 'Title', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'text',
@@ -291,6 +280,23 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Stripe Terminal is a POS gateway: it is offered on POS requests and on the order-pay
+	 * page a POS user opens, never on the shop checkout. The saved `enabled` option is not
+	 * consulted, so a site that once enabled web checkout does not keep it.
+	 *
+	 * @return bool
+	 */
+	public function is_available() {
+		if ( empty( $this->api_key ) ) {
+			return false;
+		}
+		if ( \function_exists( 'woocommerce_pos_request' ) && woocommerce_pos_request() ) {
+			return true;
+		}
+		return \function_exists( 'is_checkout_pay_page' ) && is_checkout_pay_page() && current_user_can( 'access_woocommerce_pos' );
+	}
+
+	/**
 	 * Register the gateway with WooCommerce.
 	 *
 	 * @param array $methods Existing payment methods.
@@ -384,7 +390,7 @@ class Gateway extends WC_Payment_Gateway {
 						<code><?php echo esc_html( Server\Stripe_Server_Provider::webhook_url() ); ?></code>
 						<?php echo esc_html( Settings::get_pos_webhook_secret() ? __( 'Signing secret stored.', 'stripe-terminal-for-woocommerce' ) : __( 'Signing secret missing; enter a Stripe secret key for the selected mode and save settings to register.', 'stripe-terminal-for-woocommerce' ) ); ?>
 					<?php } else { ?>
-						<?php esc_html_e( 'Requires WooCommerce POS Pro 1.11.0 or newer (legacy checkout only)', 'stripe-terminal-for-woocommerce' ); ?>
+						<?php esc_html_e( 'Requires WooCommerce POS Pro 2.0.0 or newer.', 'stripe-terminal-for-woocommerce' ); ?>
 					<?php } ?>
 				</td>
 			</tr>
@@ -574,23 +580,12 @@ class Gateway extends WC_Payment_Gateway {
 			}
 		}
 
-		// No Terminal payment yet.
-		// On a direct order-pay form submission, keep the failure notice so
-		// skipping the reader does not silently redirect back to the same page.
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Matches maybe_redirect_paid_order_submission detection; form nonce is verified by WooCommerce before process_payment.
-		if ( isset( $_POST['woocommerce_pay'] ) ) {
-			wc_add_notice( __( 'Payment error: No successful payment found for this order.', 'stripe-terminal-for-woocommerce' ), 'error' );
+		// No Terminal payment yet: the order-pay form was submitted without the reader
+		// completing, so keep the failure notice rather than silently reloading the page.
+		wc_add_notice( __( 'Payment error: No successful payment found for this order.', 'stripe-terminal-for-woocommerce' ), 'error' );
 
-			return array(
-				'result' => 'failure',
-			);
-		}
-
-		// Blocks / classic main checkout: create the pending order then send
-		// the customer to classic order-pay (pay_for_order) where Terminal UI runs.
 		return array(
-			'result'   => 'success',
-			'redirect' => $order->get_checkout_payment_url(),
+			'result' => 'failure',
 		);
 	}
 
@@ -740,17 +735,10 @@ class Gateway extends WC_Payment_Gateway {
 		// key, rejected nonce) left the cashier with an empty panel.
 		echo '<div class="stripe-terminal-error" style="display: none;"><p></p></div>';
 
-		// Check if we're on the order-pay page.
-		if ( is_checkout_pay_page() ) {
-			// Extract the order ID from the URL.
-			$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
-			$order    = wc_get_order( $order_id );
-				$amount   = $order ? $order->get_total() * 100 : 0; // Convert to cents.
-		} else {
-			// Default behavior for the main checkout page.
-			$order_id = null;
-			$amount   = WC()->cart ? WC()->cart->get_total( 'raw' ) * 100 : 0; // Convert to cents.
-		}
+		// The panel only renders on the order-pay page.
+		$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
+		$order    = wc_get_order( $order_id );
+		$amount   = $order ? $order->get_total() * 100 : 0; // Convert to cents.
 
 			// Payment interface with reader management (hidden initially, shown after AJAX load).
 			echo '<div class="stripe-terminal-payment-section" style="display: none;">';
@@ -834,9 +822,8 @@ class Gateway extends WC_Payment_Gateway {
 	 * Enqueue payment scripts on checkout pages.
 	 */
 	public function enqueue_payment_scripts(): void {
-		// Only load on classic checkout / order-pay. Blocks checkout uses the
-		// Blocks payment method registration and has no payment_fields() markup.
-		if ( ! $this->should_enqueue_classic_payment_scripts() ) {
+		// The panel lives on the order-pay page only.
+		if ( ! is_checkout_pay_page() ) {
 			return;
 		}
 
@@ -861,18 +848,10 @@ class Gateway extends WC_Payment_Gateway {
 			true
 		);
 
-			// Check if we're on the order-pay page to get order ID and key.
-		$order_id  = null;
-		$order_key = null;
-		$order     = null;
-		if ( is_checkout_pay_page() ) {
-			$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
-			if ( $order_id ) {
-				$order     = wc_get_order( $order_id );
-				$order     = $order instanceof WC_Abstract_Order ? $order : null;
-				$order_key = $order ? $order->get_order_key() : null;
-			}
-		}
+		$order_id  = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
+		$order     = $order_id ? wc_get_order( $order_id ) : null;
+		$order     = $order instanceof WC_Abstract_Order ? $order : null;
+		$order_key = $order ? $order->get_order_key() : null;
 
 		$payment_request_token = $this->create_payment_request_token( $order );
 
@@ -968,33 +947,6 @@ class Gateway extends WC_Payment_Gateway {
 		} finally {
 			wp_set_current_user( $original_user_id );
 		}
-	}
-
-	/**
-	 * Whether the classic jQuery Terminal UI scripts should load.
-	 *
-	 * Order-pay always uses classic templates (even on Blocks stores). Main
-	 * Blocks checkout has no payment_fields() markup — skip classic assets there
-	 * to avoid pointless validate/list-reader AJAX on page load.
-	 *
-	 * @return bool
-	 */
-	private function should_enqueue_classic_payment_scripts(): bool {
-		if ( is_checkout_pay_page() ) {
-			return true;
-		}
-
-		if ( ! is_checkout() ) {
-			return false;
-		}
-
-		if ( class_exists( '\Automattic\WooCommerce\Blocks\Utils\CartCheckoutUtils' ) ) {
-			return ! \Automattic\WooCommerce\Blocks\Utils\CartCheckoutUtils::is_checkout_block_default();
-		}
-
-		$checkout_page_id = wc_get_page_id( 'checkout' );
-
-		return ! ( $checkout_page_id > 0 && function_exists( 'has_block' ) && has_block( 'woocommerce/checkout', $checkout_page_id ) );
 	}
 
 	/**

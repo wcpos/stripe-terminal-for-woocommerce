@@ -118,7 +118,7 @@ class PosReaderSettingsTest extends ServerTestCase {
 		$this->assertSame( 'wc-enhanced-select', $gateway->form_fields['allowed_readers']['class'] );
 		$this->assertSame( array( 'tmr_a' => 'Till (tmr_a)' ), $gateway->form_fields['allowed_readers']['options'] );
 		$this->assertSame( 'checkbox', $gateway->form_fields['lock_to_default']['type'] );
-		$this->assertSame( array( 'default_reader', 'allowed_readers', 'lock_to_default' ), array_slice( array_keys( $gateway->form_fields ), 5, 3 ) );
+		$this->assertSame( array( 'default_reader', 'allowed_readers', 'lock_to_default' ), array_slice( array_keys( $gateway->form_fields ), 4, 3 ) );
 	}
 
 	/**

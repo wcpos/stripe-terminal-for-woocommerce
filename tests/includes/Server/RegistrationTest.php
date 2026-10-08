@@ -9,13 +9,12 @@ require_once __DIR__ . '/ServerTestCase.php';
  * @preserveGlobalState disabled
  */
 class RegistrationTest extends ServerTestCase {
-	public function test_no_pro_is_legacy_only(): void {
+	public function test_no_pro_registers_nothing(): void {
 		$this->assertFalse( Registration::pro_supported() );
 		$this->assertFalse( Registration::register() );
-		Registration::activation_check( '/plugin.php' );
 	}
 
-	public function test_old_pro_does_not_register_and_receives_activation_notice(): void {
+	public function test_old_pro_does_not_register(): void {
 		Functions\when( 'wcpos_pro_register_server_provider' )->justReturn( null );
 		$calls = array();
 		Functions\when( 'wcpos_pro_requires' )->alias(
@@ -25,8 +24,8 @@ class RegistrationTest extends ServerTestCase {
 			}
 		);
 		$this->assertFalse( Registration::pro_supported() );
-		Registration::activation_check( '/plugin.php' );
-		$this->assertSame( array( array( '1.11.0', '' ), array( '1.11.0', '' ), array( '1.11.0', '/plugin.php' ) ), $calls );
+		$this->assertFalse( Registration::register() );
+		$this->assertSame( array( array( '2.0.0', '' ), array( '2.0.0', '' ) ), $calls );
 	}
 
 	public function test_supported_pro_registers_once(): void {
