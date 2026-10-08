@@ -7,6 +7,37 @@
 - Key POS PaymentIntent creation idempotently by payment attempt to prevent duplicate intents on retries.
 - Report Dashboard-configured on-reader tips to POS, which records them as a Tip order fee.
 
+## 0.0.37 - 2026-10-05
+
+### Fixed
+
+- The order-pay script and stylesheet are now built with a content hash in the filename (`payment.<hash>.js`) and enqueued through a build manifest. Previously they were served as `payment.js?ver=<version>`, and a cache that ignores the query string (a "remove query strings" optimiser setting, a CDN, or the WCPOS desktop app's embedded browser) kept serving a previous release's script against the updated PHP. The stale script failed its first request and showed the generic "Stripe Terminal service is not properly configured" message even though the API keys were fine and the same site worked from a web browser.
+
+## 0.0.36 - 2026-10-02
+
+### Fixed
+
+- With WooCommerce's opt-in HPOS data caching turned on, an order could still be completed twice, and its stock reduced twice, despite the 0.0.35 fix. The re-read of the order now also clears the HPOS data store's cached row and meta. The meta is cleared directly because WooCommerce skips it when the row-cache delete fails. On the posts store, the re-read now also refreshes the order's meta. (#131)
+
+## 0.0.35 - 2026-10-01
+
+### Fixed
+
+- An order paid on a Terminal reader is now completed exactly once. The `payment_intent.succeeded` webhook and the automatic order-pay submit could each complete the same order from a copy loaded while it was still unpaid, so stock was reduced twice and completion notes and emails were duplicated. Completion now takes a per-order claim (one atomic `INSERT IGNORE` on the options table, taken over after two minutes if its request died) and decides from the order re-read with the post and HPOS order caches cleared. A request that finds the claim held leaves the order to the request completing it, and the order-pay form still goes to the thank-you page. (#129)
+
+## 0.0.34 - 2026-10-01
+
+### Fixed
+
+- The order-pay terminal panel now shows the reason when readers cannot be loaded (for example an invalid restricted API key) instead of hiding "Loading Stripe Terminal..." and leaving an empty panel. The error container was never rendered by `payment_fields()`, and the readers request discarded the server message.
+- The gateway settings page now verifies restricted (`rk_`) keys by listing Terminal readers, the same call the order-pay page makes first, instead of only checking their prefix. A rolled, deleted or under-permissioned restricted key shows a red error next to the key field rather than a green "format is valid" tick with the real failure buried under Locations.
+- The on-page terminal log now sits outside the payment section, so it stays reachable when a service error hides that section.
+
+### Added
+
+- Step-by-step "How to get this key" instructions under both secret key fields, with direct Stripe Dashboard links and the exact permissions a restricted key needs.
+- Non-string log entries (exception context arrays) are written as single-line JSON instead of multi-line `print_r` output, which broke the line-number gutter in WooCommerce > Status > Logs.
+
 ## 0.0.33 - 2026-09-08
 
 ### Fixed
