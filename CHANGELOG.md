@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A Terminal payment's order is no longer left unpaid when its webhook arrives while another request is completing it.** The `payment_intent.succeeded` webhook used to acknowledge the event even when it found the order's completion claim held, so Stripe never redelivered it, and if the request holding the claim died before completing the order, nothing completed it. The webhook now answers HTTP 409 in that case, Stripe retries the delivery with backoff, and the retry completes the order or finds it already paid.
+
 ## 0.0.37 - 2026-10-05
 
 ### Fixed
