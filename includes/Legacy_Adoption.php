@@ -27,8 +27,25 @@ final class Legacy_Adoption {
 		if ( version_compare( (string) get_option( 'stwc_adoption_version', '0' ), self::VERSION, '>=' ) ) {
 			return;
 		}
+		// The old panel keeps writing intents while Phone Order is on; only orders that existed
+		// when the pass began are candidates, so a sale taken after the upgrade stays on the old
+		// path and never gets a row.
+		$boundary = (int) get_option( 'stwc_adoption_boundary', 0 );
+		if ( 0 === $boundary ) {
+			$latest   = wc_get_orders(
+				array(
+					'type' => 'shop_order',
+					'limit' => 1,
+					'orderby' => 'ID',
+					'order' => 'DESC',
+					'return' => 'ids',
+				)
+			);
+			$boundary = $latest ? (int) $latest[0] : -1;
+			update_option( 'stwc_adoption_boundary', $boundary, false );
+		}
 		$offset = (int) get_option( 'stwc_adoption_offset', 0 );
-		$orders = wc_get_orders(
+		$orders = $boundary < 0 ? array() : wc_get_orders(
 			array(
 				'type'         => 'shop_order',
 				'limit'        => self::PAGE_SIZE,
@@ -40,6 +57,9 @@ final class Legacy_Adoption {
 			)
 		);
 		foreach ( $orders as $order ) {
+			if ( $order->get_id() > $boundary ) {
+				continue;
+			}
 			$intent = (string) $order->get_meta( self::META_INTENT );
 			if ( '' === $intent || in_array( (string) $order->get_meta( self::META_STATUS ), self::FINAL_STATUSES, true ) || wcpos_pro_payment_id_for_action( self::PROVIDER, $intent ) ) {
 				continue;
@@ -49,8 +69,10 @@ final class Legacy_Adoption {
 				wc_get_logger()->error( 'Legacy Stripe Terminal adoption failed for order ' . $order->get_id() . ': ' . $result->get_error_code(), array( 'source' => 'stripe-terminal' ) );
 			}
 		}
-		if ( count( $orders ) < self::PAGE_SIZE ) {
+		$last = $orders ? end( $orders ) : null;
+		if ( count( $orders ) < self::PAGE_SIZE || ( $last && $last->get_id() >= $boundary ) ) {
 			delete_option( 'stwc_adoption_offset' );
+			delete_option( 'stwc_adoption_boundary' );
 			update_option( 'stwc_adoption_version', self::VERSION, false );
 			return;
 		}

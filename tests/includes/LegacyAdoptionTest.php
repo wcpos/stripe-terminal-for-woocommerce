@@ -71,6 +71,7 @@ class LegacyAdoptionTest extends TestCase {
 		$done     = $this->order( 2, 'pi_done', 'succeeded' );
 		$adopted  = $this->order( 3, 'pi_adopted', 'processing' );
 		$canceled = $this->order( 4, 'pi_gone', 'canceled' );
+		$this->options['stwc_adoption_boundary'] = 4;
 		Functions\expect( 'wc_get_orders' )->once()->andReturn( array( $pending, $done, $adopted, $canceled ) );
 		Functions\expect( 'wcpos_pro_payment_id_for_action' )->with( 'stripe', 'pi_pending' )->andReturn( null );
 		Functions\expect( 'wcpos_pro_payment_id_for_action' )->with( 'stripe', 'pi_adopted' )->andReturn( 'row-3' );
@@ -88,9 +89,12 @@ class LegacyAdoptionTest extends TestCase {
 		for ( $i = 1; $i <= Legacy_Adoption::PAGE_SIZE; $i++ ) {
 			$orders[] = $this->order( $i, 'pi_done_' . $i, 'succeeded' );
 		}
-		$this->options['stwc_adoption_offset'] = 50;
+		$this->options['stwc_adoption_offset']   = 50;
+		$this->options['stwc_adoption_boundary'] = 1000;
 		Functions\expect( 'wc_get_orders' )->once()->with( \Mockery::on( function ( $args ) {
-			return 50 === $args['offset'] && Legacy_Adoption::PAGE_SIZE === $args['limit'];
+			return 50 === $args['offset'] && Legacy_Adoption::PAGE_SIZE === $args['limit']
+				&& Legacy_Adoption::META_INTENT === $args['meta_key'] && 'EXISTS' === $args['meta_compare']
+				&& 'ID' === $args['orderby'] && 'ASC' === $args['order'];
 		} ) )->andReturn( $orders );
 		Functions\expect( 'wcpos_pro_adopt_legacy_attempt' )->never();
 
@@ -98,6 +102,31 @@ class LegacyAdoptionTest extends TestCase {
 
 		$this->assertSame( 50 + Legacy_Adoption::PAGE_SIZE, $this->options['stwc_adoption_offset'] );
 		$this->assertArrayNotHasKey( 'stwc_adoption_version', $this->options );
+	}
+
+	/** The first request records the newest order id; later sales stay on the old path. */
+	public function test_the_first_request_snapshots_the_boundary_and_newer_orders_are_left_alone(): void {
+		$old = $this->order( 7, 'pi_old', 'processing' );
+		$new = $this->order( 9, 'pi_new', 'processing' );
+		Functions\expect( 'wc_get_orders' )->twice()->andReturnUsing(
+			function ( $args ) use ( $old, $new ) {
+				return isset( $args['return'] ) ? array( 8 ) : array( $old, $new );
+			}
+		);
+		Functions\when( 'wcpos_pro_payment_id_for_action' )->justReturn( null );
+		$adopted = array();
+		Functions\when( 'wcpos_pro_adopt_legacy_attempt' )->alias(
+			function ( $order, $gateway_id, $intent ) use ( &$adopted ) {
+				$adopted[] = $intent;
+				return array( 'id' => 'row' );
+			}
+		);
+
+		Legacy_Adoption::upgrade();
+
+		$this->assertSame( array( 'pi_old' ), $adopted );
+		$this->assertSame( Legacy_Adoption::VERSION, $this->options['stwc_adoption_version'] );
+		$this->assertArrayNotHasKey( 'stwc_adoption_boundary', $this->options );
 	}
 
 	/** Once the version is recorded, nothing runs. */
@@ -112,6 +141,7 @@ class LegacyAdoptionTest extends TestCase {
 	public function test_a_refused_adoption_is_logged_and_skipped(): void {
 		$first  = $this->order( 1, 'pi_first', 'processing' );
 		$second = $this->order( 2, 'pi_second', 'processing' );
+		$this->options['stwc_adoption_boundary'] = 2;
 		Functions\expect( 'wc_get_orders' )->once()->andReturn( array( $first, $second ) );
 		Functions\when( 'wcpos_pro_payment_id_for_action' )->justReturn( null );
 		Functions\expect( 'wcpos_pro_adopt_legacy_attempt' )->twice()->andReturnUsing(

@@ -1,5 +1,7 @@
 <?php
 namespace WCPOS\WooCommercePOS\StripeTerminal\Tests\Server;
+
+use Brain\Monkey\Functions;
 use WCPOS\WooCommercePOS\StripeTerminal\Server\Stripe_Server_Provider as Provider;
 require_once __DIR__ . '/ServerTestCase.php';
 class StripeServerProviderWebhookTest extends ServerTestCase {
@@ -85,6 +87,7 @@ class StripeServerProviderWebhookTest extends ServerTestCase {
 		}
 		if ( 'uuid' === $scenario ) {
 			$intent['metadata'] = array();
+			Functions\when( 'wcpos_pro_payment_id_for_action' )->justReturn( null );
 		}
 		if ( 'mode' === $scenario ) {
 			$intent['livemode'] = true;
@@ -98,6 +101,25 @@ class StripeServerProviderWebhookTest extends ServerTestCase {
 		$result = $this->provider()->verify_webhook( $this->request( $type, $intent, $secret ) );
 		$this->assertSame( $code, $result->get_error_code() );
 		$this->assertSame( $status, $result->get_error_data()['status'] );
+	}
+
+	/** An intent the old panel created has no wcpos_payment_id; an adopted one resolves through Pro. */
+	public function test_adopted_legacy_intent_resolves_through_the_action_lookup(): void {
+		$intent             = $this->intent( array( 'status' => 'succeeded' ) );
+		$intent['metadata'] = array( 'order_id' => '42' );
+		Functions\expect( 'wcpos_pro_payment_id_for_action' )->once()->with( 'stripe', $intent['id'] )->andReturn( '0b4b0c1e-7d2f-4a1b-9c3d-5e6f7a8b9c0d' );
+		$result = $this->provider()->verify_webhook( $this->request( 'payment_intent.succeeded', $intent ) );
+		$this->assertSame( '0b4b0c1e-7d2f-4a1b-9c3d-5e6f7a8b9c0d', $result['payment_id'] );
+		$this->assertSame( 'captured', $result['patch']['status'] );
+	}
+
+	/** Without an adoption, an intent that is not ours is still acknowledged and dropped. */
+	public function test_unadopted_legacy_intent_is_still_unknown(): void {
+		$intent             = $this->intent();
+		$intent['metadata'] = array( 'order_id' => '42' );
+		Functions\expect( 'wcpos_pro_payment_id_for_action' )->once()->andReturn( null );
+		$result = $this->provider()->verify_webhook( $this->request( 'payment_intent.succeeded', $intent ) );
+		$this->assertSame( 'stripe_webhook_unknown_payment', $result->get_error_code() );
 	}
 
 	public function rejected(): array {

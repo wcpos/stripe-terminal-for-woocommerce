@@ -386,8 +386,13 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			}
 			$id = $intent['metadata']['wcpos_payment_id'] ?? '';
 			if ( ! is_string( $id ) || ! preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $id ) ) {
-				// Not ours (a legacy or online intent on the same account): a 2xx so Stripe stops redelivering it.
-				return new \WP_Error( 'stripe_webhook_unknown_payment', __( 'Unknown POS payment.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 200 ) );
+				// An intent the old panel created carries only order_id; if the upgrade adopted
+				// it, Pro resolves the row from the intent id. Otherwise it is not ours (a legacy
+				// or online intent on the same account): a 2xx so Stripe stops redelivering it.
+				$id = \function_exists( 'wcpos_pro_payment_id_for_action' ) ? (string) wcpos_pro_payment_id_for_action( $this->provider(), (string) ( $intent['id'] ?? '' ) ) : '';
+				if ( '' === $id ) {
+					return new \WP_Error( 'stripe_webhook_unknown_payment', __( 'Unknown POS payment.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 200 ) );
+				}
 			}
 			if ( ( $intent['livemode'] ?? null ) !== ! Settings::is_test_mode() ) {
 				return new \WP_Error( 'stripe_webhook_mode_mismatch', __( 'Stripe payment mode mismatch.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 200 ) );
