@@ -32,7 +32,7 @@ jobs:
           tools: wp-cli:2.12.0
 
       - name: Update POT file
-        run: wp i18n make-pot . languages/stripe-terminal-for-woocommerce.pot --domain=stripe-terminal-for-woocommerce --slug=stripe-terminal-for-woocommerce --package-name="Stripe Terminal for WooCommerce" --headers="{\"Report-Msgid-Bugs-To\":\"https://github.com/wcpos/stripe-terminal-for-woocommerce/issues\"}" --exclude=includes/abstracts,includes/utils,assets/js/blocks
+        run: wp i18n make-pot . languages/stripe-terminal-for-woocommerce.pot --domain=stripe-terminal-for-woocommerce --slug=stripe-terminal-for-woocommerce --package-name="Stripe Terminal for WooCommerce" --headers="{\"Report-Msgid-Bugs-To\":\"https://github.com/wcpos/stripe-terminal-for-woocommerce/issues\"}" --exclude=includes/abstracts,includes/utils
 
       - name: Check for changes
         id: git-diff

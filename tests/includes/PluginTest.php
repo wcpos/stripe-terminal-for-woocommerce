@@ -20,20 +20,32 @@ function plugin_dir_path( $file ) { return dirname( $file ) . '/'; }
 function plugin_dir_url( $file ) { return 'https://example.test/plugins/stripe-terminal/'; }
 function register_activation_hook( $file, $callback ) {}
 function wcpos_pro_requires( $version, $file = '' ) { return false; }
-function add_action( $hook, $callback, ...$args ) { $GLOBALS['actions'][] = $hook; }
+function add_action( $hook, $callback, ...$args ) { $GLOBALS['actions'][] = $hook; $GLOBALS['hooked'][] = array( $hook, $args[0] ?? 10 ); }
 function add_filter( $hook, $callback, ...$args ) { $GLOBALS['filters'][] = $hook; }
 function get_option( $key, $default = false ) { return $default; }
 class WP_Error { public function __construct( ...$args ) {} }
 PHP;
 		$code .= "\nrequire " . var_export( $plugin, true ) . ';';
 		$code .= <<<'PHP'
+$hooked = $GLOBALS['hooked'];
 $GLOBALS['actions'] = array();
 $GLOBALS['filters'] = array();
 \WCPOS\WooCommercePOS\StripeTerminal\init();
-echo json_encode( array( $GLOBALS['actions'], $GLOBALS['filters'] ) );
+echo json_encode( array( $GLOBALS['actions'], $GLOBALS['filters'], $hooked ) );
 PHP;
 		exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $code ), $output, $exit_code );
 		$this->assertSame( 0, $exit_code );
-		$this->assertSame( array( array( 'admin_notices' ), array() ), json_decode( implode( "\n", $output ), true ) );
+		list( $actions, $filters, $hooked ) = json_decode( implode( "\n", $output ), true );
+		$this->assertSame( array( 'admin_notices' ), $actions );
+		$this->assertSame( array(), $filters );
+		// Pro defines wcpos_pro_requires() from its own plugins_loaded hook at priority 20; a gate
+		// hooked earlier sees no Pro on every site, Pro 2.0 included.
+		$priorities = array();
+		foreach ( $hooked as $entry ) {
+			if ( 'plugins_loaded' === $entry[0] ) {
+				$priorities[] = $entry[1];
+			}
+		}
+		$this->assertSame( array( 30, 31 ), $priorities );
 	}
 }

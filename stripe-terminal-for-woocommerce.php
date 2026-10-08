@@ -93,7 +93,10 @@ function init(): void {
 	// Best-effort reader keep-warm (POS activity + new-order triggers).
 	( new ReaderWarmer() )->register();
 }
-add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 11 );
+// Pro defines its helpers (wcpos_pro_requires and the provider registration API) from its own
+// plugins_loaded hook at priority 20, so the gate must run after that: 30, where provider
+// registration already sat. Reader-settings migration stays one step later.
+add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 30 );
 add_action( 'plugins_loaded', array( Server\Pos_Reader_Settings::class, 'migrate_once' ), 31 );
 register_activation_hook(
 	__FILE__,
