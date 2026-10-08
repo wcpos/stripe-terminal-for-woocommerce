@@ -203,6 +203,9 @@ class StripeTerminalService {
 				}
 			}
 
+			// API 2026-09-30.endive (stripe-php 22) removed the writable `payment_method_types`;
+			// `allowed_payment_method_types` is its replacement and accepts card_present and
+			// interac_present. The read-only `payment_method_types` on the object is unchanged.
 			if ( $moto ) {
 				$payment_method_types = array( 'card' );
 			} else {
@@ -222,11 +225,11 @@ class StripeTerminalService {
 				function () use ( $amount, $currency, $payment_method_types, $description, $order_id ) {
 					return \Stripe\PaymentIntent::create(
 						array(
-							'amount'               => $amount,
-							'currency'             => $currency,
-							'payment_method_types' => $payment_method_types,
-							'description'          => $description,
-							'metadata'             => array( 'order_id' => $order_id ),
+							'amount'                       => $amount,
+							'currency'                     => $currency,
+							'allowed_payment_method_types' => $payment_method_types,
+							'description'                  => $description,
+							'metadata'                     => array( 'order_id' => $order_id ),
 						)
 					);
 				}
