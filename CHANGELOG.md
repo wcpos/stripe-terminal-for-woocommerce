@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A POS payment whose create Stripe did not answer (a dropped connection or timeout) now stays pending and resumes on the same PaymentIntent when the till retries or the sweeper runs; before, the leg was dropped while the intent could already be on the reader.
+- A decline Stripe reports by webhook fails the POS leg the way polling does, after a fresh read of the intent: a retry already on the reader is left to polling, a paid intent reports its money, and a confirmed decline is retired so nothing can charge it again. A stale decline arriving after the payment was captured reports the capture; a provider record that contradicts captured money is refused and logged instead of ignored.
+- A replayed POS payment whose reader has moved on, or whose retry picked another reader, is no longer failed while the intent may be live or paid: the intent is read first, and an idempotency conflict keeps the leg pending.
+- A refund from the POS of an order paid on the previous order-pay panel finds the Stripe payment by the order's transaction id, charge ids included (Canadian orders check the charge for Interac).
+- The previous panel's Retry no longer puts an intent back on a reader once the POS has adopted it.
+- With Phone Order on, submitting the order-pay form no longer marks a partly paid order as paid from a POS keypad payment, and a refund on such a mixed order no longer targets the keypad payment on the old path.
+- Pro's provider conformance suite runs in CI against the real adapter over a scripted Stripe; the transcripts in `tests/conformance/transcripts` are the certified record.
 - Terminal and phone-order PaymentIntents, including the keypad's, are created with `allowed_payment_method_types`, which the current Stripe API version accepts and which replaces the `payment_method_types` parameter removed in API 2026-09-30.endive, so a later stripe-php 22 upgrade cannot break payment creation.
 - Requires WooCommerce POS Pro 2.0.0 or newer; the plugin registers nothing and shows an admin notice on older or missing Pro.
 - Web checkout removed: Stripe Terminal is no longer offered on the shop's classic or Blocks checkout, and the "Enable Stripe Terminal for web checkout" setting is gone. The POS keypad and the POS order-pay page are the only surfaces.

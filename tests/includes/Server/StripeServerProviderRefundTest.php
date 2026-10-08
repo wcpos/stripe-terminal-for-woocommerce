@@ -79,4 +79,22 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		$this->assertSame( 'succeeded', $provider->refund( $this->row( 'CAD' ), 123, '2.50' )['status'] );
 		$this->assertCount( 2, $this->http->requests );
 	}
+
+	/** A historical webview row names the charge; the Interac check reads the charge, and the refund keys on it. */
+	public function test_cad_charge_reference_reads_the_charge(): void {
+		$provider = $this->provider( array( $this->ok( $this->charge() ), $this->ok( array( 'id' => 're_test', 'status' => 'succeeded' ) ) ) );
+		$row      = array( 'id' => self::PAYMENT_ID, 'order_id' => 42, 'amount' => '12.50', 'currency' => 'CAD', 'provider_refs' => array( 'transaction_id' => 'ch_test' ) );
+		$this->assertSame( 'succeeded', $provider->refund( $row, 123, '2.50' )['status'] );
+		$this->assertStringEndsWith( '/charges/ch_test', $this->http->requests[0]['url'] );
+		$this->assertSame( 'ch_test', $this->http->requests[1]['params']['charge'] );
+	}
+
+	public function test_cad_interac_charge_reference_requires_reader(): void {
+		$charge = $this->charge();
+		$charge['payment_method_details']['type'] = 'interac_present';
+		$provider = $this->provider( array( $this->ok( $charge ) ) );
+		$row      = array( 'id' => self::PAYMENT_ID, 'order_id' => 42, 'amount' => '12.50', 'currency' => 'CAD', 'provider_refs' => array( 'transaction_id' => 'ch_test' ) );
+		$this->assert_provider_error( $provider->refund( $row, 123, '2.50' ), 'interac_refund_on_reader' );
+		$this->assertCount( 1, $this->http->requests );
+	}
 }

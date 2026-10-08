@@ -87,6 +87,75 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  conformance:
+    name: Conformance PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    needs: php-lint
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.3']
+    defaults:
+      run:
+        working-directory: stripe-terminal-for-woocommerce
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: stripe-terminal-for-woocommerce
+          persist-credentials: false
+
+      # Pro's provider conformance suite runs the real adapter under wp-env with Pro (which vendors
+      # Free) as a sibling plugin; see tests/conformance/. The org-level wcpos-bot App mints a token
+      # scoped to contents:read on the private Pro repo. Fork PRs get no secrets and stop here by design.
+      - name: Read-only Pro token
+        id: pro-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.WCPOS_BOT_APP_ID }}
+          private-key: ${{ secrets.WCPOS_BOT_PRIVATE_KEY }}
+          owner: wcpos
+          repositories: woocommerce-pos-pro
+          permission-contents: read
+
+      - name: Checkout Pro next as sibling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: wcpos/woocommerce-pos-pro
+          ref: next
+          path: woocommerce-pos-pro
+          token: ${{ steps.pro-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Set up PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer
+
+      - name: Install Composer dependencies
+        run: |
+          composer install --no-interaction --prefer-dist
+          composer install --working-dir=../woocommerce-pos-pro --no-interaction --prefer-dist
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Start WordPress test environment
+        run: |
+          npm i -g @wordpress/env
+          printf '{"phpVersion":"%s"}\n' '${{ matrix.php }}' > .wp-env.override.json
+          wp-env start
+
+      # Transcripts are compared, never recorded, here: recording is an opt-in inside the PHPUnit
+      # process (`wp-env run tests-cli -- env WCPOS_RECORD_TRANSCRIPTS=1 ...`) that CI does not set.
+      - name: Provider conformance suite
+        run: wp-env run --env-cwd='wp-content/plugins/stripe-terminal-for-woocommerce' tests-cli -- vendor/bin/phpunit -c phpunit.conformance.xml.dist
+
   stripe-live-tests:
     name: Stripe Test-Mode Smoke
     runs-on: ubuntu-latest

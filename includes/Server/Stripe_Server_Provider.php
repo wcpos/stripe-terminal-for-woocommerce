@@ -104,23 +104,53 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				( 'cad' === strtolower( $row['currency'] ) )
 			);
 			if ( is_wp_error( $intent ) ) {
-				return self::error( $intent );
+				// Stripe may have accepted a create it did not answer, and an idempotency conflict on a
+				// replay means the intent exists under this row's key (a retry on another reader);
+				// Pro replays the row under the same key, so it must stay pending, never be dropped.
+				return self::unanswered( $intent ) || self::idempotency_conflict( $intent ) ? $this->indeterminate( 'stripe_create_unanswered', $intent->get_error_message() ) : self::error( $intent );
 			}
 			// Written BEFORE the dispatch: a warm scheduled during this request must not replace the action.
 			update_option( 'stwc_payment_dispatch_at', time(), false );
 			$result = $this->service->process_payment_intent( $reader_id, $intent['id'], array( 'enable_customer_cancellation' => true ) );
 			if ( is_wp_error( $result ) ) {
+				// Dispatch may have landed despite the error, and on a replay the intent may already be
+				// paid: read before deciding, and never retire an intent that may carry money.
 				$reader = $this->service->get_reader( $reader_id );
-				if ( is_wp_error( $reader ) ) {
-					return self::error( $result );
+				if ( is_wp_error( $reader ) && self::unanswered( $result ) ) {
+					return $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() );
 				}
-				// Dispatch may have succeeded despite the error; let polling resolve this intent.
-				$action = $reader['action'] ?? array();
-				if ( ( $action['process_payment_intent']['payment_intent'] ?? null ) !== $intent['id']
-					|| ! in_array( $action['status'] ?? '', array( 'in_progress', 'succeeded' ), true ) ) {
-					$this->cancel_best_effort( $intent['id'] );
-					return self::error( $result );
+				// An unreadable reader after a refusal still gets the intent read below: on a replay
+				// the intent may be live or paid.
+				$action = is_wp_error( $reader ) ? array() : ( $reader['action'] ?? array() );
+				if ( ( $action['process_payment_intent']['payment_intent'] ?? null ) === $intent['id']
+					&& in_array( $action['status'] ?? '', array( 'in_progress', 'succeeded' ), true ) ) {
+					return array(
+						'ref' => $intent['id'],
+						'expires_at' => null,
+					);
 				}
+				$again = $this->service->retrieve_payment_intent( $intent['id'] );
+				if ( is_wp_error( $again ) ) {
+					return $this->indeterminate( 'stripe_dispatch_unanswered', $again->get_error_message() );
+				}
+				if ( in_array( $again['status'], array( 'succeeded', 'requires_capture', 'processing' ), true ) ) {
+					// The reader has moved on but this intent was paid: polling settles it.
+					return array(
+						'ref' => $intent['id'],
+						'expires_at' => null,
+					);
+				}
+				if ( self::unanswered( $result ) ) {
+					return $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() );
+				}
+				// A reader read that got no answer may hide a reader still collecting this unpaid
+				// intent: keep the leg pending for the replay rather than fail it. A reader Stripe
+				// answers for (not holding the intent, or no longer existing) lets it be retired.
+				if ( is_wp_error( $reader ) && self::unanswered( $reader ) ) {
+					return $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() );
+				}
+				$this->cancel_best_effort( $intent['id'] );
+				return self::error( $result );
 			}
 			return array(
 				'ref' => $intent['id'],
@@ -201,6 +231,9 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				'stripe_payment_intent' => $intent['id'],
 				'stripe_charge' => $intent['latest_charge']['id'] ?? null,
 				'stripe_mode' => ! empty( $intent['livemode'] ) ? 'live' : 'test',
+				// The reference a historical webview row refunds by; the old panel stored the intent
+				// id (webhook completions) or the charge id, and refund() accepts either.
+				'transaction_id' => $intent['id'],
 			),
 			'receipt'       => self::receipt( $intent ),
 		);
@@ -309,17 +342,21 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 */
 	public function refund( array $row, int $refund_id, string $amount ) {
 		try {
-			// Pro stores the intent under `action`; the fetch/webhook refs carry it too, for a row restored without one.
-			$ref = $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? '';
+			// Pro stores the intent under `action`; the fetch/webhook refs carry it too, for a row restored
+			// without one; a historical webview row carries only the order's transaction id (intent or charge).
+			$ref = $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? $row['provider_refs']['transaction_id'] ?? '';
 			if ( '' === $ref ) {
 				return self::error( __( 'No Stripe payment found for refund.', 'stripe-terminal-for-woocommerce' ), 'missing_payment_ref' );
 			}
 			if ( 'CAD' === strtoupper( $row['currency'] ) ) {
-				$intent = $this->service->retrieve_payment_intent( $ref );
-				if ( is_wp_error( $intent ) ) {
-					return self::error( $intent );
+				// A historical row may name the charge rather than the intent; read whichever it names.
+				$is_charge = 0 === strpos( $ref, 'ch_' );
+				$paid      = $is_charge ? $this->service->retrieve_charge( $ref ) : $this->service->retrieve_payment_intent( $ref );
+				if ( is_wp_error( $paid ) ) {
+					return self::error( $paid );
 				}
-				if ( 'interac_present' === ( $intent['latest_charge']['payment_method_details']['type'] ?? '' ) ) {
+				$type = $is_charge ? ( $paid['payment_method_details']['type'] ?? '' ) : ( $paid['latest_charge']['payment_method_details']['type'] ?? '' );
+				if ( 'interac_present' === $type ) {
 					return self::error( __( 'Interac refunds must be run on the reader', 'stripe-terminal-for-woocommerce' ), 'interac_refund_on_reader' );
 				}
 			}
@@ -397,9 +434,13 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			if ( ( $intent['livemode'] ?? null ) !== ! Settings::is_test_mode() ) {
 				return new \WP_Error( 'stripe_webhook_mode_mismatch', __( 'Stripe payment mode mismatch.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 200 ) );
 			}
+			$patch = self::webhook_patch( $intent, $event->id );
+			if ( 'failed' === ( $patch['status'] ?? '' ) ) {
+				$patch = $this->decline_patch( $intent, $event->id );
+			}
 			return array(
 				'payment_id' => strtolower( $id ),
-				'patch' => self::webhook_patch( $intent, $event->id ),
+				'patch' => $patch,
 			);
 		} catch ( \Throwable $e ) {
 			return self::error( $e );
@@ -407,7 +448,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	}
 
 	/**
-	 * Polling owns non-money outcomes; do not race a legitimate void.
+	 * Money and declines are final and reported; cancellation is left to polling, which alone can
+	 * tell a requested void from a failure, so a webhook never races a legitimate void.
 	 *
 	 * @param array  $intent   Verified intent.
 	 * @param string $event_id Stripe event ID, not the intent ID.
@@ -422,6 +464,43 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				'currency' => strtoupper( $intent['currency'] ),
 				'receipt' => self::receipt( $intent ),
 			);
+		} elseif ( 'requires_payment_method' === $intent['status'] && ! empty( $intent['last_payment_error'] ) ) {
+			// A decline, as fetch() reports it; one that arrives after capture reaches Free's
+			// transition guard instead of being swallowed. verify_webhook() enforces it only
+			// against a fresh read (decline_patch()).
+			$patch['status'] = 'failed';
+		}
+		return $patch;
+	}
+
+	/**
+	 * A decline is enforced only against a fresh read: the event is a snapshot, and the same intent
+	 * may since have been retried on the reader (in progress, or paid). What fetch() would observe
+	 * decides; a confirmed decline is retired as fetch() retires it, a paid intent reports its money,
+	 * and anything in between is left to polling.
+	 *
+	 * @param array  $intent   The event's intent.
+	 * @param string $event_id Stripe event ID.
+	 * @return array Settlement patch.
+	 */
+	private function decline_patch( array $intent, string $event_id ): array {
+		$fresh = $this->service->retrieve_payment_intent( (string) $intent['id'] );
+		if ( is_wp_error( $fresh ) ) {
+			return array( 'event_id' => $event_id );
+		}
+		if ( 'requires_payment_method' === $fresh['status'] && ! empty( $fresh['metadata']['wcpos_reader'] ) ) {
+			$reader = $this->service->get_reader( $fresh['metadata']['wcpos_reader'] );
+			if ( is_wp_error( $reader ) ) {
+				return array( 'event_id' => $event_id );
+			}
+			$action = $reader['action'] ?? array();
+			if ( ( $action['process_payment_intent']['payment_intent'] ?? null ) === $fresh['id'] && 'in_progress' === ( $action['status'] ?? '' ) ) {
+				return array( 'event_id' => $event_id ); // A retry of this intent is on the reader.
+			}
+		}
+		$patch = self::webhook_patch( $fresh, $event_id );
+		if ( 'failed' === ( $patch['status'] ?? '' ) ) {
+			$this->cancel_best_effort( (string) $fresh['id'] );
 		}
 		return $patch;
 	}
@@ -467,6 +546,26 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				return is_string( $value ) && '' !== $value;
 			}
 		);
+	}
+
+	/**
+	 * Whether the service got no usable answer (a transport failure, a timeout, or a Stripe 5xx)
+	 * rather than a refusal.
+	 *
+	 * @param \WP_Error $error Service error.
+	 */
+	private static function unanswered( \WP_Error $error ): bool {
+		return (int) ( $error->get_error_data()['status'] ?? 0 ) >= 500 || 'http_request_failed' === $error->get_error_code();
+	}
+
+	/**
+	 * Whether Stripe refused a replayed create because the row's idempotency key already holds an
+	 * intent made with other parameters (a retry on another reader): the first dispatch may be live.
+	 *
+	 * @param \WP_Error $error Service error.
+	 */
+	private static function idempotency_conflict( \WP_Error $error ): bool {
+		return 409 === (int) ( $error->get_error_data()['status'] ?? 0 );
 	}
 
 	/**

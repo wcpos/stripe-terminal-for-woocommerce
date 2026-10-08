@@ -544,8 +544,9 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-		// Only recover from Stripe when this order has evidence of a prior Terminal attempt.
-		if ( $this->stripe_service && ( $order->get_transaction_id() || $payment_intent_id ) ) {
+		// Only recover from Stripe when this order has evidence of a prior old-panel attempt: a
+		// transaction id Free copied from a Pro ledger leg is a partial payment, not one to complete.
+		if ( $this->stripe_service && ( $payment_intent_id || $this->has_legacy_charge( $order ) ) ) {
 			$status_result = $this->stripe_service->check_payment_status_from_stripe( $order );
 
 			if (
@@ -640,7 +641,13 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
+		// The transaction id names the charge this order was completed with (the terminal charge
+		// meta is overwritten by later attempts), unless Free copied it from a Pro ledger leg: on a
+		// mixed order that is the keypad payment, which only Pro can refund.
 		$charge_or_intent_id = $order->get_meta( '_transaction_id' );
+		if ( $charge_or_intent_id && $this->is_pro_leg_reference( $order, (string) $charge_or_intent_id ) ) {
+			$charge_or_intent_id = '';
+		}
 		if ( ! $charge_or_intent_id ) {
 			$charge_or_intent_id = $order->get_meta( '_stripe_terminal_charge_id' );
 		}
@@ -750,22 +757,32 @@ class Gateway extends WC_Payment_Gateway {
 			return true;
 		}
 		$transaction = (string) $order->get_transaction_id();
-		if ( '' === $transaction || ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Ledger' ) ) {
-			return '' !== $transaction;
+		return '' !== $transaction && ! $this->is_pro_leg_reference( $order, $transaction );
+	}
+
+	/**
+	 * Whether a reference on the order is one of Pro's own legs: Free copies a ledger row's intent
+	 * into the transaction id, and that is Pro's leg, not an old-panel charge. Free's own webview
+	 * row for an old-panel sale carries that sale's charge, which IS the old-panel charge, so only
+	 * server and device legs are consulted.
+	 *
+	 * @param WC_Abstract_Order $order     Order.
+	 * @param string            $reference Intent or charge id.
+	 */
+	private function is_pro_leg_reference( WC_Abstract_Order $order, string $reference ): bool {
+		if ( '' === $reference || ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Ledger' ) ) {
+			return false;
 		}
-		// Free copies a ledger row's intent into the transaction id; that is Pro's leg, not an
-		// old-panel charge. Free's own webview row for an old-panel sale carries that sale's
-		// charge, which IS the old-panel charge, so only Pro's legs are consulted.
 		foreach ( \WCPOS\WooCommercePOS\Payments\Contract\Ledger::instance()->read( $order ) as $row ) {
 			if ( ! in_array( $row['capture_mode'] ?? '', array( 'server', 'device' ), true ) ) {
 				continue;
 			}
 			$refs = $row['provider_refs'] ?? array();
-			if ( in_array( $transaction, array( $refs['action'] ?? null, $refs['stripe_payment_intent'] ?? null, $refs['payment_intent'] ?? null, $refs['transaction_id'] ?? null ), true ) ) {
-				return false;
+			if ( in_array( $reference, array( $refs['action'] ?? null, $refs['stripe_payment_intent'] ?? null, $refs['payment_intent'] ?? null, $refs['transaction_id'] ?? null ), true ) ) {
+				return true;
 			}
 		}
-		return true;
+		return false;
 	}
 
 	/**

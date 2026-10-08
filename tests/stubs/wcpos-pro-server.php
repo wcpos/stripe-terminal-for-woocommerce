@@ -63,7 +63,17 @@ namespace WCPOS\WooCommercePOSPro\Payments\Server {
 	}
 	if ( ! class_exists( Abstract_Provider_Adapter::class ) ) {
 		/** Test double for Abstract_Provider_Adapter. */
-		abstract class Abstract_Provider_Adapter implements Provider_Adapter_Interface {}
+		abstract class Abstract_Provider_Adapter implements Provider_Adapter_Interface {
+			/**
+			 * Keep a potentially dispatched charge pending when the provider cannot answer.
+			 *
+			 * @param string $code Error code.
+			 * @param string $message Error message.
+			 */
+			protected function indeterminate( string $code, string $message ): \WP_Error {
+				return new \WP_Error( $code, $message, array( 'indeterminate' => true, 'status' => 502 ) );
+			}
+		}
 	}
 	if ( ! class_exists( Event_Log::class ) ) {
 		/** Test double for Event_Log. */

@@ -321,6 +321,26 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Retrieve a charge without order mutations: a historical row may name the charge, not the intent.
+	 *
+	 * @param string $id Charge ID.
+	 * @return array|WP_Error Charge or error.
+	 */
+	public function retrieve_charge( string $id ) {
+		try {
+			$charge = $this->timed(
+				'retrieve_charge',
+				function () use ( $id ) {
+					return $this->get_stripe_client()->charges->retrieve( $id );
+				}
+			);
+			return $charge->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'retrieve_charge_error' );
+		}
+	}
+
+	/**
 	 * Cancel a POS intent without order mutations.
 	 *
 	 * @param string $id PaymentIntent ID.
@@ -1033,6 +1053,17 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Whether an intent belongs to WooCommerce POS Pro's ledger (a keypad leg, or an attempt Pro
+	 * adopted on upgrade): a split order's partial payment, which must never complete the order
+	 * through this panel.
+	 *
+	 * @param \Stripe\PaymentIntent $payment_intent Intent.
+	 */
+	private static function is_pro_intent( $payment_intent ): bool {
+		return ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) );
+	}
+
+	/**
 	 * Perform the payment-status lookup while the read timeout is active.
 	 *
 	 * @param WC_Order $order The WooCommerce order.
@@ -1045,9 +1076,24 @@ class StripeTerminalService {
 
 			$order_id = $order->get_id();
 
-				// First, try to get payment intent from order transaction ID.
-				$transaction_id = $order->get_transaction_id();
-			if ( $transaction_id ) {
+			// The panel's own recorded intent first: the order's transaction id may be a POS keypad
+			// leg Free copied there, which is a partial payment and never this panel's attempt.
+			$recorded_payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
+			if ( $recorded_payment_intent_id ) {
+				try {
+					$payment_intent = \Stripe\PaymentIntent::retrieve( $recorded_payment_intent_id );
+				} catch ( \Stripe\Exception\InvalidRequestException $e ) {
+					if ( 404 !== $e->getHttpStatus() ) {
+						return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
+					}
+
+					Logger::log( 'Stripe Terminal manual status check: recorded payment intent not found, falling back to the transaction id.' );
+				}
+			}
+
+			// Then the order transaction id, for an order completed before the intent was recorded.
+			$transaction_id = $order->get_transaction_id();
+			if ( ! isset( $payment_intent ) && $transaction_id ) {
 				try {
 					// Check if it's a payment intent ID.
 					if ( 0 === strpos( $transaction_id, 'pi_' ) ) {
@@ -1062,20 +1108,9 @@ class StripeTerminalService {
 				}
 			}
 
-			// If intent metadata exists, retrieve that intent directly before scanning.
-			if ( ! isset( $payment_intent ) ) {
-				$recorded_payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
-				if ( $recorded_payment_intent_id ) {
-					try {
-						$payment_intent = \Stripe\PaymentIntent::retrieve( $recorded_payment_intent_id );
-					} catch ( \Stripe\Exception\InvalidRequestException $e ) {
-						if ( 404 !== $e->getHttpStatus() ) {
-							return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
-						}
-
-						Logger::log( 'Stripe Terminal manual status check: recorded payment intent not found, falling back to metadata search.' );
-					}
-				}
+			// The transaction id may name a POS leg Pro drove or adopted: never this panel's payment.
+			if ( isset( $payment_intent ) && self::is_pro_intent( $payment_intent ) ) {
+				unset( $payment_intent );
 			}
 
 			// If we don't have a payment intent yet, search for it by order metadata.
@@ -1087,7 +1122,7 @@ class StripeTerminalService {
 				);
 
 				foreach ( $payment_intents->data as $pi ) {
-					if ( isset( $pi->metadata->order_id ) && $pi->metadata->order_id == $order_id ) {
+					if ( isset( $pi->metadata->order_id ) && $pi->metadata->order_id == $order_id && ! self::is_pro_intent( $pi ) ) {
 						$payment_intent = $pi;
 
 						break;

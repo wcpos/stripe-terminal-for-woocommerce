@@ -217,6 +217,7 @@ class StripeDeviceProviderTest extends ServerTestCase {
 				'stripe_payment_intent' => 'pi_test',
 				'stripe_charge' => 'ch_test',
 				'stripe_mode' => 'test',
+				'transaction_id' => 'pi_test',
 			),
 			$result['provider_refs']
 		);

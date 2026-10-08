@@ -167,4 +167,42 @@ class StripeServerProviderWebhookTest extends ServerTestCase {
 		$request->set_header( 'stripe-signature', 't=' . $t . ',v1=' . hash_hmac( 'sha256', "$t.invalid json", 'whsec_test' ) );
 		$this->assertSame( 400, $this->provider()->verify_webhook( $request )->get_error_data()['status'] );
 	}
+
+	/** A decline the fresh read confirms fails the leg, and the intent is retired so nothing can charge it again. */
+	public function test_decline_patch_retires_the_intent(): void {
+		$declined = $this->intent( array( 'last_payment_error' => array( 'code' => 'card_declined', 'decline_code' => 'generic_decline' ) ) );
+		$provider = $this->provider( array( $this->ok( $declined ), $this->ok( array( 'id' => 'tmr_test', 'action' => array( 'status' => 'failed', 'process_payment_intent' => array( 'payment_intent' => 'pi_test' ) ) ) ), $this->ok( $this->intent( array( 'status' => 'canceled' ) ) ) ) );
+		$result   = $provider->verify_webhook( $this->request( 'payment_intent.payment_failed', $declined ) );
+		$this->assertSame( array( 'event_id' => 'evt_test', 'status' => 'failed' ), $result['patch'] );
+		$this->assertStringEndsWith( '/payment_intents/pi_test', $this->http->requests[0]['url'] );
+		$this->assertStringEndsWith( '/terminal/readers/tmr_test', $this->http->requests[1]['url'] );
+		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[2]['url'] );
+		$this->assertCount( 3, $this->http->requests );
+	}
+
+	/** The event is a snapshot: a retry of the same intent already on the reader is polling's to settle. */
+	public function test_decline_with_a_retry_in_progress_is_left_to_polling(): void {
+		$declined = $this->intent( array( 'last_payment_error' => array( 'code' => 'card_declined' ) ) );
+		$provider = $this->provider( array( $this->ok( $declined ), $this->ok( array( 'id' => 'tmr_test', 'action' => array( 'status' => 'in_progress', 'process_payment_intent' => array( 'payment_intent' => 'pi_test' ) ) ) ) ) );
+		$result   = $provider->verify_webhook( $this->request( 'payment_intent.payment_failed', $declined ) );
+		$this->assertSame( array( 'event_id' => 'evt_test' ), $result['patch'] );
+		$this->assertCount( 2, $this->http->requests );
+	}
+
+	/** A stale decline delivered after the intent was paid reports the money, never the decline. */
+	public function test_stale_decline_after_success_reports_the_success(): void {
+		$declined = $this->intent( array( 'last_payment_error' => array( 'code' => 'card_declined' ) ) );
+		$provider = $this->provider( array( $this->ok( $this->intent( array( 'status' => 'succeeded', 'amount_received' => 1250, 'latest_charge' => $this->charge() ) ) ) ) );
+		$result   = $provider->verify_webhook( $this->request( 'payment_intent.payment_failed', $declined ) );
+		$this->assertSame( 'captured', $result['patch']['status'] );
+		$this->assertSame( '12.50', $result['patch']['amount'] );
+		$this->assertCount( 1, $this->http->requests );
+	}
+
+	/** Without a decline the intent is still the reader's: no status, no cancel. */
+	public function test_requires_payment_method_without_error_is_not_a_decline(): void {
+		$result = $this->provider()->verify_webhook( $this->request( 'payment_intent.payment_failed', $this->intent() ) );
+		$this->assertSame( array( 'event_id' => 'evt_test' ), $result['patch'] );
+		$this->assertCount( 0, $this->http->requests );
+	}
 }
