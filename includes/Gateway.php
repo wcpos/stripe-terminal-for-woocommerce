@@ -754,8 +754,12 @@ class Gateway extends WC_Payment_Gateway {
 			return '' !== $transaction;
 		}
 		// Free copies a ledger row's intent into the transaction id; that is Pro's leg, not an
-		// old-panel charge.
+		// old-panel charge. Free's own webview row for an old-panel sale carries that sale's
+		// charge, which IS the old-panel charge, so only Pro's legs are consulted.
 		foreach ( \WCPOS\WooCommercePOS\Payments\Contract\Ledger::instance()->read( $order ) as $row ) {
+			if ( ! in_array( $row['capture_mode'] ?? '', array( 'server', 'device' ), true ) ) {
+				continue;
+			}
 			$refs = $row['provider_refs'] ?? array();
 			if ( in_array( $transaction, array( $refs['action'] ?? null, $refs['stripe_payment_intent'] ?? null, $refs['payment_intent'] ?? null, $refs['transaction_id'] ?? null ), true ) ) {
 				return false;

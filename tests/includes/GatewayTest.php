@@ -395,6 +395,29 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			}
 		}
 
+		/** A webview row carrying the old-panel charge as its transaction id does not hide that charge. */
+		public function test_process_refund_falls_back_when_only_a_webview_row_carries_the_charge(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_livemode' )->andReturn( '' );
+			$order->shouldReceive( 'get_transaction_id' )->andReturn( 'ch_old' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'webview', 'provider_refs' => array( 'transaction_id' => 'ch_old' ) ),
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'server', 'provider_refs' => array( 'action' => 'pi_keypad' ) ),
+			);
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_refund' )->once()->andReturn( new \WP_Error( 'wcpos_refund_not_allocatable' ) );
+				$result = $gateway->process_refund( 42, 50.0, 'why' );
+				$this->assertInstanceOf( \WP_Error::class, $result );
+				$this->assertSame( 'refund_service_unavailable', $result->get_error_code(), 'the old path ran' );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
+
 		/** A pending or voided row is not a sale to refund through Pro; the old path answers. */
 		public function test_process_refund_ignores_rows_that_do_not_count(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
