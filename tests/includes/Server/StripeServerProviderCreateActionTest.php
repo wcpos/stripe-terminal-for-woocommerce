@@ -37,7 +37,7 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 					'wcpos_reader'     => 'tmr_test',
 				),
 				'capture_method'       => 'automatic',
-				'payment_method_types' => $methods,
+				'allowed_payment_method_types' => $methods,
 			),
 			$this->http->requests[0]['params']
 		);

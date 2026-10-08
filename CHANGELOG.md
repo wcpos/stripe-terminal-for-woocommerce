@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Terminal and phone-order PaymentIntents, including the keypad's, are created with `allowed_payment_method_types`, which the current Stripe API version accepts and which replaces the `payment_method_types` parameter removed in API 2026-09-30.endive, so a later stripe-php 22 upgrade cannot break payment creation.
 - Requires WooCommerce POS Pro 2.0.0 or newer; the plugin registers nothing and shows an admin notice on older or missing Pro.
 - Web checkout removed: Stripe Terminal is no longer offered on the shop's classic or Blocks checkout, and the "Enable Stripe Terminal for web checkout" setting is gone. The POS keypad and the POS order-pay page are the only surfaces.
 - If you had web checkout enabled, nothing changes on the POS; the shop checkout simply no longer lists Stripe Terminal.

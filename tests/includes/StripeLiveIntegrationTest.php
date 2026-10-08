@@ -114,12 +114,12 @@ class StripeLiveIntegrationTest extends TestCase {
 
 		$payment_intent = \Stripe\PaymentIntent::create(
 			array(
-				'amount'               => 1234,
-				'currency'             => 'usd',
-				'payment_method_types' => array( 'card_present' ),
-				'capture_method'       => 'manual',
-				'description'          => 'STWC live integration smoke test',
-				'metadata'             => array(
+				'amount'                       => 1234,
+				'currency'                     => 'usd',
+				'allowed_payment_method_types' => array( 'card_present' ),
+				'capture_method'               => 'manual',
+				'description'                  => 'STWC live integration smoke test',
+				'metadata'                     => array(
 					'stwc_test' => 'stripe_live_integration',
 				),
 			)
@@ -140,13 +140,13 @@ class StripeLiveIntegrationTest extends TestCase {
 		try {
 			$payment_intent = \Stripe\PaymentIntent::create(
 				array(
-					'amount'               => 1234,
-					'currency'             => 'usd',
-					'payment_method_types' => array( 'card' ),
-					'payment_method'       => 'pm_card_visa',
-					'confirm'              => true,
-					'description'          => 'STWC live integration refund smoke test',
-					'metadata'             => array(
+					'amount'                       => 1234,
+					'currency'                     => 'usd',
+					'allowed_payment_method_types' => array( 'card' ),
+					'payment_method'               => 'pm_card_visa',
+					'confirm'                      => true,
+					'description'                  => 'STWC live integration refund smoke test',
+					'metadata'                     => array(
 						'stwc_test' => 'stripe_live_integration',
 					),
 				)
