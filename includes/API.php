@@ -448,7 +448,16 @@ class API extends Abstracts\APIController {
 			switch ( $event->type ) {
 				case 'payment_intent.succeeded':
 					$payment_intent = $event->data->object;
-					$this->update_order_with_payment_intent( $payment_intent );
+					if ( ! $this->update_order_with_payment_intent( $payment_intent ) ) {
+						// Another request holds the completion claim. A non-2xx makes
+						// Stripe redeliver with backoff; once the claim is released or
+						// expires, the retry completes the order or finds it paid.
+						return new WP_Error(
+							'webhook_order_busy',
+							'Order completion is in progress in another request; retry later.',
+							array( 'status' => 409 )
+						);
+					}
 
 					break;
 
@@ -513,8 +522,10 @@ class API extends Abstracts\APIController {
 	 * Update the order with the payment intent ID.
 	 *
 	 * @param object $payment_intent The payment intent object.
+	 * @return bool False when another request holds the order's completion
+	 *              claim, so the event must be retried; true otherwise.
 	 */
-	private function update_order_with_payment_intent( $payment_intent ): void {
+	private function update_order_with_payment_intent( $payment_intent ): bool {
 		$order_id = $payment_intent->metadata->order_id ?? null;
 		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
 			// A WooCommerce POS 1.11 ledger leg: Pro settles it through wcpos_settle_payment(); the legacy path must not complete the order or add its tip a second time.
@@ -523,14 +534,14 @@ class API extends Abstracts\APIController {
 		if ( ! $order_id ) {
 			Logger::log( 'Payment intent webhook: No order_id found in metadata', 'warning' );
 
-			return;
+			return true;
 		}
 
 		$order = wc_get_order( $order_id );
 		if ( ! $order ) {
 			Logger::log( 'Payment intent webhook: Order not found: ' . $order_id, 'error' );
 
-			return;
+			return true;
 		}
 
 		// A stale or unrelated intent must not overwrite or complete the order:
@@ -539,7 +550,7 @@ class API extends Abstracts\APIController {
 		if ( '' !== $recorded_intent && $recorded_intent !== $payment_intent->id ) {
 			Logger::log( 'Payment intent webhook: ignoring intent ' . $payment_intent->id . ' for order ' . $order_id . '; the recorded Terminal intent is ' . $recorded_intent, 'warning' );
 
-			return;
+			return true;
 		}
 
 		// Save payment metadata before completing the order.
@@ -571,6 +582,11 @@ class API extends Abstracts\APIController {
 				$completion     = OrderCompletion::complete( $order, $transaction_id );
 				if ( OrderCompletion::COMPLETED === $completion ) {
 					$order->add_order_note( __( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', 'stripe-terminal-for-woocommerce' ) );
+				} elseif ( OrderCompletion::BUSY === $completion ) {
+					// The retried delivery adds the payment note, so it is not added twice.
+					Logger::log( 'Payment intent webhook: completion of order ' . $order_id . ' is held by another request; asking Stripe to retry ' . $payment_intent->id, 'warning' );
+
+					return false;
 				} else {
 					Logger::log( 'Payment intent webhook: order ' . $order_id . ' was not completed by this request (' . $completion . ')', 'info' );
 				}
@@ -595,6 +611,8 @@ class API extends Abstracts\APIController {
 		);
 
 		Logger::log( 'Payment intent webhook: Metadata saved for order ' . $order_id . ' - Payment Intent: ' . $payment_intent->id, 'info' );
+
+		return true;
 	}
 
 
