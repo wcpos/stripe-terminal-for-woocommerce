@@ -568,10 +568,12 @@ class API extends Abstracts\APIController {
 
 			if ( $amount_matches ) {
 				$transaction_id = $payment_intent->latest_charge ?? $payment_intent->id;
-				$order->set_transaction_id( $transaction_id );
-				Gateway::claim_order_gateway( $order );
-				$order->payment_complete( $transaction_id );
-				$order->add_order_note( __( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', 'stripe-terminal-for-woocommerce' ) );
+				$completion     = OrderCompletion::complete( $order, $transaction_id );
+				if ( OrderCompletion::COMPLETED === $completion ) {
+					$order->add_order_note( __( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', 'stripe-terminal-for-woocommerce' ) );
+				} else {
+					Logger::log( 'Payment intent webhook: order ' . $order_id . ' was not completed by this request (' . $completion . ')', 'info' );
+				}
 			} else {
 				Logger::log( 'Payment intent webhook: intent ' . $payment_intent->id . ' amount ' . $payment_intent->amount . ' ' . $payment_intent->currency . ' does not match order ' . $order_id . ' total ' . $expected_amount . ' ' . $order->get_currency() . '; order left unpaid', 'warning' );
 				$order->add_order_note( __( 'Stripe Terminal: Payment Intent succeeded but its amount does not match the order total; the order was not completed. Check the payment in Stripe.', 'stripe-terminal-for-woocommerce' ) );

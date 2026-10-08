@@ -873,28 +873,24 @@ class StripeTerminalPayment {
       }
 
       // Fetching readers also validates the Stripe service connection.
-      const readers = await this.fetchReaders();
-      if (readers === null) {
-        this.showServiceError();
-        return;
-      }
-      
-      // Update readers and show interface
-      this.readers = readers;
+      this.readers = await this.fetchReaders();
       this.showInterface();
-      
+
       // Load saved reader from localStorage
       this.loadSavedReader();
-      
+
     } catch (error) {
       console.error('Failed to initialize interface:', error);
-      this.showServiceError();
+      this.showServiceError(error.message);
     }
   }
 
+  // Resolves with the reader list, or rejects with the server's reason so the
+  // cashier sees e.g. "Invalid API Key provided" instead of a blank panel.
   async fetchReaders() {
+    let response;
     try {
-      const response = await jQuery.ajax({
+      response = await jQuery.ajax({
         url: this.ajaxUrl,
         type: 'POST',
         data: this.addPaymentRequestData({
@@ -903,20 +899,17 @@ class StripeTerminalPayment {
           order_id: this.config.orderId
         })
       });
-      
-      console.log('Fetch readers response:', response);
-      
-      if (response.success) {
-        console.log('Readers data:', response.data.readers);
-        return response.data.readers;
-      } else {
-        console.error('Failed to fetch readers:', response.data);
-        return null;
-      }
     } catch (error) {
-      console.error('Failed to fetch readers:', error);
-      return null;
+      throw new Error(this.strings.networkError || 'Network error occurred');
     }
+
+    console.log('Fetch readers response:', response);
+
+    if (!response || !response.success) {
+      throw this.createAjaxError(response && response.data, this.strings.readersError || 'Failed to load readers');
+    }
+
+    return response.data.readers || [];
   }
 
   showLoading() {
@@ -924,10 +917,14 @@ class StripeTerminalPayment {
     jQuery('.stripe-terminal-payment-section').hide();
   }
 
-  showServiceError() {
+  showServiceError(detail = '') {
+    const message = detail
+      ? `${this.strings.serviceError || 'Service error'} ${detail}`
+      : (this.strings.serviceError || 'Service error');
+    this.addToLog(message, 'error');
     jQuery('.stripe-terminal-loading').hide();
     jQuery('.stripe-terminal-payment-section').hide();
-    jQuery('.stripe-terminal-error').show().find('p').text(this.strings.serviceError || 'Service error');
+    jQuery('.stripe-terminal-error').show().find('p').text(message);
   }
 
   showReadersError() {

@@ -53,6 +53,31 @@ class LoggerTest extends TestCase {
 		$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
 	}
 
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_log_encodes_non_string_messages_as_single_line_json(): void {
+		\Mockery::mock( 'alias:WC_Logger' );
+		$wc_logger = \Mockery::mock();
+		$wc_logger->shouldReceive( 'log' )->once()->with(
+			'info',
+			'{"context":"get_reader_status_error","status":401}',
+			array( 'source' => Logger::WC_LOG_FILENAME )
+		);
+		Functions\when( 'wc_get_logger' )->justReturn( $wc_logger );
+		Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
+
+		Logger::log(
+			array(
+				'context' => 'get_reader_status_error',
+				'status'  => 401,
+			)
+		);
+
+		$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+	}
+
 	public function test_log_filename_constant_equals_plugin_slug(): void {
 		$this->assertSame( 'stripe-terminal-for-woocommerce', Logger::WC_LOG_FILENAME );
 	}

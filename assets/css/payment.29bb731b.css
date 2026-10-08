@@ -368,6 +368,8 @@
     border-radius: 8px;
     color: #ffffff;
     overflow: hidden;
+    /* Matches .stripe-terminal-payment-section; the log sits beside it, not inside it. */
+    max-width: 600px;
 }
 
 .stripe-terminal-logging-header {

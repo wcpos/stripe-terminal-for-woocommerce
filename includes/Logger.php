@@ -59,7 +59,9 @@ class Logger {
 			}
 
 			if ( ! \is_string( $message ) ) {
-				$message = print_r( $message, true );
+				// Single-line JSON. print_r() spans several lines, which the
+				// WooCommerce log viewer renders with a broken line-number gutter.
+				$message = wp_json_encode( $message );
 			}
 
 			self::$logger->log( '' !== $level ? $level : self::$log_level, $message, array( 'source' => self::WC_LOG_FILENAME ) );
