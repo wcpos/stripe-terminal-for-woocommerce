@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Taking a Terminal payment no longer fails with "The `payment_method_types` parameter is no longer supported".** Today's dependency update to stripe-php 22 (#143, unreleased) pinned the plugin to Stripe API version 2026-09-30, which rejects the `payment_method_types` parameter every Terminal PaymentIntent is created with; the live smoke test proved it and the update is reverted to stripe-php 21 (API version 2026-06-24). Dependabot no longer proposes stripe-php majors; a move to the newer API is a deliberate change.
+
 ## 0.0.37 - 2026-10-05
 
 ### Fixed

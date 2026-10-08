@@ -14,4 +14,11 @@ updates:
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Each stripe-php major pins a newer Stripe API version; 22.0 pins
+      # 2026-09-30.endive, which rejects payment_method_types on PaymentIntent
+      # create and so breaks every Terminal intent. A major moves by hand, with
+      # the live smoke green (see CHANGELOG Unreleased, 2026-10-08).
+      - dependency-name: "stripe/stripe-php"
+        update-types: ["version-update:semver-major"]
 
