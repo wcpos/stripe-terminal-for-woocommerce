@@ -1053,6 +1053,17 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Whether an intent belongs to WooCommerce POS Pro's ledger (a keypad leg, or an attempt Pro
+	 * adopted on upgrade): a split order's partial payment, which must never complete the order
+	 * through this panel.
+	 *
+	 * @param \Stripe\PaymentIntent $payment_intent Intent.
+	 */
+	private static function is_pro_intent( $payment_intent ): bool {
+		return ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) );
+	}
+
+	/**
 	 * Perform the payment-status lookup while the read timeout is active.
 	 *
 	 * @param WC_Order $order The WooCommerce order.
@@ -1097,6 +1108,11 @@ class StripeTerminalService {
 				}
 			}
 
+			// The transaction id may name a POS leg Pro drove or adopted: never this panel's payment.
+			if ( isset( $payment_intent ) && self::is_pro_intent( $payment_intent ) ) {
+				unset( $payment_intent );
+			}
+
 			// If we don't have a payment intent yet, search for it by order metadata.
 			if ( ! isset( $payment_intent ) ) {
 				$payment_intents = \Stripe\PaymentIntent::all(
@@ -1106,7 +1122,7 @@ class StripeTerminalService {
 				);
 
 				foreach ( $payment_intents->data as $pi ) {
-					if ( isset( $pi->metadata->order_id ) && $pi->metadata->order_id == $order_id ) {
+					if ( isset( $pi->metadata->order_id ) && $pi->metadata->order_id == $order_id && ! self::is_pro_intent( $pi ) ) {
 						$payment_intent = $pi;
 
 						break;

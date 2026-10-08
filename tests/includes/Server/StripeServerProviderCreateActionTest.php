@@ -100,7 +100,9 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 	public function test_dispatch_error_and_reader_read_error_do_not_cancel(): void {
 		$this->order();
 		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'reader_busy' ), $this->error( 'resource_missing' ), $this->ok( $this->intent() ) ) );
-		$this->assert_provider_error( $provider->create_reader_action( $this->row(), 'tmr_test' ), 'reader_busy' );
+		$error = $provider->create_reader_action( $this->row(), 'tmr_test' );
+		$this->assertInstanceOf( \WP_Error::class, $error );
+		$this->assertTrue( $error->get_error_data()['indeterminate'], 'an unreadable reader may still be collecting the intent: the leg stays pending' );
 		// The reader read, then the intent read (unpaid); no cancel: the unreadable reader may still hold it.
 		$this->assertCount( 4, $this->http->requests );
 		$this->assertSame( 'get', $this->http->requests[2]['method'] );

@@ -967,6 +967,42 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertSame( 'pi_panel', $result['payment_intent']['id'] ?? ( is_wp_error( $result ) ? 'error' : 'none' ) );
 	}
 
+	/**
+	 * The old panel's "Check Payment Status" on a split order before any panel attempt: the order's
+	 * transaction id is the POS keypad leg (Pro's metadata), so it is not this panel's payment, and
+	 * the metadata scan skips Pro's intents too. Nothing is written.
+	 */
+	public function test_check_payment_status_ignores_pro_intents(): void {
+		$service = new StripeTerminalService( 'sk_test_status_key' );
+		$client  = new StripeHttpClientFake(
+			array(
+				array(
+					'body'   => array( 'id' => 'pi_keypad', 'object' => 'payment_intent', 'status' => 'succeeded', 'amount' => 1000, 'currency' => 'usd', 'created' => 1700000000, 'metadata' => array( 'order_id' => '42', 'wcpos_payment_id' => 'A1234567-1234-4123-8123-123456789ABC' ) ),
+					'status' => 200,
+				),
+				array(
+					'body'   => array( 'object' => 'list', 'data' => array( array( 'id' => 'pi_keypad', 'object' => 'payment_intent', 'status' => 'succeeded', 'amount' => 1000, 'currency' => 'usd', 'created' => 1700000000, 'metadata' => array( 'order_id' => '42', 'wcpos_payment_id' => 'A1234567-1234-4123-8123-123456789ABC' ) ) ) ),
+					'status' => 200,
+				),
+			)
+		);
+		\Stripe\ApiRequestor::setHttpClient( $client );
+
+		$order = Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_transaction_id' )->andReturn( 'pi_keypad' );
+		$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
+		$order->shouldReceive( 'is_paid' )->andReturn( false );
+		$order->shouldReceive( 'update_meta_data' )->never();
+		$order->shouldReceive( 'save' )->never();
+
+		$result = $service->check_payment_status_from_stripe( $order );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'payment_intent_not_found', $result->get_error_code() );
+		$this->assertCount( 2, $client->requests );
+	}
+
 	// -----------------------------------------------------------------------
 	// confirm_payment_intent tests
 	// -----------------------------------------------------------------------
