@@ -509,7 +509,8 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-		if ( $this->uses_pro_panel() ) {
+		if ( $this->uses_pro_panel() || Legacy_Adoption::is_adopted( (string) $order->get_meta( '_stripe_terminal_payment_intent_id' ) ) ) {
+			// Pro's panel, or an attempt Pro adopted on upgrade: Pro reads the ledger and answers.
 			return wcpos_pro_order_pay_process( $order );
 		}
 
@@ -745,7 +746,22 @@ class Gateway extends WC_Payment_Gateway {
 	 * @param WC_Abstract_Order $order Order being refunded.
 	 */
 	private function has_legacy_charge( WC_Abstract_Order $order ): bool {
-		return '' !== (string) $order->get_meta( '_stripe_terminal_charge_id' ) || '' !== (string) $order->get_transaction_id();
+		if ( '' !== (string) $order->get_meta( '_stripe_terminal_charge_id' ) ) {
+			return true;
+		}
+		$transaction = (string) $order->get_transaction_id();
+		if ( '' === $transaction || ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Ledger' ) ) {
+			return '' !== $transaction;
+		}
+		// Free copies a ledger row's intent into the transaction id; that is Pro's leg, not an
+		// old-panel charge.
+		foreach ( \WCPOS\WooCommercePOS\Payments\Contract\Ledger::instance()->read( $order ) as $row ) {
+			$refs = $row['provider_refs'] ?? array();
+			if ( in_array( $transaction, array( $refs['action'] ?? null, $refs['stripe_payment_intent'] ?? null, $refs['payment_intent'] ?? null, $refs['transaction_id'] ?? null ), true ) ) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**

@@ -357,6 +357,43 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			}
 		}
 
+		/** A transaction id that is a ledger row's own intent is Pro's leg, not an old-panel charge: Pro's refusal stands. */
+		public function test_process_refund_does_not_fall_back_when_the_transaction_id_is_a_ledger_rows_intent(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_transaction_id' )->andReturn( 'pi_device' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'device', 'provider_refs' => array( 'payment_intent' => 'pi_device' ) ),
+			);
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_refund' )->once()->andReturn( new \WP_Error( 'wcpos_refund_not_allocatable' ) );
+				$result = $gateway->process_refund( 42, 50.0, 'why' );
+				$this->assertInstanceOf( \WP_Error::class, $result );
+				$this->assertSame( 'wcpos_refund_not_allocatable', $result->get_error_code() );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
+
+		/** The old panel's own form submit for an attempt Pro adopted is Pro's to answer. */
+		public function test_process_payment_hands_an_adopted_attempt_to_pro_even_with_moto_on(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes';
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( false );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_adopted' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			$GLOBALS['stwc_payment_id_for_action'] = array( 'pi_adopted' => 'row-1' );
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_process' )->once()->with( $order )->andReturn( array( 'result' => 'failure' ) );
+				$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
+			} finally {
+				$GLOBALS['stwc_payment_id_for_action'] = array();
+			}
+		}
+
 		/** A pending or voided row is not a sale to refund through Pro; the old path answers. */
 		public function test_process_refund_ignores_rows_that_do_not_count(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();

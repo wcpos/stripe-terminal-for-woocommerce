@@ -18,6 +18,8 @@ class LegacyAdoptionTest extends TestCase {
 	private $options = array();
 	/** Modified times per order id, as the order doubles report them. */
 	private $modified = array();
+	/** Order doubles by id, what wc_get_order() answers inside the lock. */
+	private $orders = array();
 
 	/** Arm Brain Monkey and the option double. */
 	protected function setUp(): void {
@@ -25,7 +27,13 @@ class LegacyAdoptionTest extends TestCase {
 		Monkey\setUp();
 		$this->options  = array();
 		$this->modified = array();
+		$this->orders   = array();
 		$GLOBALS['stwc_payment_id_for_action'] = array();
+		Functions\when( 'wc_get_order' )->alias(
+			function ( $id ) {
+				return $this->orders[ $id ] ?? null;
+			}
+		);
 		Functions\when( 'get_option' )->alias(
 			function ( $key, $default = false ) {
 				return $this->options[ $key ] ?? $default;
@@ -70,6 +78,7 @@ class LegacyAdoptionTest extends TestCase {
 		$order->shouldReceive( 'needs_payment' )->andReturn( $needs_payment );
 		$order->shouldReceive( 'get_total' )->andReturn( '12.50' );
 		$order->shouldReceive( 'get_currency' )->andReturn( 'USD' );
+		$this->orders[ $id ] = $order;
 		return $order;
 	}
 
@@ -168,6 +177,22 @@ class LegacyAdoptionTest extends TestCase {
 		Legacy_Adoption::upgrade();
 
 		$this->assertSame( array( 'pi_untouched' ), $recorded );
+	}
+
+	/** The order is re-read under the lock; a till payment that landed meanwhile stops the adoption. */
+	public function test_adoption_re_reads_the_order_under_the_lock(): void {
+		$stale = $this->order( 6, 'pi_meanwhile' );
+		// The copy wc_get_order() answers inside the lock: paid meanwhile.
+		$this->order( 6, 'pi_meanwhile', '', false );
+		$this->options['stwc_adoption_boundary'] = 6;
+		$this->options['stwc_adoption_started']  = PHP_INT_MAX;
+		Functions\expect( 'wc_get_orders' )->once()->andReturn( array( $stale ) );
+		$recorded = array();
+		$this->record_adoptions( $recorded );
+
+		Legacy_Adoption::upgrade();
+
+		$this->assertSame( array(), $recorded );
 	}
 
 	/** Once the version is recorded, nothing runs. */

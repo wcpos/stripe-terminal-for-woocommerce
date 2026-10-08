@@ -573,6 +573,10 @@ class StripeTerminalService {
 	 * @return array|WP_Error The confirmed payment intent or error.
 	 */
 	public function confirm_payment_intent( string $payment_intent_id, WC_Order $order ) {
+		if ( Legacy_Adoption::is_adopted( $payment_intent_id ) ) {
+			// Pro adopted this attempt on upgrade: its outcome is Pro's to record.
+			return new WP_Error( 'stwc_intent_adopted', __( 'This payment is now handled by WooCommerce POS Pro; reopen the order from the POS.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 409 ) );
+		}
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
@@ -1015,6 +1019,9 @@ class StripeTerminalService {
 	 * @return array|WP_Error The payment status information or error.
 	 */
 	public function check_payment_status_from_stripe( WC_Order $order ) {
+		if ( Legacy_Adoption::is_adopted( (string) $order->get_meta( '_stripe_terminal_payment_intent_id' ) ) ) {
+			return new WP_Error( 'stwc_intent_adopted', __( 'This payment is now handled by WooCommerce POS Pro; reopen the order from the POS.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 409 ) );
+		}
 		return $this->with_read_timeout(
 			function () use ( $order ) {
 				return $this->check_payment_status_with_read_timeout( $order );

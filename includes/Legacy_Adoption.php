@@ -82,10 +82,13 @@ final class Legacy_Adoption {
 			$result = self::with_order_lock(
 				$order->get_id(),
 				static function () use ( $order, $intent ) {
-					if ( self::is_adopted( $intent ) ) {
+					// The page was loaded before the lock: re-read the order under it, and repeat
+					// the checks on that copy, so a leg a till recorded meanwhile is kept.
+					$fresh = wc_get_order( $order->get_id() );
+					if ( ! $fresh || self::is_adopted( $intent ) || $intent !== (string) $fresh->get_meta( self::META_INTENT ) || '' !== (string) $fresh->get_meta( self::META_STATUS ) || $fresh->is_paid() || ! $fresh->needs_payment() ) {
 						return null;
 					}
-					return wcpos_pro_adopt_legacy_attempt( $order, Settings::GATEWAY_ID, $intent, (string) $order->get_total(), $order->get_currency() );
+					return wcpos_pro_adopt_legacy_attempt( $fresh, Settings::GATEWAY_ID, $intent, (string) $fresh->get_total(), $fresh->get_currency() );
 				}
 			);
 			if ( is_wp_error( $result ) ) {
