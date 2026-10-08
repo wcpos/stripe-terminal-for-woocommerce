@@ -1485,5 +1485,41 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			return $order;
 		}
+
+		/** With Phone Order on, a transaction id Free copied from a Pro keypad leg is not evidence of an old-panel payment: nothing is recovered, nothing completed. */
+		public function test_process_payment_does_not_recover_from_a_pro_leg_transaction_id(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
+
+			$_POST['woocommerce_pay'] = '1';
+
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( false );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( '' );
+			$order->shouldReceive( 'get_transaction_id' )->andReturn( 'pi_keypad' );
+			$order->shouldReceive( 'payment_complete' )->never();
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => \WCPOS\WooCommercePOS\StripeTerminal\Settings::GATEWAY_ID, 'status' => 'captured', 'capture_mode' => 'server', 'provider_refs' => array( 'action' => 'pi_keypad', 'transaction_id' => 'pi_keypad' ) ),
+			);
+
+			$stripe_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+			$stripe_service->shouldReceive( 'check_payment_status_from_stripe' )->never();
+			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( $gateway, $stripe_service );
+
+			Functions\stubs( array( '__' => function ( $text ) { return $text; } ) );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( 'wc_add_notice' )->justReturn( null );
+			try {
+				$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
 	}
 }

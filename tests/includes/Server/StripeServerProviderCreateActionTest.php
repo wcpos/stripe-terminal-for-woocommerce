@@ -58,12 +58,13 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 
 	public function test_dispatch_failure_cancels_intent(): void {
 		$this->order();
-		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error(), $this->ok( array( 'id' => 'tmr_test', 'action' => null ) ), $this->ok( $this->intent( array( 'status' => 'canceled' ) ) ) ) );
+		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error(), $this->ok( array( 'id' => 'tmr_test', 'action' => null ) ), $this->ok( $this->intent() ), $this->ok( $this->intent( array( 'status' => 'canceled' ) ) ) ) );
 		$this->assert_provider_error( $provider->create_reader_action( $this->row(), 'tmr_test' ), 'card_declined' );
-		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[3]['url'] );
 		$this->assertSame( 'get', $this->http->requests[2]['method'] );
 		$this->assertStringEndsWith( '/terminal/readers/tmr_test', $this->http->requests[2]['url'] );
-		$this->assertCount( 4, $this->http->requests );
+		$this->assertStringEndsWith( '/payment_intents/pi_test', $this->http->requests[3]['url'] );
+		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[4]['url'] );
+		$this->assertCount( 5, $this->http->requests );
 	}
 
 	/** @dataProvider active_action_statuses */
@@ -139,5 +140,47 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 		$this->assertStringContainsString( 'Currency CAD is not supported', $error->get_error_message() );
 		$this->assertCount( 1, $this->http->requests );
 		$this->assertStringEndsWith( '/account', $this->http->requests[0]['url'] );
+	}
+
+	/** A create Stripe did not answer may exist: Pro replays it under the same idempotency key. */
+	public function test_unanswered_create_is_indeterminate(): void {
+		$this->order();
+		$provider = $this->provider( array( \Stripe\Exception\ApiConnectionException::factory( 'Connection lost' ) ) );
+		$error    = $provider->create_reader_action( $this->row(), 'tmr_test' );
+		$this->assertInstanceOf( \WP_Error::class, $error );
+		$this->assertSame( 'stripe_create_unanswered', $error->get_error_code() );
+		$this->assertTrue( $error->get_error_data()['indeterminate'] );
+		$this->assertCount( 1, $this->http->requests );
+	}
+
+	/** On a replay the reader may have moved on while this intent was paid: the ref is returned, nothing is retired. */
+	public function test_dispatch_refused_after_the_intent_succeeded_returns_the_ref(): void {
+		$this->order();
+		$other    = array( 'id' => 'tmr_test', 'action' => array( 'status' => 'in_progress', 'process_payment_intent' => array( 'payment_intent' => 'pi_other' ) ) );
+		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'terminal_reader_busy' ), $this->ok( $other ), $this->ok( $other ), $this->ok( $this->intent( array( 'status' => 'succeeded', 'amount_received' => 1250 ) ) ) ) );
+		$this->assertSame( array( 'ref' => 'pi_test', 'expires_at' => null ), $provider->create_reader_action( $this->row(), 'tmr_test' ) );
+		$this->assertCount( 5, $this->http->requests );
+	}
+
+	/** A retry on another reader changes the metadata under the row's idempotency key: the first dispatch may be live. */
+	public function test_idempotency_conflict_on_replay_is_indeterminate(): void {
+		$this->order();
+		$provider = $this->provider( array( array( 'body' => array( 'error' => array( 'type' => 'idempotency_error', 'message' => 'Keys for idempotent requests can only be used with the same parameters they were first used with.' ) ), 'status' => 400 ) ) );
+		$error    = $provider->create_reader_action( $this->row(), 'tmr_other' );
+		$this->assertInstanceOf( \WP_Error::class, $error );
+		$this->assertTrue( $error->get_error_data()['indeterminate'] );
+	}
+
+	/** An unanswered dispatch whose reader cannot be read back may be on the reader already. */
+	public function test_unanswered_dispatch_with_unreadable_reader_is_indeterminate(): void {
+		$this->order();
+		// Dispatch lost; the service's timeout recovery cancels the reader action (idle) and retries once, lost again; the readback fails.
+		$provider = $this->provider( array( $this->ok( $this->intent() ), \Stripe\Exception\ApiConnectionException::factory( 'Connection lost' ), $this->error( 'resource_missing' ), \Stripe\Exception\ApiConnectionException::factory( 'Connection lost' ), $this->error( 'resource_missing' ) ) );
+		$error    = $provider->create_reader_action( $this->row(), 'tmr_test' );
+		$this->assertInstanceOf( \WP_Error::class, $error );
+		$this->assertSame( 'stripe_dispatch_unanswered', $error->get_error_code() );
+		$this->assertTrue( $error->get_error_data()['indeterminate'] );
+		$this->assertStringEndsWith( '/terminal/readers/tmr_test', end( $this->http->requests )['url'] );
+		$this->assertCount( 5, $this->http->requests );
 	}
 }

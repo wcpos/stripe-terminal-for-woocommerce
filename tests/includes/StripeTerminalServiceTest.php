@@ -39,6 +39,9 @@ class StripeHttpClientFake implements \Stripe\HttpClient\ClientInterface {
 		);
 
 		$response = array_shift( $this->responses );
+		if ( $response instanceof \Throwable ) {
+			throw $response;
+		}
 
 		return array( wp_json_encode( $response['body'] ), $response['status'], array() );
 	}

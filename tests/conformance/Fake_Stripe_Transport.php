@@ -152,15 +152,13 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 			}
 			$entry = &$this->intents[ $ref ];
 			if ( 'cancel' === ( $m[2] ?? '' ) ) {
-				if ( 'succeeded' === $entry['data']['status'] ) {
-					return self::error( 'payment_intent_unexpected_state', 'This PaymentIntent has already succeeded.', 400 );
+				if ( in_array( $entry['data']['status'], array( 'succeeded', 'canceled' ), true ) ) {
+					return self::error( 'payment_intent_unexpected_state', 'This PaymentIntent cannot be canceled.', 400 );
 				}
 				$this->apply_state( $entry, 'canceled' );
 			} elseif ( 'capture' === ( $m[2] ?? '' ) ) {
-				if ( 'requires_capture' !== $entry['data']['status'] ) {
-					return self::error( 'payment_intent_unexpected_state', 'This PaymentIntent cannot be captured.', 400 );
-				}
-				$this->apply_state( $entry, 'succeeded' );
+				// Every intent the adapter creates is capture_method automatic: there is nothing to capture.
+				return self::error( 'payment_intent_unexpected_state', 'This PaymentIntent cannot be captured.', 400 );
 			}
 			return self::ok( $entry['data'] );
 		}
@@ -170,7 +168,13 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 				return self::error( 'resource_missing', 'No such payment_intent: ' . $ref, 404 );
 			}
 			$data = $this->intents[ $ref ]['data'];
+			if ( 'succeeded' !== $data['status'] || (int) ( $params['amount'] ?? $data['amount_received'] ) > $data['amount_received'] ) {
+				return self::error( 'charge_not_captured', 'Only a captured amount can be refunded.', 400 );
+			}
 			return self::ok( array( 'id' => 're_' . ( ++$this->seq ), 'object' => 'refund', 'status' => $this->refund_status, 'amount' => (int) ( $params['amount'] ?? $data['amount_received'] ), 'currency' => $data['currency'], 'payment_intent' => $ref, 'charge' => $data['latest_charge']['id'] ?? null, 'metadata' => $params['metadata'] ?? array() ) );
+		}
+		if ( preg_match( '#^/v1/charges/([^/]+)$#', $path, $m ) && isset( $this->charges[ $m[1] ] ) ) {
+			return self::ok( $this->intents[ $this->charges[ $m[1] ] ]['data']['latest_charge'] );
 		}
 		if ( '/v1/account' === $path ) {
 			return self::ok( array( 'id' => 'acct_conformance', 'object' => 'account', 'country' => 'IE', 'default_currency' => 'eur' ) );
@@ -182,7 +186,7 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 	 * Move an intent (and its reader's action) to a named state.
 	 *
 	 * @param array  $entry Intent entry, by reference.
-	 * @param string $state created, succeeded, short, usd, requires_capture, declined, canceled.
+	 * @param string $state created, succeeded, short, usd, declined, canceled.
 	 */
 	private function apply_state( array &$entry, string $state ): void {
 		$data   = &$entry['data'];
@@ -205,12 +209,6 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 				}
 				$data['latest_charge'] = $data['latest_charge'] ?? $this->charge( $data['id'] );
 				$action                = array( 'status' => 'succeeded' );
-				break;
-			case 'requires_capture':
-				$data['status']          = 'requires_capture';
-				$data['amount_received'] = 0;
-				$data['latest_charge']   = $data['latest_charge'] ?? $this->charge( $data['id'] );
-				$action                  = array( 'status' => 'succeeded' );
 				break;
 			case 'declined':
 				$data['status']             = 'requires_payment_method';

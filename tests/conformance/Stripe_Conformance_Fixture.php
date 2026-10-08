@@ -22,7 +22,9 @@ require_once __DIR__ . '/Recording_Stripe_Provider.php';
 /**
  * Capabilities not claimed, and why: `expiry` (Stripe has no provider-side expiry; Pro's deadline
  * void is the only one), `cancel_unsupported` (cancel exists), `prompt` (smart readers take no
- * cashier prompts through the API), `test_live_isolation` (the adapter's credentials are the
+ * cashier prompts through the API), `manual_capture` (the adapter's capture() exists, but every
+ * intent it creates is `capture_method: automatic`, so `requires_capture` is unreachable and a
+ * fake that invents it would certify nothing), `test_live_isolation` (the adapter's credentials are the
  * gateway's current mode, so an action created in test mode would be fetched with live keys after
  * a mode switch; Stripe answers 404 rather than the wrong money, and the webhook refuses a mode
  * mismatch, but the lesson as written is not met).
@@ -87,7 +89,7 @@ final class Stripe_Conformance_Fixture implements Conformance_Fixture {
 	}
 
 	public function supports( string $capability ): bool {
-		return in_array( $capability, array( 'cancel', 'cancel_final', 'cancel_requested_then_completed', 'webhook', 'refund', 'partial_refund', 'manual_capture', 'legacy_adoption', 'historical_webview_refund' ), true );
+		return in_array( $capability, array( 'cancel', 'cancel_final', 'cancel_requested_then_completed', 'webhook', 'refund', 'partial_refund', 'legacy_adoption', 'historical_webview_refund' ), true );
 	}
 
 	public function script( string $scenario ): void {
@@ -104,7 +106,6 @@ final class Stripe_Conformance_Fixture implements Conformance_Fixture {
 			'cancel_final'                    => array( array( 'created' ), 'idle' ),
 			'amount_mismatch'                 => array( array( 'short' ) ),
 			'currency_mismatch'               => array( array( 'usd' ) ),
-			'manual_capture'                  => array( array( 'requires_capture' ) ),
 			'refund_ok'                       => array( array( 'succeeded' ), 'idle', 'succeeded' ),
 			'refund_pending'                  => array( array( 'succeeded' ), 'idle', 'pending' ),
 			'refund_failed'                   => array( array( 'succeeded' ), 'idle', 'failed' ),
@@ -123,6 +124,10 @@ final class Stripe_Conformance_Fixture implements Conformance_Fixture {
 			throw new \OutOfBoundsException( 'Unknown webhook event: ' . $event );
 		}
 		$ref = (string) $this->transport->current;
+		// `failed` moves the fake's record to a decline, which Stripe cannot do to a succeeded intent:
+		// the lesson it serves (webhook_out_of_order) is a provider whose current record contradicts
+		// captured money, which Free must refuse. A real stale decline event after success reads the
+		// success on the adapter's fresh read instead (decline_patch()).
 		if ( wcpos_pro_payment_id_for_action( 'stripe', $ref ) ) {
 			// Model an actual 0.x intent: the old panel wrote only order_id into the metadata.
 			$this->transport->strip_payment_metadata( $ref );

@@ -318,6 +318,26 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Retrieve a charge without order mutations: a historical row may name the charge, not the intent.
+	 *
+	 * @param string $id Charge ID.
+	 * @return array|WP_Error Charge or error.
+	 */
+	public function retrieve_charge( string $id ) {
+		try {
+			$charge = $this->timed(
+				'retrieve_charge',
+				function () use ( $id ) {
+					return $this->get_stripe_client()->charges->retrieve( $id );
+				}
+			);
+			return $charge->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'retrieve_charge_error' );
+		}
+	}
+
+	/**
 	 * Cancel a POS intent without order mutations.
 	 *
 	 * @param string $id PaymentIntent ID.
