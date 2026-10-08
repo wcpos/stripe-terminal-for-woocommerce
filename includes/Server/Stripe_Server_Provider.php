@@ -143,10 +143,10 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				if ( self::unanswered( $result ) ) {
 					return $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() );
 				}
-				// An unreadable reader may still be collecting this unpaid intent: keep the leg pending
-				// for the replay rather than fail it. Only a readable reader that does not hold the
-				// intent lets it be retired.
-				if ( is_wp_error( $reader ) ) {
+				// A reader read that got no answer may hide a reader still collecting this unpaid
+				// intent: keep the leg pending for the replay rather than fail it. A reader Stripe
+				// answers for (not holding the intent, or no longer existing) lets it be retired.
+				if ( is_wp_error( $reader ) && self::unanswered( $reader ) ) {
 					return $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() );
 				}
 				$this->cancel_best_effort( $intent['id'] );

@@ -99,16 +99,25 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 
 	public function test_dispatch_error_and_reader_read_error_do_not_cancel(): void {
 		$this->order();
-		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'reader_busy' ), $this->error( 'resource_missing' ), $this->ok( $this->intent() ) ) );
+		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'reader_busy' ), \Stripe\Exception\ApiConnectionException::factory( 'Connection lost' ), $this->ok( $this->intent() ) ) );
 		$error = $provider->create_reader_action( $this->row(), 'tmr_test' );
 		$this->assertInstanceOf( \WP_Error::class, $error );
-		$this->assertTrue( $error->get_error_data()['indeterminate'], 'an unreadable reader may still be collecting the intent: the leg stays pending' );
-		// The reader read, then the intent read (unpaid); no cancel: the unreadable reader may still hold it.
+		$this->assertTrue( $error->get_error_data()['indeterminate'], 'a reader read that got no answer may hide a reader still collecting the intent: the leg stays pending' );
+		// The reader read, then the intent read (unpaid); no cancel: the reader may still hold it.
 		$this->assertCount( 4, $this->http->requests );
 		$this->assertSame( 'get', $this->http->requests[2]['method'] );
 		$this->assertStringEndsWith( '/terminal/readers/tmr_test', $this->http->requests[2]['url'] );
 		$this->assertSame( 'get', $this->http->requests[3]['method'] );
 		$this->assertStringEndsWith( '/payment_intents/pi_test', $this->http->requests[3]['url'] );
+	}
+
+	/** A reader Stripe no longer knows cannot be collecting the intent: a refused dispatch retires it. */
+	public function test_dispatch_refused_on_a_missing_reader_retires_the_intent(): void {
+		$this->order();
+		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'reader_busy' ), $this->error( 'resource_missing' ), $this->ok( $this->intent() ), $this->ok( $this->intent( array( 'status' => 'canceled' ) ) ) ) );
+		$this->assert_provider_error( $provider->create_reader_action( $this->row(), 'tmr_test' ), 'reader_busy' );
+		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[4]['url'] );
+		$this->assertCount( 5, $this->http->requests );
 	}
 
 	public function test_missing_order(): void {
