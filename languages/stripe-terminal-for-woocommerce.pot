@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-10-08T17:58:21+00:00\n"
+"POT-Creation-Date: 2026-10-08T19:11:06+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: stripe-terminal-for-woocommerce\n"
@@ -50,28 +50,28 @@ msgstr ""
 msgid "Sorry, you are not allowed to do that."
 msgstr ""
 
-#: includes/API.php:580
+#: includes/API.php:582
 msgid "Stripe Terminal: Order completed from the payment_intent.succeeded webhook."
 msgstr ""
 
-#: includes/API.php:591
+#: includes/API.php:593
 msgid "Stripe Terminal: Payment Intent succeeded but its amount does not match the order total; the order was not completed. Check the payment in Stripe."
 msgstr ""
 
 #. translators: 1: Payment intent ID, 2: payment amount, 3: payment currency, 4: payment status.
-#: includes/API.php:597
+#: includes/API.php:599
 #, php-format
 msgid "Stripe Terminal: Payment Intent succeeded - ID: %1$s, Amount: %2$s %3$s, Status: %4$s. Order ready for processing."
 msgstr ""
 
 #. translators: 1: Payment intent ID, 2: charge ID, 3: payment amount, 4: payment currency, 5: payment status.
-#: includes/API.php:683
+#: includes/API.php:685
 #, php-format
 msgid "Stripe Terminal: Charge succeeded - Payment Intent: %1$s, Charge: %2$s, Amount: %3$s %4$s, Status: %5$s. Order ready for processing."
 msgstr ""
 
 #. translators: 1: error message, 2: error code, 3: decline code, 4: payment intent ID
-#: includes/API.php:736
+#: includes/API.php:738
 #, php-format
 msgid "Stripe Terminal: Payment declined - %1$s (code: %2$s, decline_code: %3$s). Payment Intent: %4$s"
 msgstr ""
@@ -523,18 +523,18 @@ msgid "<strong>%1$s</strong> (ID: %2$s)<br>Address: %3$s<br>%4$s"
 msgstr ""
 
 #. translators: 1: Payment intent ID, 2: charge ID.
-#: includes/StripeTerminalService.php:925
+#: includes/StripeTerminalService.php:928
 #, php-format
 msgid "Stripe Terminal payment detected via manual check. Payment Intent: %1$s, Charge: %2$s. Order ready for processing."
 msgstr ""
 
 #. translators: 1: Payment intent ID, 2: charge ID.
-#: includes/StripeTerminalService.php:1089
+#: includes/StripeTerminalService.php:1092
 #, php-format
 msgid "Stripe Terminal payment detected via webhook. Payment Intent: %1$s, Charge: %2$s. Order ready for processing."
 msgstr ""
 
-#: includes/StripeTerminalService.php:1135
+#: includes/StripeTerminalService.php:1138
 msgid "Payment failed via Stripe Terminal."
 msgstr ""
 
