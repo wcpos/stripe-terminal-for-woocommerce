@@ -499,6 +499,55 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		}
 
 		/**
+		 * Greptile on #144: a delivery that finds the claim held must not be
+		 * acknowledged, or Stripe never retries it and an order whose claim
+		 * holder died stays unpaid.
+		 */
+		public function test_busy_webhook_delivery_is_not_acknowledged_so_stripe_retries(): void {
+			$held                                 = json_encode( array( 'token' => 'other-request', 'expires_at' => time() + 60 ) );
+			$this->wpdb->rows[ self::CLAIM_KEY ] = $held;
+
+			$response = $this->deliver_webhook();
+
+			$this->assertInstanceOf( \WP_Error::class, $response );
+			$this->assertSame( 'webhook_order_busy', $response->get_error_code() );
+			$this->assertSame( array( 'status' => 409 ), $response->get_error_data() );
+			$this->assertSame( 0, $this->payment_complete_calls );
+			$this->assertSame( 'pending', $this->row['status'] );
+			$this->assertSame( array(), $this->notes, 'the retried delivery adds the notes' );
+			$this->assertSame( $held, $this->wpdb->rows[ self::CLAIM_KEY ] );
+
+			// The holder died: Stripe's retry after the claim expired completes the order.
+			$this->wpdb->rows[ self::CLAIM_KEY ] = json_encode( array( 'token' => 'other-request', 'expires_at' => time() - 1 ) );
+
+			$this->assert_acknowledged( $this->deliver_webhook() );
+			$this->assert_completed_once();
+			$this->assertContains( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', $this->notes );
+		}
+
+		public function test_completing_webhook_delivery_is_acknowledged(): void {
+			$this->assert_acknowledged( $this->deliver_webhook() );
+
+			$this->assert_completed_once();
+			$this->assertContains( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', $this->notes );
+		}
+
+		public function test_already_paid_webhook_delivery_is_acknowledged(): void {
+			// The webhook request loads the order while it is unpaid; order-pay then completes it.
+			$this->in_request( 'webhook' );
+			wc_get_order( 42 );
+			$this->in_request( 'order-pay' );
+			$this->run_order_pay();
+			$this->notes = array();
+
+			$this->in_request( 'webhook' );
+			$this->assert_acknowledged( $this->deliver_webhook() );
+
+			$this->assert_completed_once();
+			$this->assertNotContains( 'Stripe Terminal: Order completed from the payment_intent.succeeded webhook.', $this->notes );
+		}
+
+		/**
 		 * HPOS keeps its own per-request OrderCache, which the reload must clear too.
 		 *
 		 * @runInSeparateProcess
@@ -596,6 +645,49 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				$method->setAccessible( true );
 			}
 			$method->invoke( $api, $payment_intent );
+		}
+
+		/** A signed payment_intent.succeeded delivery through the REST handler. */
+		private function deliver_webhook() {
+			$secret  = 'whsec_test';
+			$payload = (string) json_encode(
+				array(
+					'id'     => 'evt_race',
+					'object' => 'event',
+					'type'   => 'payment_intent.succeeded',
+					'data'   => array(
+						'object' => array(
+							'id'                   => 'pi_race',
+							'object'               => 'payment_intent',
+							'latest_charge'        => 'ch_race',
+							'livemode'             => false,
+							'metadata'             => array( 'order_id' => '42' ),
+							'amount'               => 1000,
+							'currency'             => 'usd',
+							'status'               => 'succeeded',
+							'payment_method_types' => array( 'card_present' ),
+						),
+					),
+				)
+			);
+			$time    = time();
+			Functions\when( 'get_option' )->alias(
+				function ( $name, $fallback = false ) use ( $secret ) {
+					return 'woocommerce_stripe_terminal_for_woocommerce_settings' === $name ? array( 'webhook_secret' => $secret ) : array();
+				}
+			);
+			Functions\when( 'rest_ensure_response' )->returnArg();
+			$request = \Mockery::mock( \WP_REST_Request::class );
+			$request->shouldReceive( 'get_body' )->andReturn( $payload );
+			$request->shouldReceive( 'get_header' )->with( 'stripe-signature' )->andReturn( 't=' . $time . ',v1=' . hash_hmac( 'sha256', $time . '.' . $payload, $secret ) );
+			$api = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+
+			return $api->handle_webhook( $request );
+		}
+
+		private function assert_acknowledged( $response ): void {
+			$this->assertNotInstanceOf( \WP_Error::class, $response );
+			$this->assertSame( array( 'success' => true, 'message' => 'Webhook handled successfully.' ), $response );
 		}
 
 		private function run_order_pay( $stripe_service = null ): array {
