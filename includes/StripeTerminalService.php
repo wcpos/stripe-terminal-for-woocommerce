@@ -1065,9 +1065,24 @@ class StripeTerminalService {
 
 			$order_id = $order->get_id();
 
-				// First, try to get payment intent from order transaction ID.
-				$transaction_id = $order->get_transaction_id();
-			if ( $transaction_id ) {
+			// The panel's own recorded intent first: the order's transaction id may be a POS keypad
+			// leg Free copied there, which is a partial payment and never this panel's attempt.
+			$recorded_payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
+			if ( $recorded_payment_intent_id ) {
+				try {
+					$payment_intent = \Stripe\PaymentIntent::retrieve( $recorded_payment_intent_id );
+				} catch ( \Stripe\Exception\InvalidRequestException $e ) {
+					if ( 404 !== $e->getHttpStatus() ) {
+						return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
+					}
+
+					Logger::log( 'Stripe Terminal manual status check: recorded payment intent not found, falling back to the transaction id.' );
+				}
+			}
+
+			// Then the order transaction id, for an order completed before the intent was recorded.
+			$transaction_id = $order->get_transaction_id();
+			if ( ! isset( $payment_intent ) && $transaction_id ) {
 				try {
 					// Check if it's a payment intent ID.
 					if ( 0 === strpos( $transaction_id, 'pi_' ) ) {
@@ -1079,22 +1094,6 @@ class StripeTerminalService {
 					}
 				} catch ( \Stripe\Exception\InvalidRequestException $e ) {
 					Logger::log( 'Stripe Terminal manual status check: transaction ID not found in Stripe, falling back to metadata search.' );
-				}
-			}
-
-			// If intent metadata exists, retrieve that intent directly before scanning.
-			if ( ! isset( $payment_intent ) ) {
-				$recorded_payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
-				if ( $recorded_payment_intent_id ) {
-					try {
-						$payment_intent = \Stripe\PaymentIntent::retrieve( $recorded_payment_intent_id );
-					} catch ( \Stripe\Exception\InvalidRequestException $e ) {
-						if ( 404 !== $e->getHttpStatus() ) {
-							return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
-						}
-
-						Logger::log( 'Stripe Terminal manual status check: recorded payment intent not found, falling back to metadata search.' );
-					}
 				}
 			}
 

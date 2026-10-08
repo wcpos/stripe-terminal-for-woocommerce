@@ -3,7 +3,7 @@
 ## Unreleased
 
 - A POS payment whose create Stripe did not answer (a dropped connection or timeout) now stays pending and resumes on the same PaymentIntent when the till retries or the sweeper runs; before, the leg was dropped while the intent could already be on the reader.
-- A decline Stripe reports by webhook fails the POS leg the way polling does, after a fresh read of the intent: a retry already on the reader is left to polling, a paid intent reports its money, and a confirmed decline is retired so nothing can charge it again. A stale decline arriving after the payment was captured is refused and logged instead of ignored.
+- A decline Stripe reports by webhook fails the POS leg the way polling does, after a fresh read of the intent: a retry already on the reader is left to polling, a paid intent reports its money, and a confirmed decline is retired so nothing can charge it again. A stale decline arriving after the payment was captured reports the capture; a provider record that contradicts captured money is refused and logged instead of ignored.
 - A replayed POS payment whose reader has moved on, or whose retry picked another reader, is no longer failed while the intent may be live or paid: the intent is read first, and an idempotency conflict keeps the leg pending.
 - A refund from the POS of an order paid on the previous order-pay panel finds the Stripe payment by the order's transaction id, charge ids included (Canadian orders check the charge for Interac).
 - The previous panel's Retry no longer puts an intent back on a reader once the POS has adopted it.

@@ -99,11 +99,14 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 
 	public function test_dispatch_error_and_reader_read_error_do_not_cancel(): void {
 		$this->order();
-		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'reader_busy' ), $this->error( 'resource_missing' ) ) );
+		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'reader_busy' ), $this->error( 'resource_missing' ), $this->ok( $this->intent() ) ) );
 		$this->assert_provider_error( $provider->create_reader_action( $this->row(), 'tmr_test' ), 'reader_busy' );
-		$this->assertCount( 3, $this->http->requests );
+		// The reader read, then the intent read (unpaid); no cancel: the unreadable reader may still hold it.
+		$this->assertCount( 4, $this->http->requests );
 		$this->assertSame( 'get', $this->http->requests[2]['method'] );
 		$this->assertStringEndsWith( '/terminal/readers/tmr_test', $this->http->requests[2]['url'] );
+		$this->assertSame( 'get', $this->http->requests[3]['method'] );
+		$this->assertStringEndsWith( '/payment_intents/pi_test', $this->http->requests[3]['url'] );
 	}
 
 	public function test_missing_order(): void {
@@ -159,6 +162,16 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 		$other    = array( 'id' => 'tmr_test', 'action' => array( 'status' => 'in_progress', 'process_payment_intent' => array( 'payment_intent' => 'pi_other' ) ) );
 		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'terminal_reader_busy' ), $this->ok( $other ), $this->ok( $other ), $this->ok( $this->intent( array( 'status' => 'succeeded', 'amount_received' => 1250 ) ) ) ) );
 		$this->assertSame( array( 'ref' => 'pi_test', 'expires_at' => null ), $provider->create_reader_action( $this->row(), 'tmr_test' ) );
+		$this->assertCount( 5, $this->http->requests );
+	}
+
+	/** A refused dispatch whose reader cannot be read back still reads the intent: on a replay it may be paid. */
+	public function test_dispatch_refused_with_unreadable_reader_reads_the_intent(): void {
+		$this->order();
+		$other    = array( 'id' => 'tmr_test', 'action' => array( 'status' => 'in_progress', 'process_payment_intent' => array( 'payment_intent' => 'pi_other' ) ) );
+		$provider = $this->provider( array( $this->ok( $this->intent() ), $this->error( 'terminal_reader_busy' ), $this->ok( $other ), $this->error( 'resource_missing' ), $this->ok( $this->intent( array( 'status' => 'succeeded', 'amount_received' => 1250 ) ) ) ) );
+		$this->assertSame( array( 'ref' => 'pi_test', 'expires_at' => null ), $provider->create_reader_action( $this->row(), 'tmr_test' ) );
+		$this->assertStringEndsWith( '/payment_intents/pi_test', end( $this->http->requests )['url'] );
 		$this->assertCount( 5, $this->http->requests );
 	}
 

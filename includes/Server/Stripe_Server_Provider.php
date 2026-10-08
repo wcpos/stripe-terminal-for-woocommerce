@@ -116,10 +116,12 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				// Dispatch may have landed despite the error, and on a replay the intent may already be
 				// paid: read before deciding, and never retire an intent that may carry money.
 				$reader = $this->service->get_reader( $reader_id );
-				if ( is_wp_error( $reader ) ) {
-					return self::unanswered( $result ) ? $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() ) : self::error( $result );
+				if ( is_wp_error( $reader ) && self::unanswered( $result ) ) {
+					return $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() );
 				}
-				$action = $reader['action'] ?? array();
+				// An unreadable reader after a refusal still gets the intent read below: on a replay
+				// the intent may be live or paid.
+				$action = is_wp_error( $reader ) ? array() : ( $reader['action'] ?? array() );
 				if ( ( $action['process_payment_intent']['payment_intent'] ?? null ) === $intent['id']
 					&& in_array( $action['status'] ?? '', array( 'in_progress', 'succeeded' ), true ) ) {
 					return array(
@@ -141,7 +143,11 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				if ( self::unanswered( $result ) ) {
 					return $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() );
 				}
-				$this->cancel_best_effort( $intent['id'] );
+				// Retire the unpaid intent only when the reader was read and does not hold it; an
+				// unreadable reader may still be collecting it.
+				if ( ! is_wp_error( $reader ) ) {
+					$this->cancel_best_effort( $intent['id'] );
+				}
 				return self::error( $result );
 			}
 			return array(
