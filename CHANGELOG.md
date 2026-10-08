@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Add a Stripe Terminal smart-reader checkout tile for WooCommerce POS 1.11 through WooCommerce POS Pro 1.11.0 or newer; legacy checkout remains unchanged.
+- Requires WooCommerce POS Pro 2.0.0 or newer; the plugin registers nothing and shows an admin notice on older or missing Pro.
+- Web checkout removed: Stripe Terminal is no longer offered on the shop's classic or Blocks checkout, and the "Enable Stripe Terminal for web checkout" setting is gone. The POS keypad and the POS order-pay page are the only surfaces.
+- If you had web checkout enabled, nothing changes on the POS; the shop checkout simply no longer lists Stripe Terminal.
+- Add a Stripe Terminal smart-reader checkout tile for WooCommerce POS 2.0 (Pro 2.0.0).
 - Automatically register the separate POS webhook endpoint when gateway settings are saved with a Stripe key and supported Pro installed.
 - Key POS PaymentIntent creation idempotently by payment attempt to prevent duplicate intents on retries.
 - Report Dashboard-configured on-reader tips to POS, which records them as a Tip order fee.

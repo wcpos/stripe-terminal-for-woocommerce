@@ -1,6 +1,6 @@
 <?php
 /**
- * Optional Pro integration; legacy checkout remains available without Pro.
+ * Registration of the keypad providers on Pro's shared base.
  *
  * @package WCPOS\WooCommercePOS\StripeTerminal
  */
@@ -9,10 +9,10 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Server;
 
 use WCPOS\WooCommercePOS\StripeTerminal\Settings;
 
-/** Register only when Pro supplies the shared server contract. */
+/** Register the server and device providers with Pro. */
 final class Registration {
-	/** First Pro release with the shared server handler and provider registration API. */
-	public const REQUIRED_PRO_VERSION = '1.11.0';
+	/** First Pro release the extension runs on: the shared payments base and the order-pay panel. */
+	public const REQUIRED_PRO_VERSION = '2.0.0';
 
 	/**
 	 * Avoid registering twice in the same request.
@@ -26,7 +26,7 @@ final class Registration {
 		return function_exists( 'wcpos_pro_register_server_provider' ) && function_exists( 'wcpos_pro_requires' ) && wcpos_pro_requires( self::REQUIRED_PRO_VERSION );
 	}
 
-	/** Register once without loading the adapter on legacy-only sites. */
+	/** Register once per request. */
 	public static function register(): bool {
 		if ( ! self::pro_supported() ) {
 			return false;
@@ -39,16 +39,5 @@ final class Registration {
 			self::$registered = true;
 		}
 		return true;
-	}
-
-	/**
-	 * Let old Pro persist its upgrade notice without requiring Pro for legacy checkout.
-	 *
-	 * @param string $plugin_file Activated plugin file.
-	 */
-	public static function activation_check( string $plugin_file ): void {
-		if ( function_exists( 'wcpos_pro_requires' ) && ! wcpos_pro_requires( self::REQUIRED_PRO_VERSION ) ) {
-			wcpos_pro_requires( self::REQUIRED_PRO_VERSION, $plugin_file );
-		}
 	}
 }

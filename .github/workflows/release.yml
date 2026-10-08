@@ -45,13 +45,6 @@ jobs:
           npm install
           npm run build
 
-      - name: Install and Build blocks-payment
-        if: steps.check_version.outputs.release == 'true'
-        working-directory: packages/blocks-payment
-        run: |
-          npm ci
-          npm run build
-
       - name: Extract release notes from CHANGELOG.md
         if: steps.check_version.outputs.release == 'true'
         run: |

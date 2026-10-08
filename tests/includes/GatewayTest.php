@@ -78,6 +78,11 @@ namespace {
 				return 'enable_moto' === $key ? 'no' : ( $this->options[ $key ] ?? null );
 			}
 
+			/** Mirror the parent gateway's enabled-option short circuit. */
+			public function is_available() {
+				return 'yes' === $this->get_option( 'enabled' );
+			}
+
 			/** Initialize stub settings. */
 			public function init_settings() {}
 
@@ -222,6 +227,37 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$_GET  = array();
 			Monkey\tearDown();
 			parent::tearDown();
+		}
+
+		/** Saved web-checkout enablement cannot expose the gateway outside POS. */
+		public function test_availability_requires_pos_and_a_key_not_saved_enablement(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$key = new \ReflectionProperty( Gateway::class, 'api_key' );
+			$key->setAccessible( true );
+			$key->setValue( $gateway, 'sk_test_fake' );
+			$gateway->options['enabled'] = 'yes';
+			Functions\when( 'woocommerce_pos_request' )->justReturn( false );
+			Functions\when( 'is_checkout_pay_page' )->justReturn( false );
+			$this->assertFalse( $gateway->is_available() );
+
+			$gateway->options['enabled'] = 'no';
+			Functions\when( 'woocommerce_pos_request' )->justReturn( true );
+			$this->assertTrue( $gateway->is_available() );
+			$key->setValue( $gateway, '' );
+			$this->assertFalse( $gateway->is_available() );
+		}
+
+		/** Non-POS order-pay requests require the POS capability. */
+		public function test_order_pay_availability_requires_pos_capability(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$key = new \ReflectionProperty( Gateway::class, 'api_key' );
+			$key->setAccessible( true );
+			$key->setValue( $gateway, 'sk_test_fake' );
+			Functions\when( 'woocommerce_pos_request' )->justReturn( false );
+			Functions\when( 'is_checkout_pay_page' )->justReturn( true );
+			Functions\expect( 'current_user_can' )->twice()->with( 'access_woocommerce_pos' )->andReturn( false, true );
+			$this->assertFalse( $gateway->is_available() );
+			$this->assertTrue( $gateway->is_available() );
 		}
 
 		public function test_payment_fields_renders_hidden_error_container(): void {
@@ -383,7 +419,6 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			Functions\stubs(
 				array(
-					'is_checkout'              => false,
 					'is_checkout_pay_page'     => true,
 					'woocommerce_pos_request'  => true,
 					'wp_enqueue_style'         => true,
@@ -442,7 +477,6 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			Functions\stubs(
 				array(
-					'is_checkout'              => false,
 					'is_checkout_pay_page'     => true,
 					'woocommerce_pos_request'  => true,
 					'wp_enqueue_style'         => true,
@@ -490,7 +524,6 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			Functions\stubs(
 				array(
-					'is_checkout'              => false,
 					'is_checkout_pay_page'     => true,
 					'woocommerce_pos_request'  => false,
 					'wp_enqueue_style'         => true,
@@ -1089,54 +1122,6 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			);
 
 			$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
-		}
-
-		/** Process payment redirects to order pay when unpaid from checkout. */
-		public function test_process_payment_redirects_to_order_pay_when_unpaid_from_checkout(): void {
-			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
-
-			$order = \Mockery::mock( \WC_Order::class );
-			$order->shouldReceive( 'is_paid' )->andReturn( false );
-			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
-			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
-			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_status' )->andReturn( '' );
-			$order->shouldReceive( 'get_transaction_id' )->andReturn( '' );
-			$order->shouldReceive( 'get_checkout_payment_url' )->withNoArgs()->once()->andReturn( 'https://example.test/checkout/order-pay/42/?pay_for_order=true&key=wc_order_key' );
-			$order->shouldReceive( 'set_transaction_id' )->never();
-			$order->shouldReceive( 'payment_complete' )->never();
-
-			$status_checks  = 0;
-			$stripe_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
-			$stripe_service->shouldReceive( 'check_payment_status_from_stripe' )
-				->andReturnUsing(
-					function () use ( &$status_checks ) {
-						++$status_checks;
-
-						return new \WP_Error( 'not_found' );
-					}
-				);
-
-			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
-			if ( PHP_VERSION_ID < 80100 ) {
-				$property->setAccessible( true );
-			}
-			$property->setValue( $gateway, $stripe_service );
-
-			Functions\when( 'wc_get_order' )->justReturn( $order );
-			Functions\when( 'wc_add_notice' )->alias(
-				function () {
-					TestCase::fail( 'Checkout Place Order should redirect, not add an error notice.' );
-				}
-			);
-
-			$this->assertSame(
-				array(
-					'result'   => 'success',
-					'redirect' => 'https://example.test/checkout/order-pay/42/?pay_for_order=true&key=wc_order_key',
-				),
-				$gateway->process_payment( 42 )
-			);
-			$this->assertSame( 0, $status_checks );
 		}
 
 		/** Process payment fails on order pay without terminal payment. */
