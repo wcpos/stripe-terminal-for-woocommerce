@@ -75,7 +75,7 @@ namespace {
 			 * @param string $key Option key.
 			 */
 			public function get_option( $key ) {
-				return 'enable_moto' === $key ? 'no' : ( $this->options[ $key ] ?? null );
+				return 'enable_moto' === $key ? ( $this->options['enable_moto'] ?? 'no' ) : ( $this->options[ $key ] ?? null );
 			}
 
 			/** Mirror the parent gateway's enabled-option short circuit. */
@@ -215,6 +215,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		protected function setUp(): void {
 			parent::setUp();
 			Monkey\setUp();
+			$GLOBALS['stwc_payment_id_for_action'] = array();
 			$this->previous_wpdb = $GLOBALS['wpdb'] ?? null;
 		}
 
@@ -260,8 +261,189 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertTrue( $gateway->is_available() );
 		}
 
+		/** With MOTO off, the order-pay page is Pro's shared panel and nothing of the old markup. */
+		public function test_payment_fields_hands_the_page_to_pro_when_moto_is_off(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$GLOBALS['wp'] = (object) array( 'query_vars' => array( 'order-pay' => 42 ) );
+			$order = \Mockery::mock( \WC_Order::class );
+			Functions\when( 'absint' )->alias( 'intval' );
+			Functions\expect( 'wc_get_order' )->once()->with( 42 )->andReturn( $order );
+			Functions\expect( 'wcpos_pro_order_pay_panel' )->once()->with( $gateway, $order )->andReturnUsing(
+				function (): void {
+					echo '<div id="wcpos-pro-order-pay"></div>';
+				}
+			);
+			ob_start();
+			$gateway->payment_fields();
+			$html = (string) ob_get_clean();
+			$this->assertSame( '<div id="wcpos-pro-order-pay"></div>', $html );
+		}
+
+		/** With MOTO off, the old panel's script is not enqueued; Pro's panel brings its own. */
+		public function test_enqueue_payment_scripts_does_nothing_when_pro_panel_runs(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			Functions\when( 'is_checkout_pay_page' )->justReturn( true );
+			Functions\expect( 'wp_enqueue_script' )->never();
+			Functions\expect( 'wp_enqueue_style' )->never();
+			$gateway->enqueue_payment_scripts();
+			$this->assertTrue( true );
+		}
+
+		/** With MOTO off, an unpaid order is processed by Pro. */
+		public function test_process_payment_delegates_to_pro_when_moto_is_off(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( false );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\expect( 'wcpos_pro_order_pay_process' )->once()->with( $order )->andReturn( array( 'result' => 'success', 'redirect' => 'https://example.test/received' ) );
+			$this->assertSame( array( 'result' => 'success', 'redirect' => 'https://example.test/received' ), $gateway->process_payment( 42 ) );
+		}
+
+		/** An already-paid order still short-circuits before Pro is asked. */
+		public function test_process_payment_paid_order_does_not_reach_pro(): void {
+			$gateway = new class() extends Gateway {
+				/** Skip the real constructor. */
+				public function __construct() {}
+				/**
+				 * Return URL stand-in.
+				 *
+				 * @param mixed $order Order.
+				 */
+				public function get_return_url( $order = null ) {
+					return 'https://example.test/received';
+				}
+			};
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( true );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\expect( 'wcpos_pro_order_pay_process' )->never();
+			$this->assertSame( array( 'result' => 'success', 'redirect' => 'https://example.test/received' ), $gateway->process_payment( 42 ) );
+		}
+
+		/** A sale with a counting ledger row refunds through Pro, whatever the MOTO setting. */
+		public function test_process_refund_uses_pro_when_a_counting_row_exists(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'server' ),
+			);
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_refund' )->once()->with( $order, 5.0, 'why' )->andReturn( true );
+				$this->assertTrue( $gateway->process_refund( 42, 5.0, 'why' ) );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
+
+		/** A keypad leg plus an old-panel charge: Pro refuses to allocate, so the old path refunds the charge. */
+		public function test_process_refund_falls_back_to_the_old_path_when_pro_cannot_allocate_a_mixed_order(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( 'ch_old' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_livemode' )->andReturn( '' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'server' ),
+			);
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_refund' )->once()->andReturn( new \WP_Error( 'wcpos_refund_not_allocatable' ) );
+				$result = $gateway->process_refund( 42, 50.0, 'why' );
+				// The old path ran: with no Stripe service configured it answers its own error, not Pro's.
+				$this->assertInstanceOf( \WP_Error::class, $result );
+				$this->assertSame( 'refund_service_unavailable', $result->get_error_code() );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
+
+		/** A transaction id that is a ledger row's own intent is Pro's leg, not an old-panel charge: Pro's refusal stands. */
+		public function test_process_refund_does_not_fall_back_when_the_transaction_id_is_a_ledger_rows_intent(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_transaction_id' )->andReturn( 'pi_device' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'device', 'provider_refs' => array( 'payment_intent' => 'pi_device' ) ),
+			);
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_refund' )->once()->andReturn( new \WP_Error( 'wcpos_refund_not_allocatable' ) );
+				$result = $gateway->process_refund( 42, 50.0, 'why' );
+				$this->assertInstanceOf( \WP_Error::class, $result );
+				$this->assertSame( 'wcpos_refund_not_allocatable', $result->get_error_code() );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
+
+		/** The old panel's own form submit for an attempt Pro adopted is Pro's to answer. */
+		public function test_process_payment_hands_an_adopted_attempt_to_pro_even_with_moto_on(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes';
+			$order = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'is_paid' )->andReturn( false );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_adopted' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			$GLOBALS['stwc_payment_id_for_action'] = array( 'pi_adopted' => 'row-1' );
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_process' )->once()->with( $order )->andReturn( array( 'result' => 'failure' ) );
+				$this->assertSame( array( 'result' => 'failure' ), $gateway->process_payment( 42 ) );
+			} finally {
+				$GLOBALS['stwc_payment_id_for_action'] = array();
+			}
+		}
+
+		/** A webview row carrying the old-panel charge as its transaction id does not hide that charge. */
+		public function test_process_refund_falls_back_when_only_a_webview_row_carries_the_charge(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_charge_id' )->andReturn( '' );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_livemode' )->andReturn( '' );
+			$order->shouldReceive( 'get_transaction_id' )->andReturn( 'ch_old' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'webview', 'provider_refs' => array( 'transaction_id' => 'ch_old' ) ),
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'server', 'provider_refs' => array( 'action' => 'pi_keypad' ) ),
+			);
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_refund' )->once()->andReturn( new \WP_Error( 'wcpos_refund_not_allocatable' ) );
+				$result = $gateway->process_refund( 42, 50.0, 'why' );
+				$this->assertInstanceOf( \WP_Error::class, $result );
+				$this->assertSame( 'refund_service_unavailable', $result->get_error_code(), 'the old path ran' );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
+
+		/** A pending or voided row is not a sale to refund through Pro; the old path answers. */
+		public function test_process_refund_ignores_rows_that_do_not_count(): void {
+			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$order   = \Mockery::mock( \WC_Order::class );
+			$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_livemode' )->andReturn( '' );
+			Functions\when( 'wc_get_order' )->justReturn( $order );
+			Functions\when( '__' )->returnArg();
+			\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array(
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'pending', 'capture_mode' => 'server' ),
+				array( 'method_id' => 'other_gateway', 'status' => 'captured', 'capture_mode' => 'server' ),
+				// Free mints this one for a sale the old panel completed; Pro cannot refund it.
+				array( 'method_id' => 'stripe_terminal_for_woocommerce', 'status' => 'captured', 'capture_mode' => 'webview' ),
+			);
+			try {
+				Functions\expect( 'wcpos_pro_order_pay_refund' )->never();
+				$result = $gateway->process_refund( 42, 5.0, 'why' );
+				$this->assertInstanceOf( \WP_Error::class, $result );
+				$this->assertSame( 'refund_service_unavailable', $result->get_error_code() );
+			} finally {
+				\WCPOS\WooCommercePOS\Payments\Contract\Ledger::$rows = array();
+			}
+		}
+
 		public function test_payment_fields_renders_hidden_error_container(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 
 			$GLOBALS['wp'] = (object) array(
 				'query_vars' => array( 'order-pay' => 42 ),
@@ -403,6 +585,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		/** Enqueue payment scripts uses pos cashier nonce for pos orders. */
 		public function test_enqueue_payment_scripts_uses_pos_cashier_nonce_for_pos_orders(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 
 			$GLOBALS['wp'] = (object) array(
 				'query_vars' => array( 'order-pay' => 42 ),
@@ -468,6 +651,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		/** Enqueue payment scripts uses default nonce when order is missing. */
 		public function test_enqueue_payment_scripts_uses_default_nonce_when_order_is_missing(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 
 			$GLOBALS['wp'] = (object) array(
 				'query_vars' => array( 'order-pay' => 42 ),
@@ -511,6 +695,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		/** Enqueue payment scripts uses default nonce outside pos requests. */
 		public function test_enqueue_payment_scripts_uses_default_nonce_outside_pos_requests(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 
 			$GLOBALS['wp'] = (object) array(
 				'query_vars' => array( 'order-pay' => 42 ),
@@ -1071,6 +1256,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		/** Process payment requires strict paid true from stripe api check. */
 		public function test_process_payment_requires_strict_paid_true_from_stripe_api_check(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 
 			$_POST['woocommerce_pay'] = '1';
 
@@ -1127,6 +1313,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		/** Process payment fails on order pay without terminal payment. */
 		public function test_process_payment_fails_on_order_pay_without_terminal_payment(): void {
 			$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 
 			$_POST['woocommerce_pay'] = '1';
 
@@ -1184,6 +1371,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 					return 'https://example.test/checkout/order-received/42/';
 				}
 			};
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 
 			$order = \Mockery::mock( \WC_Order::class );
 			$order->shouldReceive( 'is_paid' )->andReturn( false );
@@ -1273,6 +1461,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		 */
 		private function make_refund_gateway( $service ): Gateway {
 			$gateway  = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
 			if ( PHP_VERSION_ID < 80100 ) {
 				$property->setAccessible( true );

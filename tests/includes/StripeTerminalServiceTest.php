@@ -55,6 +55,7 @@ class StripeTerminalServiceTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
+		$GLOBALS['stwc_payment_id_for_action'] = array();
 
 		// Stub common WP functions used by the error handler.
 		Functions\stubs(
@@ -93,6 +94,20 @@ class StripeTerminalServiceTest extends TestCase {
 	/**
 	 * Test constructor creates an instance without errors.
 	 */
+	/** An attempt Pro adopted on upgrade is not completed by the old panel's AJAX confirm. */
+	public function test_confirm_payment_intent_refuses_an_adopted_attempt(): void {
+		$GLOBALS['stwc_payment_id_for_action'] = array( 'pi_adopted' => 'row-1' );
+		try {
+			$service = ( new \ReflectionClass( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class ) )->newInstanceWithoutConstructor();
+			Functions\when( '__' )->returnArg();
+			$result = $service->confirm_payment_intent( 'pi_adopted', \Mockery::mock( \WC_Order::class ) );
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertSame( 'stwc_intent_adopted', $result->get_error_code() );
+		} finally {
+			$GLOBALS['stwc_payment_id_for_action'] = array();
+		}
+	}
+
 	public function test_constructor_creates_instance(): void {
 		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
 

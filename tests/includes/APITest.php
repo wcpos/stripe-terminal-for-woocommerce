@@ -40,6 +40,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		protected function setUp(): void {
 			parent::setUp();
 			Monkey\setUp();
+			$GLOBALS['stwc_payment_id_for_action'] = array();
 			$this->previous_wpdb = $GLOBALS['wpdb'] ?? null;
 		}
 
@@ -148,6 +149,24 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			$method->invoke( $api, $payment_intent );
 			$this->addToAssertionCount( \Mockery::getContainer()->mockery_getExpectationCount() );
+		}
+
+		/** An intent Pro adopted from the old panel is Pro's to settle; the legacy handler leaves it. */
+		public function test_succeeded_webhook_leaves_an_adopted_intent_to_pro(): void {
+			$GLOBALS['stwc_payment_id_for_action'] = array( 'pi_adopted' => 'row-1' );
+			Functions\expect( 'wc_get_order' )->never();
+			$payment_intent = (object) array(
+				'id'       => 'pi_adopted',
+				'livemode' => false,
+				'metadata' => (object) array( 'order_id' => 42 ),
+				'status'   => 'succeeded',
+			);
+			$api    = ( new \ReflectionClass( API::class ) )->newInstanceWithoutConstructor();
+			$method = new \ReflectionMethod( API::class, 'update_order_with_payment_intent' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$method->setAccessible( true );
+			}
+			$this->assertTrue( $method->invoke( $api, $payment_intent ) );
 		}
 
 		/**

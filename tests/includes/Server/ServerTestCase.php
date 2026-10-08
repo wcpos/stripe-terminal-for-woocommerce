@@ -16,6 +16,7 @@ abstract class ServerTestCase extends \PHPUnit\Framework\TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
+		$GLOBALS['stwc_payment_id_for_action'] = array();
 		$this->options = array(
 			'woocommerce_stripe_terminal_for_woocommerce_settings' => array(
 				'test_mode'               => 'yes',

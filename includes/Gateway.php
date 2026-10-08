@@ -509,6 +509,11 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
+		if ( $this->uses_pro_panel() || Legacy_Adoption::is_adopted( (string) $order->get_meta( '_stripe_terminal_payment_intent_id' ) ) ) {
+			// Pro's panel, or an attempt Pro adopted on upgrade: Pro reads the ledger and answers.
+			return wcpos_pro_order_pay_process( $order );
+		}
+
 			// Check for Stripe Terminal payment metadata.
 		$payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
 		$charge_id         = $order->get_meta( '_stripe_terminal_charge_id' );
@@ -605,6 +610,16 @@ class Gateway extends WC_Payment_Gateway {
 				'refund_order_not_found',
 				__( 'The order could not be found.', 'stripe-terminal-for-woocommerce' )
 			);
+		}
+
+		// A leg Pro drove refunds through Pro. When the order also carries an old-panel
+		// charge and Pro cannot allocate the amount across its rows (it refuses before
+		// moving money), the old path refunds that charge; Stripe caps it at the charge.
+		if ( $this->has_counting_row( $order ) ) {
+			$result = wcpos_pro_order_pay_refund( $order, $amount, $reason );
+			if ( ! is_wp_error( $result ) || 'wcpos_refund_not_allocatable' !== $result->get_error_code() || ! $this->has_legacy_charge( $order ) ) {
+				return $result;
+			}
 		}
 
 		// Refund with the key matching the mode the order was paid in, scoped to
@@ -714,6 +729,67 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Whether the POS order-pay page runs through Pro's shared panel.
+	 *
+	 * MOTO carve-out (roadmap#95, 2026-10-08): while "Phone Order" is enabled the merchant
+	 * keeps Stripe's own panel, because keyed entry has no home in Pro's panel yet. With it
+	 * off, the shared panel takes the page and the payment becomes a ledger row.
+	 */
+	private function uses_pro_panel(): bool {
+		return 'yes' !== $this->get_option( 'enable_moto' );
+	}
+
+	/**
+	 * Whether the order carries a charge the old panel took, which only the old refund
+	 * path can return.
+	 *
+	 * @param WC_Abstract_Order $order Order being refunded.
+	 */
+	private function has_legacy_charge( WC_Abstract_Order $order ): bool {
+		if ( '' !== (string) $order->get_meta( '_stripe_terminal_charge_id' ) ) {
+			return true;
+		}
+		$transaction = (string) $order->get_transaction_id();
+		if ( '' === $transaction || ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Ledger' ) ) {
+			return '' !== $transaction;
+		}
+		// Free copies a ledger row's intent into the transaction id; that is Pro's leg, not an
+		// old-panel charge. Free's own webview row for an old-panel sale carries that sale's
+		// charge, which IS the old-panel charge, so only Pro's legs are consulted.
+		foreach ( \WCPOS\WooCommercePOS\Payments\Contract\Ledger::instance()->read( $order ) as $row ) {
+			if ( ! in_array( $row['capture_mode'] ?? '', array( 'server', 'device' ), true ) ) {
+				continue;
+			}
+			$refs = $row['provider_refs'] ?? array();
+			if ( in_array( $transaction, array( $refs['action'] ?? null, $refs['stripe_payment_intent'] ?? null, $refs['payment_intent'] ?? null, $refs['transaction_id'] ?? null ), true ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Whether Pro's ledger holds a counting (authorized or captured) server or device row
+	 * for this gateway: a leg Pro drove and can refund.
+	 *
+	 * Free also mints a `webview` row for a sale the old panel completed; Pro cannot refund
+	 * that one (it carries no intent reference), so it stays on the old path.
+	 *
+	 * @param WC_Abstract_Order $order Order being refunded.
+	 */
+	private function has_counting_row( WC_Abstract_Order $order ): bool {
+		if ( ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Ledger' ) ) {
+			return false;
+		}
+		foreach ( \WCPOS\WooCommercePOS\Payments\Contract\Ledger::instance()->read( $order ) as $row ) {
+			if ( Settings::GATEWAY_ID === ( $row['method_id'] ?? null ) && in_array( $row['status'] ?? '', \WCPOS\WooCommercePOS\Payments\Contract\Ledger::COUNTING_STATUSES, true ) && in_array( $row['capture_mode'] ?? '', array( 'server', 'device' ), true ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Payment fields displayed during checkout or order-pay page.
 	 */
 	public function payment_fields(): void {
@@ -723,6 +799,14 @@ class Gateway extends WC_Payment_Gateway {
 			$description = apply_filters( 'woocommerce_gateway_description', $this->get_option( 'description' ), $this->id );
 		if ( $description ) {
 			echo '<p>' . wp_kses_post( $description ) . '</p>';
+		}
+
+		if ( $this->uses_pro_panel() ) {
+			$order = wc_get_order( isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0 );
+			if ( $order instanceof \WC_Order ) {
+				wcpos_pro_order_pay_panel( $this, $order );
+			}
+			return;
 		}
 
 			// Show loading state initially - readers will be loaded via AJAX.
@@ -822,8 +906,8 @@ class Gateway extends WC_Payment_Gateway {
 	 * Enqueue payment scripts on checkout pages.
 	 */
 	public function enqueue_payment_scripts(): void {
-		// The panel lives on the order-pay page only.
-		if ( ! is_checkout_pay_page() ) {
+		// The panel lives on the order-pay page only; Pro's panel enqueues its own script.
+		if ( ! is_checkout_pay_page() || $this->uses_pro_panel() ) {
 			return;
 		}
 
