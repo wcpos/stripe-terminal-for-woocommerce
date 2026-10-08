@@ -509,6 +509,10 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
+		if ( $this->uses_pro_panel() ) {
+			return wcpos_pro_order_pay_process( $order );
+		}
+
 			// Check for Stripe Terminal payment metadata.
 		$payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
 		$charge_id         = $order->get_meta( '_stripe_terminal_charge_id' );
@@ -605,6 +609,12 @@ class Gateway extends WC_Payment_Gateway {
 				'refund_order_not_found',
 				__( 'The order could not be found.', 'stripe-terminal-for-woocommerce' )
 			);
+		}
+
+		// A sale with a counting ledger row refunds through Pro; one taken on the old panel
+		// has no row, and only this path knows its charge.
+		if ( $this->has_counting_row( $order ) ) {
+			return wcpos_pro_order_pay_refund( $order, $amount, $reason );
 		}
 
 		// Refund with the key matching the mode the order was paid in, scoped to
@@ -714,10 +724,49 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Whether the POS order-pay page runs through Pro's shared panel.
+	 *
+	 * MOTO carve-out (roadmap#95, 2026-10-08): while "Phone Order" is enabled the merchant
+	 * keeps Stripe's own panel, because keyed entry has no home in Pro's panel yet. With it
+	 * off, the shared panel takes the page and the payment becomes a ledger row.
+	 */
+	private function uses_pro_panel(): bool {
+		return 'yes' !== $this->get_option( 'enable_moto' );
+	}
+
+	/**
+	 * Whether Pro's ledger holds a counting (authorized or captured) row for this gateway.
+	 *
+	 * A sale taken on the old panel has no row; its refund stays on the old path. Anything
+	 * with a row is refunded through Pro.
+	 *
+	 * @param WC_Abstract_Order $order Order being refunded.
+	 */
+	private function has_counting_row( WC_Abstract_Order $order ): bool {
+		if ( ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Ledger' ) ) {
+			return false;
+		}
+		foreach ( \WCPOS\WooCommercePOS\Payments\Contract\Ledger::instance()->read( $order ) as $row ) {
+			if ( Settings::GATEWAY_ID === ( $row['method_id'] ?? null ) && in_array( $row['status'] ?? '', \WCPOS\WooCommercePOS\Payments\Contract\Ledger::COUNTING_STATUSES, true ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Payment fields displayed during checkout or order-pay page.
 	 */
 	public function payment_fields(): void {
 		global $wp;
+
+		if ( $this->uses_pro_panel() ) {
+			$order = wc_get_order( isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0 );
+			if ( $order instanceof \WC_Order ) {
+				wcpos_pro_order_pay_panel( $this, $order );
+			}
+			return;
+		}
 
 			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WooCommerce core hook.
 			$description = apply_filters( 'woocommerce_gateway_description', $this->get_option( 'description' ), $this->id );
@@ -822,8 +871,8 @@ class Gateway extends WC_Payment_Gateway {
 	 * Enqueue payment scripts on checkout pages.
 	 */
 	public function enqueue_payment_scripts(): void {
-		// The panel lives on the order-pay page only.
-		if ( ! is_checkout_pay_page() ) {
+		// The panel lives on the order-pay page only; Pro's panel enqueues its own script.
+		if ( ! is_checkout_pay_page() || $this->uses_pro_panel() ) {
 			return;
 		}
 

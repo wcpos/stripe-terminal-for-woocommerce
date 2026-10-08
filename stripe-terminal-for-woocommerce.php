@@ -79,6 +79,9 @@ function init(): void {
 	// The keypad's server and device modes, on Pro's shared base.
 	Server\Registration::register();
 
+	// Fold attempts the old order-pay panel left mid-flight into Pro's ledger.
+	add_action( 'init', array( Legacy_Adoption::class, 'upgrade' ), 20 );
+
 	// The REST API serves Stripe's webhooks.
 	add_action(
 		'rest_api_init',

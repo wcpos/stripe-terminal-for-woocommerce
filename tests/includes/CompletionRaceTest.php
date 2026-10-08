@@ -31,7 +31,7 @@ namespace {
 			public $options = array();
 
 			public function get_option( $key ) {
-				return 'enable_moto' === $key ? 'no' : ( $this->options[ $key ] ?? null );
+				return 'enable_moto' === $key ? ( $this->options['enable_moto'] ?? 'no' ) : ( $this->options[ $key ] ?? null );
 			}
 
 			public function init_settings() {}
@@ -694,6 +694,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$_POST['woocommerce_pay'] = '1';
 			Functions\when( 'wc_add_notice' )->justReturn( null );
 			$gateway  = ( new \ReflectionClass( RaceGateway::class ) )->newInstanceWithoutConstructor();
+			$gateway->options['enable_moto'] = 'yes'; // These races belong to the old panel (MOTO carve-out).
 			$property = new \ReflectionProperty( Gateway::class, 'stripe_service' );
 			if ( PHP_VERSION_ID < 80100 ) {
 				$property->setAccessible( true );
