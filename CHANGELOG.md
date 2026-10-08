@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix PaymentIntent creation against Stripe API 2026-09-30.endive, pinned by stripe-php 22: `allowed_payment_method_types` replaces the removed `payment_method_types` parameter. Without this, every Terminal and phone-order payment fails with `payment_method_types_no_longer_supported`.
+
 ### Fixed
 
 - **A Terminal payment's order is no longer left unpaid when its webhook arrives while another request is completing it.** The `payment_intent.succeeded` webhook used to acknowledge the event even when it found the order's completion claim held, so Stripe never redelivered it, and if the request holding the claim died before completing the order, nothing completed it. The webhook now answers HTTP 409 in that case, Stripe retries the delivery with backoff, and the retry completes the order or finds it already paid.

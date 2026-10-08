@@ -260,6 +260,8 @@ class API extends Abstracts\APIController {
 			$tax_amount           = CurrencyConverter::convert_to_stripe_amount( $order->get_total_tax(), $order->get_currency() );
 			$currency             = strtolower( $order->get_currency() );
 			$description          = \sprintf( 'Order #%s', $order_id );
+			// `allowed_payment_method_types` replaces the writable `payment_method_types` removed in
+			// API 2026-09-30.endive (stripe-php 22); the object's read-only property is unchanged.
 			if ( $moto ) {
 				$payment_method_types = array( 'card' );
 			} else {
@@ -276,11 +278,11 @@ class API extends Abstracts\APIController {
 
 			$payment_intent = \Stripe\PaymentIntent::create(
 				array(
-					'amount'               => $amount,
-					'currency'             => $currency,
-					'payment_method_types' => $payment_method_types,
-					'description'          => $description,
-					'metadata'             => array( 'order_id' => $order_id ),
+					'amount'                       => $amount,
+					'currency'                     => $currency,
+					'allowed_payment_method_types' => $payment_method_types,
+					'description'                  => $description,
+					'metadata'                     => array( 'order_id' => $order_id ),
 				)
 			);
 
