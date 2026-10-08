@@ -146,7 +146,7 @@ class StripeLiveIntegrationTest extends TestCase {
 					'payment_method'               => 'pm_card_visa',
 					'confirm'                      => true,
 					'description'                  => 'STWC live integration refund smoke test',
-					'metadata'             => array(
+					'metadata'                     => array(
 						'stwc_test' => 'stripe_live_integration',
 					),
 				)
