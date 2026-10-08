@@ -138,6 +138,32 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-dev
 
+      # The extension is Pro-only: the site needs WooCommerce POS Pro (which vendors the free
+      # plugin) or the bootstrap registers nothing. The org-level wcpos-bot App mints a token
+      # scoped to contents:read on the private Pro repo.
+      - name: Read-only Pro token
+        id: pro-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.WCPOS_BOT_APP_ID }}
+          private-key: ${{ secrets.WCPOS_BOT_PRIVATE_KEY }}
+          owner: wcpos
+          repositories: woocommerce-pos-pro
+          permission-contents: read
+
+      - name: Checkout Pro next into the E2E site
+        uses: actions/checkout@v7
+        with:
+          repository: wcpos/woocommerce-pos-pro
+          ref: next
+          path: e2e/pro/woocommerce-pos-pro
+          token: ${{ steps.pro-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Install Pro's Composer dependencies
+        working-directory: e2e/pro/woocommerce-pos-pro
+        run: composer install --no-dev --no-interaction --prefer-dist
+
       - name: Build payment-frontend
         working-directory: packages/payment-frontend
         run: |
