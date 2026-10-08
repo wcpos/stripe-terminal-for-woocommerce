@@ -10,6 +10,11 @@
 - Key POS PaymentIntent creation idempotently by payment attempt to prevent duplicate intents on retries.
 - Report Dashboard-configured on-reader tips to POS, which records them as a Tip order fee.
 
+### Fixed
+
+- **Taking a Terminal payment no longer fails with "The `payment_method_types` parameter is no longer supported".** Today's dependency update to stripe-php 22 (#143, unreleased) pinned the plugin to Stripe API version 2026-09-30, which rejects the `payment_method_types` parameter every Terminal PaymentIntent is created with; the live smoke test proved it and the update is reverted to stripe-php 21 (API version 2026-06-24). Dependabot no longer proposes stripe-php majors; a move to the newer API is a deliberate change.
+- **A Terminal payment's order is no longer left unpaid when its webhook arrives while another request is completing it.** The `payment_intent.succeeded` webhook used to acknowledge the event even when it found the order's completion claim held, so Stripe never redelivered it, and if the request holding the claim died before completing the order, nothing completed it. The webhook now answers HTTP 409 in that case, Stripe retries the delivery with backoff, and the retry completes the order or finds it already paid.
+
 ## 0.0.37 - 2026-10-05
 
 ### Fixed
