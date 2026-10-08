@@ -257,17 +257,26 @@ namespace WCPOS\WooCommercePOS\Payments\Contract {
 			 * @var int[]
 			 */
 			public static $locked = array();
+			/**
+			 * Order ids whose lock is held by someone else.
+			 *
+			 * @var int[]
+			 */
+			public static $refuse = array();
 			/** The single instance. */
 			public static function instance(): self {
 				return new self();
 			}
 			/**
-			 * Run the callback as if the lock were held.
+			 * Run the callback as if the lock were held, or refuse as Free does.
 			 *
 			 * @param int      $order_id Order id.
 			 * @param callable $callback Work.
 			 */
 			public function with_lock( int $order_id, callable $callback ) {
+				if ( in_array( $order_id, self::$refuse, true ) ) {
+					return new \WP_Error( 'wcpos_payment_locked' );
+				}
 				self::$locked[] = $order_id;
 				return $callback();
 			}

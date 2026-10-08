@@ -67,6 +67,7 @@ final class Legacy_Adoption {
 				'meta_compare' => 'EXISTS',
 			)
 		);
+		$retry = false;
 		foreach ( $orders as $order ) {
 			$modified = $order->get_date_modified();
 			if ( $order->get_id() > $boundary || ( $modified && $modified->getTimestamp() > $started ) ) {
@@ -92,8 +93,16 @@ final class Legacy_Adoption {
 				}
 			);
 			if ( is_wp_error( $result ) ) {
+				// A held lock is a till at work on that order: the page is seen again on the next
+				// request. Any other refusal is final for this order and is logged.
+				if ( in_array( $result->get_error_code(), array( 'wcpos_payment_locked', 'stwc_adoption_no_lock' ), true ) ) {
+					$retry = true;
+				}
 				wc_get_logger()->error( 'Legacy Stripe Terminal adoption failed for order ' . $order->get_id() . ': ' . $result->get_error_code(), array( 'source' => 'stripe-terminal' ) );
 			}
+		}
+		if ( $retry ) {
+			return;
 		}
 		$last = $orders ? end( $orders ) : null;
 		if ( count( $orders ) < self::PAGE_SIZE || ( $last && $last->get_id() >= $boundary ) ) {

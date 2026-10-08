@@ -195,6 +195,27 @@ class LegacyAdoptionTest extends TestCase {
 		$this->assertSame( array(), $recorded );
 	}
 
+	/** A held lock keeps the page for the next request; a final refusal does not. */
+	public function test_a_held_lock_keeps_the_page_for_the_next_request(): void {
+		$locked = $this->order( 1, 'pi_locked' );
+		$this->options['stwc_adoption_boundary'] = 1;
+		$this->options['stwc_adoption_started']  = PHP_INT_MAX;
+		Functions\expect( 'wc_get_orders' )->once()->andReturn( array( $locked ) );
+		Functions\expect( 'wcpos_pro_adopt_legacy_attempt' )->never();
+		$logger = \Mockery::mock();
+		$logger->shouldReceive( 'error' )->once();
+		Functions\expect( 'wc_get_logger' )->once()->andReturn( $logger );
+		\WCPOS\WooCommercePOS\Payments\Contract\Order_Lock::$refuse = array( 1 );
+		try {
+			Legacy_Adoption::upgrade();
+		} finally {
+			\WCPOS\WooCommercePOS\Payments\Contract\Order_Lock::$refuse = array();
+		}
+		$this->assertArrayNotHasKey( 'stwc_adoption_version', $this->options );
+		$this->assertArrayNotHasKey( 'stwc_adoption_offset', $this->options );
+		$this->assertSame( 1, $this->options['stwc_adoption_boundary'] );
+	}
+
 	/** Once the version is recorded, nothing runs. */
 	public function test_a_finished_pass_does_not_run_again(): void {
 		$this->options['stwc_adoption_version'] = Legacy_Adoption::VERSION;

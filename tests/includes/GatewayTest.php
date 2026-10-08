@@ -215,6 +215,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 		protected function setUp(): void {
 			parent::setUp();
 			Monkey\setUp();
+			$GLOBALS['stwc_payment_id_for_action'] = array();
 			$this->previous_wpdb = $GLOBALS['wpdb'] ?? null;
 		}
 

@@ -55,6 +55,7 @@ class StripeTerminalServiceTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
+		$GLOBALS['stwc_payment_id_for_action'] = array();
 
 		// Stub common WP functions used by the error handler.
 		Functions\stubs(
