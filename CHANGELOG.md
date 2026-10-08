@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A POS payment whose create Stripe did not answer (a dropped connection or timeout) now stays pending and resumes on the same PaymentIntent when the till retries or the sweeper runs; before, the leg was dropped while the intent could already be on the reader.
+- A decline Stripe reports by webhook fails the POS leg the way polling does; a stale decline arriving after the payment was captured is refused and logged instead of ignored.
+- A refund from the POS of an order paid on the previous order-pay panel finds the Stripe payment by the order's transaction id.
+- Pro's provider conformance suite runs in CI against the real adapter over a scripted Stripe; the transcripts in `tests/conformance/transcripts` are the certified record.
 - Terminal and phone-order PaymentIntents, including the keypad's, are created with `allowed_payment_method_types`, which the current Stripe API version accepts and which replaces the `payment_method_types` parameter removed in API 2026-09-30.endive, so a later stripe-php 22 upgrade cannot break payment creation.
 - Requires WooCommerce POS Pro 2.0.0 or newer; the plugin registers nothing and shows an admin notice on older or missing Pro.
 - Web checkout removed: Stripe Terminal is no longer offered on the shop's classic or Blocks checkout, and the "Enable Stripe Terminal for web checkout" setting is gone. The POS keypad and the POS order-pay page are the only surfaces.

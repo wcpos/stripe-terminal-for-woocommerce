@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pro's provider conformance suite against the real adapter under wp-env; see tests/conformance/. -->
+<phpunit bootstrap="tests/conformance/bootstrap.php" colors="true" cacheResult="false">
+	<testsuites>
+		<testsuite name="conformance"><directory prefix="Test_" suffix=".php">tests/conformance</directory></testsuite>
+	</testsuites>
+</phpunit>

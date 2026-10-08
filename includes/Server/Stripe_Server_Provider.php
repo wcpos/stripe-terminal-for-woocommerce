@@ -104,7 +104,9 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				( 'cad' === strtolower( $row['currency'] ) )
 			);
 			if ( is_wp_error( $intent ) ) {
-				return self::error( $intent );
+				// Stripe may have accepted a create it did not answer; Pro replays the row under the
+				// same idempotency key, so the row must stay pending rather than be dropped.
+				return self::unanswered( $intent ) ? $this->indeterminate( 'stripe_create_unanswered', $intent->get_error_message() ) : self::error( $intent );
 			}
 			// Written BEFORE the dispatch: a warm scheduled during this request must not replace the action.
 			update_option( 'stwc_payment_dispatch_at', time(), false );
@@ -112,7 +114,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			if ( is_wp_error( $result ) ) {
 				$reader = $this->service->get_reader( $reader_id );
 				if ( is_wp_error( $reader ) ) {
-					return self::error( $result );
+					// An unanswered dispatch whose reader cannot be read may be on the reader already.
+					return self::unanswered( $result ) ? $this->indeterminate( 'stripe_dispatch_unanswered', $result->get_error_message() ) : self::error( $result );
 				}
 				// Dispatch may have succeeded despite the error; let polling resolve this intent.
 				$action = $reader['action'] ?? array();
@@ -201,6 +204,9 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				'stripe_payment_intent' => $intent['id'],
 				'stripe_charge' => $intent['latest_charge']['id'] ?? null,
 				'stripe_mode' => ! empty( $intent['livemode'] ) ? 'live' : 'test',
+				// The reference a historical webview row refunds by; the old panel stored the intent
+				// id (webhook completions) or the charge id, and refund() accepts either.
+				'transaction_id' => $intent['id'],
 			),
 			'receipt'       => self::receipt( $intent ),
 		);
@@ -309,8 +315,9 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 */
 	public function refund( array $row, int $refund_id, string $amount ) {
 		try {
-			// Pro stores the intent under `action`; the fetch/webhook refs carry it too, for a row restored without one.
-			$ref = $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? '';
+			// Pro stores the intent under `action`; the fetch/webhook refs carry it too, for a row restored
+			// without one; a historical webview row carries only the order's transaction id (intent or charge).
+			$ref = $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? $row['provider_refs']['transaction_id'] ?? '';
 			if ( '' === $ref ) {
 				return self::error( __( 'No Stripe payment found for refund.', 'stripe-terminal-for-woocommerce' ), 'missing_payment_ref' );
 			}
@@ -407,7 +414,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	}
 
 	/**
-	 * Polling owns non-money outcomes; do not race a legitimate void.
+	 * Money and declines are final and reported; cancellation is left to polling, which alone can
+	 * tell a requested void from a failure, so a webhook never races a legitimate void.
 	 *
 	 * @param array  $intent   Verified intent.
 	 * @param string $event_id Stripe event ID, not the intent ID.
@@ -422,6 +430,10 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				'currency' => strtoupper( $intent['currency'] ),
 				'receipt' => self::receipt( $intent ),
 			);
+		} elseif ( 'requires_payment_method' === $intent['status'] && ! empty( $intent['last_payment_error'] ) ) {
+			// A decline, as fetch() reports it; one that arrives after capture reaches Free's
+			// transition guard instead of being swallowed.
+			$patch['status'] = 'failed';
 		}
 		return $patch;
 	}
@@ -467,6 +479,15 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				return is_string( $value ) && '' !== $value;
 			}
 		);
+	}
+
+	/**
+	 * Whether the service got no answer (transport failure or timeout) rather than a refusal.
+	 *
+	 * @param \WP_Error $error Service error.
+	 */
+	private static function unanswered( \WP_Error $error ): bool {
+		return 502 === (int) ( $error->get_error_data()['status'] ?? 0 ) || 'http_request_failed' === $error->get_error_code();
 	}
 
 	/**
