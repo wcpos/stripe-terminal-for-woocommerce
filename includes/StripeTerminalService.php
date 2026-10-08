@@ -200,11 +200,11 @@ class StripeTerminalService {
 				function () use ( $amount, $currency, $payment_method_types, $description, $order_id ) {
 					return \Stripe\PaymentIntent::create(
 						array(
-							'amount'               => $amount,
-							'currency'             => $currency,
-							'payment_method_types' => $payment_method_types,
-							'description'          => $description,
-							'metadata'             => array( 'order_id' => $order_id ),
+							'amount'                       => $amount,
+							'currency'                     => $currency,
+							'allowed_payment_method_types' => $payment_method_types,
+							'description'                  => $description,
+							'metadata'                     => array( 'order_id' => $order_id ),
 						)
 					);
 				}
@@ -280,12 +280,12 @@ class StripeTerminalService {
 				function () use ( $amount, $currency, $description, $metadata, $idempotency_key, $interac ) {
 					return $this->get_stripe_client()->paymentIntents->create(
 						array(
-							'amount'               => $amount,
-							'currency'             => $currency,
-							'description'          => $description,
-							'metadata'             => $metadata,
-							'capture_method'       => 'automatic',
-							'payment_method_types' => $interac ? array( 'card_present', 'interac_present' ) : array( 'card_present' ),
+							'amount'                       => $amount,
+							'currency'                     => $currency,
+							'description'                  => $description,
+							'metadata'                     => $metadata,
+							'capture_method'               => 'automatic',
+							'allowed_payment_method_types' => $interac ? array( 'card_present', 'interac_present' ) : array( 'card_present' ),
 						),
 						array( 'idempotency_key' => $idempotency_key )
 					);

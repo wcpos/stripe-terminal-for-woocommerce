@@ -276,11 +276,11 @@ class API extends Abstracts\APIController {
 
 			$payment_intent = \Stripe\PaymentIntent::create(
 				array(
-					'amount'               => $amount,
-					'currency'             => $currency,
-					'payment_method_types' => $payment_method_types,
-					'description'          => $description,
-					'metadata'             => array( 'order_id' => $order_id ),
+					'amount'                       => $amount,
+					'currency'                     => $currency,
+					'allowed_payment_method_types' => $payment_method_types,
+					'description'                  => $description,
+					'metadata'                     => array( 'order_id' => $order_id ),
 				)
 			);
 

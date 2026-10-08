@@ -177,7 +177,7 @@ class StripeDeviceProviderTest extends ServerTestCase {
 		$result = ( new Stripe_Device_Provider( $service ) )->create_intent( $this->row(), array() );
 		$this->assertSame( 'pi_test', $result['ref'] );
 		$this->assertSame( 'automatic', $this->http->requests[0]['params']['capture_method'] );
-		$this->assertSame( array( 'card_present' ), $this->http->requests[0]['params']['payment_method_types'] );
+		$this->assertSame( array( 'card_present' ), $this->http->requests[0]['params']['allowed_payment_method_types'] );
 		$this->assert_idempotency( 0, self::PAYMENT_ID );
 	}
 
