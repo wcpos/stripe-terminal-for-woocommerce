@@ -529,7 +529,7 @@ class API extends Abstracts\APIController {
 		$order_id = $payment_intent->metadata->order_id ?? null;
 		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) ) {
 			// A WooCommerce POS 1.11 ledger leg: Pro settles it through wcpos_settle_payment(); the legacy path must not complete the order or add its tip a second time.
-			return;
+			return true;
 		}
 		if ( ! $order_id ) {
 			Logger::log( 'Payment intent webhook: No order_id found in metadata', 'warning' );
