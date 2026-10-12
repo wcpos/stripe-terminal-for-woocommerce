@@ -132,8 +132,10 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 	public function test_no_reference_is_found_by_metadata(): void {
 		$other    = $this->refund( array( 'id' => 're_other', 'status' => 'succeeded', 'metadata' => array( 'wcpos_payment_id' => self::PAYMENT_ID, 'wcpos_refund_id' => '99' ) ) );
 		$foreign  = $this->refund( array( 'id' => 're_foreign', 'status' => 'succeeded', 'metadata' => array( 'wcpos_payment_id' => 'B1234567-1234-4123-8123-123456789ABC', 'wcpos_refund_id' => '123' ) ) );
+		$bare     = $this->refund( array( 'id' => 're_dashboard', 'status' => 'succeeded', 'metadata' => array() ) );
+		$half     = $this->refund( array( 'id' => 're_half', 'status' => 'succeeded', 'metadata' => array( 'wcpos_refund_id' => '123' ) ) );
 		$mine     = $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded' ) );
-		$provider = $this->provider( array( $this->listing( array( $other, $foreign, $mine ) ) ) );
+		$provider = $this->provider( array( $this->listing( array( $bare, $half, $other, $foreign, $mine ) ) ) );
 		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_mine' ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
 		$this->assertCount( 1, $this->http->requests );
 		$this->assertSame( 'get', $this->http->requests[0]['method'] );
@@ -206,9 +208,43 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['test_mode'] = 'no';
 		$row['provider_refs']['stripe_mode']                                                = 'test';
-		$provider = $this->provider( array( $this->listing( array( $this->refund( array( 'status' => 'succeeded' ) ) ) ) ) );
-		$this->assertSame( 'succeeded', $provider->fetch_refund( $row, $this->allocation( '' ) )['status'] );
+		$provider = $this->provider_with_key( 'sk_live_fake', array( $this->ok( $this->refund( array( 'status' => 'succeeded' ) ) ) ) );
+		$this->assertSame( 'succeeded', $provider->fetch_refund( $row, $this->allocation() )['status'] );
 		$this->assertContains( 'Authorization: Bearer sk_test_fake', $this->http->requests[0]['headers'] );
+	}
+
+	/** The listing for a reference-less refund travels under the recorded mode's key too. */
+	public function test_lists_under_the_key_of_the_recorded_mode(): void {
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['secret_key'] = 'sk_live_fake';
+		$row                                 = $this->row();
+		$row['provider_refs']['stripe_mode'] = 'live';
+		$provider                            = $this->provider( array( $this->listing( array( $this->refund( array( 'status' => 'succeeded' ) ) ) ) ) );
+		$this->assertSame( 'succeeded', $provider->fetch_refund( $row, $this->allocation( '' ) )['status'] );
+		$this->assertContains( 'Authorization: Bearer sk_live_fake', $this->http->requests[0]['headers'] );
+	}
+
+	/** The gateway's own mode has no key (test mode ticked, no test keys): the other mode's refund is still read under its key. */
+	public function test_reads_under_the_recorded_key_when_the_current_mode_has_none(): void {
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['secret_key'] = 'sk_live_fake';
+		$row                                 = $this->row();
+		$row['provider_refs']['stripe_mode'] = 'live';
+		$provider                            = $this->provider_with_key( '', array( $this->ok( $this->refund( array( 'status' => 'succeeded' ) ) ) ) );
+		$this->assertSame( 'succeeded', $provider->fetch_refund( $row, $this->allocation() )['status'] );
+		$this->assertContains( 'Authorization: Bearer sk_live_fake', $this->http->requests[0]['headers'] );
+	}
+
+	/**
+	 * A provider whose service holds a key other than the base's `sk_test_fake`, so the key on the
+	 * wire can only come from the request.
+	 *
+	 * @param string $key       The service's own key ('' for none).
+	 * @param array  $responses Fake answers.
+	 */
+	private function provider_with_key( string $key, array $responses ): \WCPOS\WooCommercePOS\StripeTerminal\Server\Stripe_Server_Provider {
+		$service    = new \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService( $key );
+		$this->http = new \WCPOS\WooCommercePOS\StripeTerminal\Tests\StripeHttpClientFake( $responses );
+		\Stripe\ApiRequestor::setHttpClient( $this->http );
+		return new \WCPOS\WooCommercePOS\StripeTerminal\Server\Stripe_Server_Provider( $service );
 	}
 
 	/** A row in the current mode, or without a recorded mode, reads with the gateway's own key. */

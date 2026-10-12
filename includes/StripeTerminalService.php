@@ -69,7 +69,10 @@ class StripeTerminalService {
 	 */
 	public function get_stripe_client(): \Stripe\StripeClient {
 		if ( ! $this->stripe_client ) {
-			$this->stripe_client = new \Stripe\StripeClient( $this->api_key );
+			// The SDK refuses an empty key at construction but accepts none, and then requires the key
+			// on each request: a read under another mode's key must not depend on the current mode
+			// having one (a merchant who ticked test mode without entering test keys).
+			$this->stripe_client = new \Stripe\StripeClient( '' === $this->api_key ? array( 'api_key' => null ) : $this->api_key );
 		}
 
 		return $this->stripe_client;
