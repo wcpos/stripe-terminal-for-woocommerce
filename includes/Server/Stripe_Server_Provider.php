@@ -690,9 +690,12 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 * Money and declines are final and reported; cancellation is left to polling, which alone can
 	 * tell a requested void from a failure, so a webhook never races a legitimate void.
 	 *
+	 * Successful patches carry Stripe's own references, never Pro's; Free merges them into the row.
+	 * A row captured by the webhook before the till's own capture otherwise has nothing to refund by.
+	 *
 	 * @param array  $intent   Verified intent.
 	 * @param string $event_id Stripe event ID, not the intent ID.
-	 * @return array Settlement patch without Pro-owned references.
+	 * @return array Settlement patch carrying Stripe's own references on success.
 	 */
 	public static function webhook_patch( array $intent, string $event_id ): array {
 		$patch = array( 'event_id' => $event_id );
@@ -702,6 +705,12 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				'amount' => self::amount( $intent ),
 				'currency' => strtoupper( $intent['currency'] ),
 				'receipt' => self::receipt( $intent ),
+				'provider_refs' => array_filter(
+					self::normalize( $intent )['provider_refs'],
+					static function ( $value ) {
+						return null !== $value;
+					}
+				),
 			);
 		} elseif ( 'requires_payment_method' === $intent['status'] && ! empty( $intent['last_payment_error'] ) ) {
 			// A decline, as fetch() reports it; one that arrives after capture reaches Free's
