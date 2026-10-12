@@ -1,7 +1,56 @@
 <?php
 namespace WCPOS\WooCommercePOS\StripeTerminal\Tests\Server;
+use WCPOS\WooCommercePOS\StripeTerminal\Server\Stripe_Server_Provider;
 require_once __DIR__ . '/ServerTestCase.php';
 class StripeServerProviderRefundTest extends ServerTestCase {
+	/** A mode-less row keeps the gateway mode on its refund record. */
+	public function test_refund_on_a_row_without_a_mode_stamps_the_mode_on_the_record(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->with( Stripe_Server_Provider::REFUND_MODE_META )->andReturn( '' );
+		$refund->shouldReceive( 'update_meta_data' )->once()->with( Stripe_Server_Provider::REFUND_MODE_META, 'test' );
+		$refund->shouldReceive( 'save' )->once();
+		$this->orders[123] = $refund;
+		$provider = $this->provider( array( $this->ok( array( 'id' => 're_test', 'status' => 'succeeded' ) ) ) );
+		$this->assertSame( 'succeeded', $provider->refund( $this->row(), 123, '2.50' )['status'] );
+		$this->assertContains( 'Authorization: Bearer sk_test_fake', $this->http->requests[0]['headers'] );
+	}
+
+	/** A row's own mode needs no stamp. */
+	public function test_refund_on_a_row_with_a_mode_does_not_stamp_the_record(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldNotReceive( 'update_meta_data' );
+		$refund->shouldNotReceive( 'save' );
+		$this->orders[123] = $refund;
+		$row = $this->row();
+		$row['provider_refs']['stripe_mode'] = 'test';
+		$provider = $this->provider( array( $this->ok( array( 'id' => 're_test', 'status' => 'succeeded' ) ) ) );
+		$this->assertSame( 'succeeded', $provider->refund( $row, 123, '2.50' )['status'] );
+	}
+
+	/** A missing refund record does not block the create. */
+	public function test_refund_on_a_row_without_a_mode_and_without_a_record_still_posts(): void {
+		$provider = $this->provider( array( $this->ok( array( 'id' => 're_test', 'status' => 'succeeded' ) ) ) );
+		$this->assertSame( 'succeeded', $provider->refund( $this->row(), 123, '2.50' )['status'] );
+		$this->assertCount( 1, $this->http->requests );
+		$this->assertSame( 'post', $this->http->requests[0]['method'] );
+	}
+
+	/** The stamp is saved before a create whose answer never arrives. */
+	public function test_unanswered_create_stamps_the_mode_before_the_post(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->with( Stripe_Server_Provider::REFUND_MODE_META )->andReturn( '' );
+		$refund->shouldReceive( 'update_meta_data' )->once()->with( Stripe_Server_Provider::REFUND_MODE_META, 'test' )->ordered();
+		$refund->shouldReceive( 'save' )->once()->ordered()->andReturnUsing( function () {
+			$this->assertCount( 0, $this->http->requests );
+		} );
+		$this->orders[123] = $refund;
+		$provider = $this->provider( array( new \Stripe\Exception\ApiConnectionException( 'timed out' ) ) );
+		$this->assertSame( array( 'status' => 'pending', 'provider_ref' => null ), $provider->refund( $this->row(), 123, '2.50' ) );
+		$this->assertCount( 1, $this->http->requests );
+		$this->assertCount( 1, $this->scheduled );
+		$this->assertSame( 'test', $this->scheduled[0]['args'][0]['mode'] );
+	}
+
 	/** @dataProvider statuses */
 	public function test_refund_payload_and_status( string $stripe_status, string $expected ): void {
 		$provider = $this->provider(
