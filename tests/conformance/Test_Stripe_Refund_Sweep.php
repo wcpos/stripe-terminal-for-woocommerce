@@ -82,7 +82,7 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 
 		$allocation = $this->allocation( $order, $id );
 		$this->assertSame( 'succeeded', $allocation['status'] );
-		$this->assertSame( $this->provider_ref( $order, $id ), $allocation['provider_ref'] );
+		$this->assertSame( $this->first_refund_id(), $allocation['provider_ref'] );
 		$this->assertSame( '5.00', $this->stored( $order, $id )['refunded_amount'] );
 		$this->assertSame( '', $this->mark( $order ), 'A settled order leaves the sweep\'s candidate set' );
 		$this->assertStringContainsString( 'confirmed by the provider (reference ' . $allocation['provider_ref'] . ')', $this->last_note( $order ) );
@@ -140,7 +140,7 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 
 		$allocation = $this->allocation( $order, $id );
 		$this->assertSame( 'succeeded', $allocation['status'] );
-		$this->assertSame( $this->provider_ref( $order, $id ), $allocation['provider_ref'], 'The sweep wrote the reference it found' );
+		$this->assertSame( $this->first_refund_id(), $allocation['provider_ref'], 'The sweep wrote the reference it found' );
 		$this->assertSame( '5.00', $this->stored( $order, $id )['refunded_amount'] );
 		$this->assertSame( '', $this->mark( $order ) );
 		$reads = $this->calls( 'fetch_refund' );
@@ -152,10 +152,18 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 		$this->assertSame( (string) $refund->get_id(), $this->refund_metadata( $order, $id )['wcpos_refund_id'] );
 	}
 
-	/** A newer refund made from the Stripe dashboard on the same sale is never bound to the till's reference-less allocation: only the one carrying this allocation's metadata is. */
+	/**
+	 * Neither a newer refund made from the Stripe dashboard on the same sale (no metadata) nor a
+	 * newer refund of the till's own, for another record on the same row, is bound to the till's
+	 * reference-less allocation: only the one carrying this allocation's own record id is.
+	 */
 	public function test_metadata_match_ignores_a_refund_the_till_did_not_make(): void {
-		list( $order, $id ) = $this->pending_refund();
+		// The reference-less refund comes FIRST, so every other refund of the sale is newer and is
+		// listed ahead of it: a match that takes the first listed, or that checks the row alone,
+		// would bind the wrong one.
 		$this->fixture->transport->lose_next_refund_body();
+		list( $order, $id, $first ) = $this->pending_refund();
+		$this->assertEmpty( $this->allocation( $order, $id )['provider_ref'] );
 		$second = wc_create_refund( array( 'order_id' => $order->get_id(), 'amount' => '2.00', 'refund_payment' => false ) );
 		$this->assertNotWPError( $second );
 		$this->assertNotWPError( Ledger::instance()->refund( wc_get_order( $order->get_id() ), $id, $second->get_id(), '2.00' ) );
@@ -166,9 +174,10 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 
 		$ids         = $this->fixture->transport->refund_ids();
 		$allocations = array_column( $this->stored( $order, $id )['refunds'], null, 'id' );
-		$this->assertSame( 'succeeded', $allocations[ $second->get_id() ]['status'] );
-		$this->assertSame( $ids[1], $allocations[ $second->get_id() ]['provider_ref'], 'The reference-less allocation took the refund carrying its own metadata' );
-		$this->assertNotSame( $dashboard, $allocations[ $second->get_id() ]['provider_ref'] );
+		$this->assertSame( 'succeeded', $allocations[ $first->get_id() ]['status'] );
+		$this->assertSame( $ids[0], $allocations[ $first->get_id() ]['provider_ref'], 'The reference-less allocation took the refund carrying its own record id, the oldest of three' );
+		$this->assertSame( $ids[1], $allocations[ $second->get_id() ]['provider_ref'], 'The sibling allocation kept its own refund' );
+		$this->assertNotSame( $dashboard, $allocations[ $first->get_id() ]['provider_ref'] );
 		$this->assertSame( '7.00', $this->stored( $order, $id )['refunded_amount'], 'The dashboard refund is not the till\'s to record' );
 	}
 
@@ -260,11 +269,7 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 		return (string) $this->stored( $order, $id )['provider_refs']['action'];
 	}
 
-	/** The first refund the fake holds (the sale's own, when a second was made later). */
-	private function provider_ref( \WC_Order $order, string $id ): string {
-		return $this->first_refund_id();
-	}
-
+	/** The first refund the fake holds: the sale's own, in the cases that make one. */
 	private function first_refund_id(): string {
 		$ids = $this->fixture->transport->refund_ids();
 		$this->assertNotEmpty( $ids, 'No refund was created' );

@@ -48,8 +48,9 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 	}
 
 	/**
-	 * The next refund create is taken but answered without the refund in the body (a 200 whose
-	 * body Stripe never finished): the refund exists on this side, the adapter holds no id for it.
+	 * The next refund create is taken but answered with a well-formed 200 that carries no refund id
+	 * (a body cut short would be a JSON error, which the SDK throws before the adapter sees it):
+	 * the refund exists on this side, and the adapter holds no id for it.
 	 */
 	public function lose_next_refund_body(): void {
 		$this->lose_refund_body = true;
