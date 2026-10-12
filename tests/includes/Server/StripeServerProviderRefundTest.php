@@ -15,6 +15,20 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		$this->assertContains( 'Authorization: Bearer sk_test_fake', $this->http->requests[0]['headers'] );
 	}
 
+	/** A record already stamped (an earlier leg of the same refund) sets the key, the mode re-stamped and the re-ask's mode alike, whatever the gateway is in now. */
+	public function test_a_stamped_record_sets_the_key_and_the_mode_on_a_row_without_one(): void {
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['secret_key'] = 'sk_live_fake';
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->with( Stripe_Server_Provider::REFUND_MODE_META )->andReturn( 'live' );
+		$refund->shouldReceive( 'update_meta_data' )->once()->with( Stripe_Server_Provider::REFUND_MODE_META, 'live' );
+		$refund->shouldReceive( 'save' )->once();
+		$this->orders[123] = $refund;
+		$provider          = $this->provider( array( new \Stripe\Exception\ApiConnectionException( 'timed out' ) ) );
+		$this->assertSame( array( 'status' => 'pending', 'provider_ref' => null ), $provider->refund( $this->row(), 123, '2.50' ) );
+		$this->assertContains( 'Authorization: Bearer sk_live_fake', $this->http->requests[0]['headers'] );
+		$this->assertSame( 'live', $this->scheduled[0]['args'][0]['mode'] );
+	}
+
 	/** A row's own mode needs no stamp. */
 	public function test_refund_on_a_row_with_a_mode_does_not_stamp_the_record(): void {
 		$refund = \Mockery::mock( 'WC_Order_Refund' );
@@ -40,12 +54,14 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		$refund = \Mockery::mock( 'WC_Order_Refund' );
 		$refund->shouldReceive( 'get_meta' )->with( Stripe_Server_Provider::REFUND_MODE_META )->andReturn( '' );
 		$refund->shouldReceive( 'update_meta_data' )->once()->with( Stripe_Server_Provider::REFUND_MODE_META, 'test' )->ordered();
-		$refund->shouldReceive( 'save' )->once()->ordered()->andReturnUsing( function () {
-			$this->assertCount( 0, $this->http->requests );
+		$requests_at_save = null;
+		$refund->shouldReceive( 'save' )->once()->ordered()->andReturnUsing( function () use ( &$requests_at_save ) {
+			$requests_at_save = count( $this->http->requests );
 		} );
 		$this->orders[123] = $refund;
 		$provider = $this->provider( array( new \Stripe\Exception\ApiConnectionException( 'timed out' ) ) );
 		$this->assertSame( array( 'status' => 'pending', 'provider_ref' => null ), $provider->refund( $this->row(), 123, '2.50' ) );
+		$this->assertSame( 0, $requests_at_save );
 		$this->assertCount( 1, $this->http->requests );
 		$this->assertCount( 1, $this->scheduled );
 		$this->assertSame( 'test', $this->scheduled[0]['args'][0]['mode'] );

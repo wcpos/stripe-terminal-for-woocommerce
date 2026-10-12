@@ -433,8 +433,9 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 *
 	 * Reads the refund `refund()` made, by the id it returned, or (when Stripe's answer to the
 	 * create did not carry the id) finds it among the payment's refunds by the metadata the
-	 * create carried; nothing is created. The read uses the key of the mode the row's payment was
-	 * made in. Stripe answers most refunds `succeeded` at once; the sweep asks about the ones it
+	 * create carried; nothing is created. The read uses the key of the mode the refund was made
+	 * in (the row's, else the one stamped on the refund record). Stripe answers most refunds
+	 * `succeeded` at once; the sweep asks about the ones it
 	 * answered `pending` or `requires_action`, whatever the payment method, until Stripe settles
 	 * them.
 	 *
@@ -590,7 +591,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 * The key for the row's mode, else the refund record's stamp, else the gateway's current
 	 * mode. Stripe keeps test and live objects apart, so a refund made in one mode cannot be read
 	 * with the other mode's key once the gateway is switched; the device adapter refunds under the
-	 * recorded mode the same way. Null for the current mode or no mode recorded on either source.
+	 * recorded mode the same way. Null when the recorded mode is the gateway's current one, or
+	 * when neither the row nor the record recorded a mode.
 	 *
 	 * @param array $row       Ledger row.
 	 * @param int   $refund_id WooCommerce refund id.
