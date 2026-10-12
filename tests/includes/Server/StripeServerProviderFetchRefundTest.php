@@ -147,6 +147,25 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_mine' ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
 	}
 
+	/** A refused mark with a list Stripe did not answer, or refused (a key that now belongs to another account): the mark alone is not believed, and the question stays open. */
+	public function test_refused_mark_with_an_unanswered_or_refused_list_stays_open(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->andReturn( 'No such payment_intent' );
+		$this->orders = array( 123 => $refund );
+		$provider     = $this->provider( array( array( 'body' => array( 'error' => array( 'type' => 'api_error', 'message' => 'Stripe is down' ) ), 'status' => 500 ) ) );
+		$this->assert_indeterminate( $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+		$provider = $this->provider( array( array( 'body' => array( 'error' => array( 'type' => 'invalid_request_error', 'code' => 'resource_missing', 'message' => 'No such payment_intent' ) ), 'status' => 404 ) ) );
+		$this->assert_provider_error( $provider->fetch_refund( $this->row(), $this->allocation( '' ) ), 'resource_missing' );
+	}
+
+	/** A refund carrying this allocation's metadata but for another amount is not the one the till asked for. */
+	public function test_metadata_match_for_another_amount_is_refused(): void {
+		$provider = $this->provider( array( $this->listing( array( $this->refund( array( 'id' => 're_odd', 'status' => 'succeeded', 'amount' => 999 ) ) ) ) ) );
+		$this->assert_provider_error( $provider->fetch_refund( $this->row(), $this->allocation( '' ) ), 'refund_amount_mismatch' );
+		$provider = $this->provider( array( $this->listing( array( $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded', 'amount' => 250 ) ) ) ) ) );
+		$this->assertSame( 're_mine', $provider->fetch_refund( $this->row(), $this->allocation( '' ) )['provider_ref'] );
+	}
+
 	/** A refused mark with no key to look under, or no payment to look under: the record's word stands. */
 	public function test_refused_mark_without_a_way_to_look_is_reported_failed(): void {
 		$refund = \Mockery::mock( 'WC_Order_Refund' );

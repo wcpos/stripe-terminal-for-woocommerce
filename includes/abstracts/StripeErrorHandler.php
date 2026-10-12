@@ -71,7 +71,8 @@ trait StripeErrorHandler {
 				}
 			} elseif ( $e instanceof \Stripe\Exception\RateLimitException ) {
 				// Extends InvalidRequestException in stripe-php, so it is told apart first.
-				$status_code = 429; // Too Many Requests.
+				$status_code               = 429; // Too Many Requests.
+				$error_data['stripe_code'] = $e->getStripeCode();
 			} elseif ( $e instanceof \Stripe\Exception\InvalidRequestException ) {
 				$status_code               = 400; // Bad Request.
 				$error_data['stripe_code'] = $e->getStripeCode();

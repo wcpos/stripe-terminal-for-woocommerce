@@ -449,6 +449,11 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				$refund = $this->service->retrieve_refund( $ref, $key );
 			} elseif ( '' !== $payment ) {
 				$refund = $this->find_refund( $payment, $row, $allocation, $key );
+				if ( is_array( $refund ) && isset( $refund['amount'], $allocation['amount'], $row['currency'] ) && (int) $refund['amount'] !== CurrencyConverter::convert_to_stripe_amount( (string) $allocation['amount'], (string) $row['currency'] ) ) {
+					// This allocation's metadata on a refund of another amount: not the refund the till
+					// asked for, so it settles nothing here.
+					return self::error( __( 'The Stripe refund carrying this allocation\'s reference is for another amount.', 'stripe-terminal-for-woocommerce' ), 'refund_amount_mismatch' );
+				}
 				if ( null === $refund ) {
 					// Nothing of this allocation's among the payment's refunds. With the re-sent
 					// create refused under the same key and body, that is the answer: never made.

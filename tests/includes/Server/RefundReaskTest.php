@@ -39,6 +39,10 @@ class RefundReaskTest extends ServerTestCase {
 	private function stripe( array $responses ): StripeHttpClientFake {
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['test_secret_key'] = 'sk_test_fake';
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['secret_key']      = 'sk_live_fake';
+		if ( ! isset( $this->orders[123] ) ) {
+			// The refund record the request names; `run()` sends nothing for a deleted one.
+			$this->orders[123] = Mockery::mock( 'WC_Order_Refund' );
+		}
 		$this->http = new StripeHttpClientFake( $responses );
 		\Stripe\ApiRequestor::setHttpClient( $this->http );
 		return $this->http;
@@ -107,7 +111,7 @@ class RefundReaskTest extends ServerTestCase {
 		$refund->shouldReceive( 'get_parent_id' )->andReturn( 42 );
 		$refund->shouldReceive( 'get_amount' )->andReturn( '2.50' );
 		$refund->shouldReceive( 'get_currency' )->andReturn( 'USD' );
-		$order->shouldReceive( 'add_order_note' )->once()->with( Mockery::on( static fn( $note ) => false !== strpos( $note, 'Stripe refused the POS refund of 2.50 USD' ) && false !== strpos( $note, 'Stripe refused' ) && false !== strpos( $note, 'The refund was not made.' ) ) );
+		$order->shouldReceive( 'add_order_note' )->once()->with( Mockery::on( static fn( $note ) => false !== strpos( $note, 'Stripe refused the POS refund of 2.50 USD' ) && false !== strpos( $note, 'Stripe refused' ) && false === strpos( $note, 'not made' ) ) );
 		$this->orders = array( 123 => $refund, 42 => $order );
 
 		Refund_Reask::run( $this->request() );
@@ -171,6 +175,17 @@ class RefundReaskTest extends ServerTestCase {
 		$this->assertCount( 1, $this->logger->warnings );
 		$this->assertSame( 'Stripe refund re-send could not be scheduled', $this->logger->warnings[0][0] );
 		$this->assertSame( 123, $this->logger->warnings[0][1]['refund_id'] );
+	}
+
+	/** The refund record is gone (staff deleted it and refunded afresh): nothing is sent that could make the disowned refund now, and nothing is queued. */
+	public function test_a_deleted_record_stops_the_re_send(): void {
+		$this->stripe( array( $this->ok( array( 'id' => 're_test', 'object' => 'refund', 'status' => 'succeeded' ) ) ) );
+		$this->orders = array();
+
+		Refund_Reask::run( $this->request() );
+
+		$this->assertCount( 0, $this->http->requests );
+		$this->assertCount( 0, $this->scheduled );
 	}
 
 	/** The till's mode has no key any more: nothing can be sent, and nothing is queued. */

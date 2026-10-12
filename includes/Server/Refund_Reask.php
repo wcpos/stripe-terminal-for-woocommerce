@@ -24,8 +24,9 @@ final class Refund_Reask {
 
 	/**
 	 * Seconds before each re-send. A dropped connection is usually back within a minute; later
-	 * tries space out so an outage is not hammered, and the last one still lands well inside the
-	 * sweep's first look at the order. After these, the sweep's own give-up governs.
+	 * tries space out so an outage is not hammered. The sweep looks at the order every ten minutes
+	 * meanwhile and finds a taken refund by its metadata; after the last try, the sweep's own
+	 * give-up governs.
 	 */
 	public const DELAYS = array( 60, 300, 1800 );
 
@@ -84,6 +85,13 @@ final class Refund_Reask {
 			// is the sweep's to find by its metadata, the rest ends at the sweep's give-up.
 			return;
 		}
+		$refund = wc_get_order( (int) $request['refund_id'] );
+		if ( ! $refund instanceof \WC_Order_Refund ) {
+			// The record is gone (staff deleted it and refunded afresh): the merchant has disowned this
+			// refund, so nothing is sent that could make it now. A taken one is theirs to find on the
+			// Stripe dashboard, as Pro's own give-up says.
+			return;
+		}
 		$api_key = Settings::get_api_key_for_mode( (string) ( $request['mode'] ?? '' ) );
 		if ( '' === $api_key ) {
 			// Nothing can be sent without that mode's key; the sweep's give-up tells staff.
@@ -109,18 +117,15 @@ final class Refund_Reask {
 			return;
 		}
 		// Refused on the request itself: the same body under the same key would have been replayed
-		// had it been taken, so this refund was never made. Pro's sweep reports the allocation failed
-		// from this mark.
-		$refund = wc_get_order( (int) $request['refund_id'] );
-		if ( ! $refund instanceof \WC_Order_Refund ) {
-			return;
-		}
+		// had it been taken, so this refund was most likely never made. The mark is for Pro's sweep,
+		// which still checks Stripe's own list of the sale's refunds before it reports the allocation
+		// failed; the note here gives staff Stripe's reason and nothing the list has not confirmed.
 		$refund->update_meta_data( self::REFUSED_META, $result->get_error_message() );
 		$refund->save();
 		$order = wc_get_order( $refund->get_parent_id() );
 		if ( $order instanceof \WC_Order ) {
 			/* translators: 1: refund amount, 2: Stripe's message. */
-			$order->add_order_note( sprintf( __( 'Stripe refused the POS refund of %1$s when it was sent again: %2$s. The refund was not made.', 'stripe-terminal-for-woocommerce' ), $refund->get_amount() . ' ' . $refund->get_currency(), $result->get_error_message() ) );
+			$order->add_order_note( sprintf( __( 'Stripe refused the POS refund of %1$s when it was sent again: %2$s. The refund sweep will confirm whether it was made.', 'stripe-terminal-for-woocommerce' ), $refund->get_amount() . ' ' . $refund->get_currency(), $result->get_error_message() ) );
 		}
 	}
 

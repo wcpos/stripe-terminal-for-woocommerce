@@ -250,6 +250,7 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 
 		$this->assertSame( 'The refund amount exceeds what is left of the charge.', wc_get_order( $refund->get_id() )->get_meta( Refund_Reask::REFUSED_META ) );
 		$this->assertStringContainsString( 'Stripe refused the POS refund of 5.00 EUR when it was sent again', $this->last_note( $order ) );
+		$this->assertStringNotContainsString( 'not made', $this->last_note( $order ), 'Only the sweep, after Stripe\'s list, says whether it was made' );
 		do_action( Payments_Sweeper::HOOK );
 
 		$this->assertSame( 'failed', $this->allocation( $order, $id )['status'] );
