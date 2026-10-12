@@ -341,6 +341,27 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Read one refund without order mutations: Pro's refund sweep asks about a refund this plugin
+	 * answered `pending`.
+	 *
+	 * @param string $id Refund ID.
+	 * @return array|WP_Error Refund or error.
+	 */
+	public function retrieve_refund( string $id ) {
+		try {
+			$refund = $this->timed(
+				'retrieve_refund',
+				function () use ( $id ) {
+					return $this->get_stripe_client()->refunds->retrieve( $id );
+				}
+			);
+			return $refund->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'retrieve_refund_error' );
+		}
+	}
+
+	/**
 	 * Cancel a POS intent without order mutations.
 	 *
 	 * @param string $id PaymentIntent ID.

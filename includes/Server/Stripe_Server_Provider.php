@@ -374,20 +374,77 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			if ( is_wp_error( $result ) ) {
 				return self::error( $result );
 			}
-			$states = array(
-				'succeeded' => 'succeeded',
-				'pending' => 'pending',
-				'requires_action' => 'pending',
-				'failed' => 'failed',
-				'canceled' => 'failed',
-			);
 			return array(
-				'status' => $states[ $result['status'] ] ?? 'pending',
+				'status' => self::refund_status( (string) ( $result['status'] ?? '' ) ),
 				'provider_ref' => $result['id'],
 			);
 		} catch ( \Throwable $e ) {
 			return self::error( $e );
 		}
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * Reads the refund `refund()` made, by the id it returned; nothing is created. Stripe settles a
+	 * card refund at once, so the sweep asks only about the payment methods whose refunds sit
+	 * `pending` or `requires_action` for a while.
+	 *
+	 * @param array $row        Ledger row (or the historical stand-in) the refund was allocated to.
+	 * @param array $allocation The pending allocation, with the refund id `refund()` returned.
+	 * @return array|\WP_Error Status and reference, or an error that keeps the question open.
+	 */
+	public function fetch_refund( array $row, array $allocation ) {
+		try {
+			$ref = (string) ( $allocation['provider_ref'] ?? '' );
+			if ( '' === $ref ) {
+				// `refund()` answers with the refund's id or an error, never a pending without one, so
+				// an allocation with no reference was not made here: nothing is read and the question
+				// stays open rather than another refund being guessed at.
+				return self::error( __( 'No Stripe refund reference to read.', 'stripe-terminal-for-woocommerce' ), 'missing_refund_ref' );
+			}
+			$refund = $this->service->retrieve_refund( $ref );
+			if ( is_wp_error( $refund ) ) {
+				// A read Stripe refused (a key it rejects, a refund it cannot show under it) proves
+				// nothing about the refund: the question stays open, as it does when nothing answered.
+				return self::unanswered( $refund ) ? $this->indeterminate( 'stripe_refund_unanswered', $refund->get_error_message() ) : self::error( $refund );
+			}
+			if ( empty( $refund['id'] ) || empty( $refund['status'] ) ) {
+				// A success without the refund in it is no answer.
+				return $this->indeterminate( 'stripe_refund_unanswered', __( 'Stripe answered without the refund.', 'stripe-terminal-for-woocommerce' ) );
+			}
+			// The refund must belong to the row's payment: a reference bound to another sale settles
+			// nothing here. The row names the intent, or (a historical webview row) the charge.
+			$payment = $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? $row['provider_refs']['transaction_id'] ?? '';
+			$paid    = 0 === strpos( (string) $payment, 'ch_' ) ? ( $refund['charge'] ?? '' ) : ( $refund['payment_intent'] ?? '' );
+			if ( '' !== $payment && '' !== (string) $paid && $payment !== $paid ) {
+				return self::error( __( 'The Stripe refund belongs to another payment.', 'stripe-terminal-for-woocommerce' ), 'refund_payment_mismatch' );
+			}
+			return array(
+				'status' => self::refund_status( (string) $refund['status'] ),
+				'provider_ref' => $refund['id'],
+			);
+		} catch ( \Throwable $e ) {
+			return self::error( $e );
+		}
+	}
+
+	/**
+	 * Pro's three refund states from Stripe's five. `requires_action` is a refund waiting on the
+	 * customer (some bank-based methods); `canceled` is one Stripe gave up on. An unknown state is
+	 * still pending, never money returned.
+	 *
+	 * @param string $status Stripe refund status.
+	 */
+	private static function refund_status( string $status ): string {
+		$states = array(
+			'succeeded' => 'succeeded',
+			'pending' => 'pending',
+			'requires_action' => 'pending',
+			'failed' => 'failed',
+			'canceled' => 'failed',
+		);
+		return $states[ $status ] ?? 'pending';
 	}
 
 	/**

@@ -8,6 +8,7 @@
 - A refund from the POS of an order paid on the previous order-pay panel finds the Stripe payment by the order's transaction id, charge ids included (Canadian orders check the charge for Interac).
 - The previous panel's Retry no longer puts an intent back on a reader once the POS has adopted it.
 - With Phone Order on, submitting the order-pay form no longer marks a partly paid order as paid from a POS keypad payment, and a refund on such a mixed order no longer targets the keypad payment on the old path.
+- A POS refund Stripe left `pending` (some bank-based payment methods) is read back by Pro's refund sweep until Stripe settles it, so the order's refund shows confirmed or rejected without a visit to the Stripe dashboard. Card refunds settle at once and are not affected.
 - Pro's provider conformance suite runs in CI against the real adapter over a scripted Stripe; the transcripts in `tests/conformance/transcripts` are the certified record.
 - Terminal and phone-order PaymentIntents, including the keypad's, are created with `allowed_payment_method_types`, which the current Stripe API version accepts and which replaces the `payment_method_types` parameter removed in API 2026-09-30.endive, so a later stripe-php 22 upgrade cannot break payment creation.
 - Requires WooCommerce POS Pro 2.0.0 or newer; the plugin registers nothing and shows an admin notice on older or missing Pro.
