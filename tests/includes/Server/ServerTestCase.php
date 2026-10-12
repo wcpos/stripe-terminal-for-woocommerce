@@ -13,11 +13,17 @@ abstract class ServerTestCase extends \PHPUnit\Framework\TestCase {
 	protected const PAYMENT_ID = 'A1234567-1234-4123-8123-123456789ABC';
 	protected $http;
 	protected $options;
+	/** Cron events the code under test scheduled: timestamp, hook, args. */
+	protected $scheduled = array();
+	/** Orders and refund records `wc_get_order()` answers with, by id. */
+	protected $orders = array();
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
 		$GLOBALS['stwc_payment_id_for_action'] = array();
-		$this->options = array(
+		$this->scheduled = array();
+		$this->orders    = array();
+		$this->options   = array(
 			'woocommerce_stripe_terminal_for_woocommerce_settings' => array(
 				'test_mode'               => 'yes',
 				'test_pos_webhook_secret' => 'whsec_test',
@@ -52,6 +58,13 @@ abstract class ServerTestCase extends \PHPUnit\Framework\TestCase {
 				},
 				'add_query_arg'    => function ( $key, $value, $url ) {
 					return $url . '?' . $key . '=' . $value;
+				},
+				'wc_get_order'     => function ( $id ) {
+					return $this->orders[ (int) $id ] ?? false;
+				},
+				'wp_schedule_single_event' => function ( $timestamp, $hook, $args = array() ) {
+					$this->scheduled[] = array( 'timestamp' => $timestamp, 'hook' => $hook, 'args' => $args );
+					return true;
 				},
 			)
 		);
