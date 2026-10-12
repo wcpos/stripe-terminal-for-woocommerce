@@ -51,6 +51,19 @@ class StripeServerProviderWebhookTest extends ServerTestCase {
 		);
 	}
 
+	/** A real event carries `latest_charge` as an id string, not an expansion: no charge ref, no warning, the rest intact. */
+	public function test_success_event_with_a_charge_id_string_carries_the_intent_and_mode_only(): void {
+		$patch = Provider::webhook_patch( $this->intent( array( 'status' => 'succeeded', 'latest_charge' => 'ch_test' ) ), 'evt_1' );
+		$this->assertSame(
+			array(
+				'stripe_payment_intent' => 'pi_test',
+				'stripe_mode' => 'test',
+				'transaction_id' => 'pi_test',
+			),
+			$patch['provider_refs']
+		);
+	}
+
 	/** Pro's keys (`payment_intent`, `action`, `reader`) are the till's to write; a webhook never carries them. */
 	public function test_success_patch_carries_no_pro_owned_reference(): void {
 		$patch = Provider::webhook_patch( $this->intent( array( 'status' => 'succeeded' ) ), 'evt_1' );
