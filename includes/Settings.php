@@ -69,6 +69,20 @@ class Settings {
 	}
 
 	/**
+	 * The secret key of a named mode, whatever mode the gateway is in now: a refund made in one
+	 * mode is read or re-sent under that mode's key.
+	 *
+	 * @param string $mode test or live.
+	 * @return string The key, or '' when that mode has none (or the mode is unknown).
+	 */
+	public static function get_api_key_for_mode( string $mode ): string {
+		if ( ! in_array( $mode, array( 'test', 'live' ), true ) ) {
+			return '';
+		}
+		return (string) ( self::get_gateway_settings()[ 'test' === $mode ? 'test_secret_key' : 'secret_key' ] ?? '' );
+	}
+
+	/**
 	 * Get the Stripe webhook secret.
 	 */
 	public static function get_webhook_secret() {

@@ -128,6 +128,67 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 		$this->assertCount( 0, $this->http->requests );
 	}
 
+	/** The re-sent create was refused under the same key, and Stripe's list shows nothing of this allocation's: never made, so the allocation is reported failed. */
+	public function test_refused_replay_with_nothing_listed_is_reported_failed(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->with( \WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask::REFUSED_META )->andReturn( 'Charge already refunded' );
+		$this->orders = array( 123 => $refund );
+		$provider     = $this->provider( array( $this->listing( array() ) ) );
+		$this->assertSame( array( 'status' => 'failed', 'provider_ref' => null ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+		$this->assertCount( 1, $this->http->requests, 'The list is Stripe\'s word; the mark alone is not' );
+	}
+
+	/** A refused mark the list contradicts (the refund IS there under this allocation's metadata) is not believed: the refund is reported as Stripe has it. */
+	public function test_refused_mark_is_overruled_by_a_listed_refund(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->with( \WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask::REFUSED_META )->andReturn( 'Invalid API Key provided' );
+		$this->orders = array( 123 => $refund );
+		$provider     = $this->provider( array( $this->listing( array( $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded' ) ) ) ) ) );
+		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_mine' ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+	}
+
+	/** A refused mark with a list Stripe did not answer, or refused (a key that now belongs to another account): the mark alone is not believed, and the question stays open. */
+	public function test_refused_mark_with_an_unanswered_or_refused_list_stays_open(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->andReturn( 'No such payment_intent' );
+		$this->orders = array( 123 => $refund );
+		$provider     = $this->provider( array( array( 'body' => array( 'error' => array( 'type' => 'api_error', 'message' => 'Stripe is down' ) ), 'status' => 500 ) ) );
+		$this->assert_indeterminate( $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+		$provider = $this->provider( array( array( 'body' => array( 'error' => array( 'type' => 'invalid_request_error', 'code' => 'resource_missing', 'message' => 'No such payment_intent' ) ), 'status' => 404 ) ) );
+		$this->assert_provider_error( $provider->fetch_refund( $this->row(), $this->allocation( '' ) ), 'resource_missing' );
+	}
+
+	/** A refund carrying this allocation's metadata but for another amount is not the one the till asked for. */
+	public function test_metadata_match_for_another_amount_is_refused(): void {
+		$provider = $this->provider( array( $this->listing( array( $this->refund( array( 'id' => 're_odd', 'status' => 'succeeded', 'amount' => 999 ) ) ) ) ) );
+		$this->assert_provider_error( $provider->fetch_refund( $this->row(), $this->allocation( '' ) ), 'refund_amount_mismatch' );
+		$provider = $this->provider( array( $this->listing( array( $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded', 'amount' => 250 ) ) ) ) ) );
+		$this->assertSame( 're_mine', $provider->fetch_refund( $this->row(), $this->allocation( '' ) )['provider_ref'] );
+	}
+
+	/** A refused mark with no key to look under, or no payment to look under: the record's word stands. */
+	public function test_refused_mark_without_a_way_to_look_is_reported_failed(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->andReturn( 'Charge already refunded' );
+		$this->orders = array( 123 => $refund );
+		$row                                 = $this->row();
+		$row['provider_refs']['stripe_mode'] = 'live';
+		$provider                            = $this->provider();
+		$this->assertSame( array( 'status' => 'failed', 'provider_ref' => null ), $provider->fetch_refund( $row, $this->allocation( '' ) ), 'No live key configured' );
+		$row['provider_refs'] = array();
+		$this->assertSame( array( 'status' => 'failed', 'provider_ref' => null ), $provider->fetch_refund( $row, $this->allocation( '' ) ), 'No payment to list under' );
+		$this->assertCount( 0, $this->http->requests );
+	}
+
+	/** An allocation that holds a reference is read by it, whatever the record says: the reference is Stripe's own word. */
+	public function test_refused_mark_does_not_override_a_reference(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->andReturn( 'Charge already refunded' );
+		$this->orders = array( 123 => $refund );
+		$provider     = $this->provider( array( $this->ok( $this->refund( array( 'status' => 'succeeded' ) ) ) ) );
+		$this->assertSame( 'succeeded', $provider->fetch_refund( $this->row(), $this->allocation() )['status'] );
+	}
+
 	/** A refund whose create was answered without its id is found among the payment's refunds by the metadata the create carried. */
 	public function test_no_reference_is_found_by_metadata(): void {
 		$other    = $this->refund( array( 'id' => 're_other', 'status' => 'succeeded', 'metadata' => array( 'wcpos_payment_id' => self::PAYMENT_ID, 'wcpos_refund_id' => '99' ) ) );

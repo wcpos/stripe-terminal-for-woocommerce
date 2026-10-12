@@ -348,10 +348,16 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			if ( '' === $ref ) {
 				return self::error( __( 'No Stripe payment found for refund.', 'stripe-terminal-for-woocommerce' ), 'missing_payment_ref' );
 			}
+			// The row's payment was made in a recorded mode; everything about its refund happens under
+			// that mode's key, whatever mode the gateway is in now.
+			$key = $this->key_for( $row );
+			if ( is_wp_error( $key ) ) {
+				return $key;
+			}
 			if ( 'CAD' === strtoupper( $row['currency'] ) ) {
 				// A historical row may name the charge rather than the intent; read whichever it names.
 				$is_charge = 0 === strpos( $ref, 'ch_' );
-				$paid      = $is_charge ? $this->service->retrieve_charge( $ref ) : $this->service->retrieve_payment_intent( $ref );
+				$paid      = $is_charge ? $this->service->retrieve_charge( $ref, $key ) : $this->service->retrieve_payment_intent( $ref, $key );
 				if ( is_wp_error( $paid ) ) {
 					return self::error( $paid );
 				}
@@ -360,25 +366,42 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 					return self::error( __( 'Interac refunds must be run on the reader', 'stripe-terminal-for-woocommerce' ), 'interac_refund_on_reader' );
 				}
 			}
-			$result = $this->service->refund_payment(
-				$ref,
-				CurrencyConverter::convert_to_stripe_amount( $amount, $row['currency'] ),
+			$request = array(
+				'payment'   => $ref,
+				'amount'    => CurrencyConverter::convert_to_stripe_amount( $amount, $row['currency'] ),
+				'metadata'  => array(
+					'wcpos_payment_id' => $row['id'],
+					'wcpos_refund_id' => (string) $refund_id,
+				),
+				'key'       => 'wcpos_refund_' . $row['id'] . '_' . $refund_id,
+				'mode'      => self::mode_of( $row ),
+				'refund_id' => $refund_id,
+			);
+			// The time of the till's own request: a re-send is only safe while Stripe still holds the key.
+			$request['requested_at'] = time();
+			$result  = $this->service->refund_payment(
+				$request['payment'],
+				$request['amount'],
 				array(
-					'metadata'        => array(
-						'wcpos_payment_id' => $row['id'],
-						'wcpos_refund_id' => (string) $refund_id,
-					),
-					'request_options' => array( 'idempotency_key' => 'wcpos_refund_' . $row['id'] . '_' . $refund_id ),
+					'metadata'        => $request['metadata'],
+					'request_options' => array( 'idempotency_key' => $request['key'] ) + ( null === $key ? array() : array( 'api_key' => $key ) ),
 				)
 			);
-			if ( is_wp_error( $result ) ) {
+			if ( is_wp_error( $result ) && ( ! self::unanswered( $result ) || ! self::swept( $row ) ) ) {
+				// Stripe refused: nothing was made, and the record may go. An unanswered create on a
+				// row Pro's sweep never reads (a Bluetooth or Tap to Pay row) stays an error too:
+				// nothing would ever settle a pending there, so the till is told now.
 				return self::error( $result );
 			}
-			if ( empty( $result['id'] ) ) {
-				// Stripe took the refund (a 200) but the answer did not carry it. An error here would
-				// make WooCommerce delete the record, and a retry would refund again under a new key;
-				// a pending with no reference keeps the record, and `fetch_refund()` finds the refund
-				// by the metadata the create carried.
+			if ( is_wp_error( $result ) || empty( $result['id'] ) ) {
+				// Unanswered (the connection dropped, a Stripe 5xx), or a 200 that did not carry the
+				// refund: Stripe may have taken it. An error here would make WooCommerce delete the
+				// record, and a retry would refund again under a new key; a pending with no reference
+				// keeps the record, the same request is re-sent under the same key, and
+				// `fetch_refund()` finds the refund by the metadata the create carried.
+				if ( is_wp_error( $result ) ) {
+					Refund_Reask::schedule( $request );
+				}
 				return array(
 					'status' => 'pending',
 					'provider_ref' => null,
@@ -409,25 +432,43 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 */
 	public function fetch_refund( array $row, array $allocation ) {
 		try {
-			$key = $this->key_for( $row );
+			$ref     = (string) ( $allocation['provider_ref'] ?? '' );
+			$refused = '' === $ref && '' !== self::refused_reason( (int) ( $allocation['id'] ?? 0 ) );
+			$key     = $this->key_for( $row );
 			if ( is_wp_error( $key ) ) {
-				return $key;
+				// The re-sent create was refused and there is no key to look under: the record is
+				// the only word, and it says never made.
+				return $refused ? array(
+					'status' => 'failed',
+					'provider_ref' => null,
+				) : $key;
 			}
 			// The row names the intent (Pro's rows), or the intent or charge (a historical webview row).
 			$payment = (string) ( $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? $row['provider_refs']['transaction_id'] ?? '' );
-			$ref     = (string) ( $allocation['provider_ref'] ?? '' );
 			if ( '' !== $ref ) {
 				$refund = $this->service->retrieve_refund( $ref, $key );
 			} elseif ( '' !== $payment ) {
 				$refund = $this->find_refund( $payment, $row, $allocation, $key );
+				if ( is_array( $refund ) && isset( $refund['amount'], $allocation['amount'], $row['currency'] ) && CurrencyConverter::convert_to_stripe_amount( (string) $allocation['amount'], (string) $row['currency'] ) !== (int) $refund['amount'] ) {
+					// This allocation's metadata on a refund of another amount: not the refund the till
+					// asked for, so it settles nothing here.
+					return self::error( __( 'The Stripe refund carrying this allocation\'s reference is for another amount.', 'stripe-terminal-for-woocommerce' ), 'refund_amount_mismatch' );
+				}
 				if ( null === $refund ) {
-					// Stripe took the create, so the refund should be among the payment's; until it
-					// shows, the question stays open and the sweep looks again.
+					// Nothing of this allocation's among the payment's refunds. With the re-sent
+					// create refused under the same key and body, that is the answer: never made.
+					// Otherwise Stripe took the create and the refund should show; until it does,
+					// the question stays open and the sweep looks again.
 					return array(
-						'status' => 'pending',
+						'status' => $refused ? 'failed' : 'pending',
 						'provider_ref' => null,
 					);
 				}
+			} elseif ( $refused ) {
+				return array(
+					'status' => 'failed',
+					'provider_ref' => null,
+				);
 			} else {
 				// Neither a refund id nor a payment to look under: nothing this plugin can read.
 				return self::error( __( 'No Stripe refund reference to read.', 'stripe-terminal-for-woocommerce' ), 'missing_refund_ref' );
@@ -494,6 +535,44 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	}
 
 	/**
+	 * Whether Pro's refund sweep reads this row back. Pro sweeps server-mode rows and the
+	 * historical stand-in (which carries no capture mode); a Bluetooth or Tap to Pay row is never
+	 * read, so a pending left there would stand for good.
+	 *
+	 * @param array $row Ledger row.
+	 */
+	private static function swept( array $row ): bool {
+		return 'server' === ( $row['capture_mode'] ?? 'server' );
+	}
+
+	/**
+	 * Stripe's reason for refusing the re-sent create, when `Refund_Reask` recorded one.
+	 *
+	 * @param int $refund_id WooCommerce refund id.
+	 */
+	private static function refused_reason( int $refund_id ): string {
+		if ( $refund_id <= 0 ) {
+			return '';
+		}
+		$refund = wc_get_order( $refund_id );
+		return $refund instanceof \WC_Order_Refund ? (string) $refund->get_meta( Refund_Reask::REFUSED_META ) : '';
+	}
+
+	/**
+	 * The mode the row's payment was made in: recorded on the row, else the gateway's current mode
+	 * (a historical row records none and was made under the mode the gateway is in).
+	 *
+	 * @param array $row Ledger row.
+	 */
+	private static function mode_of( array $row ): string {
+		$mode = $row['provider_refs']['stripe_mode'] ?? null;
+		if ( in_array( $mode, array( 'test', 'live' ), true ) ) {
+			return $mode;
+		}
+		return Settings::is_test_mode() ? 'test' : 'live';
+	}
+
+	/**
 	 * The key of the mode the row's payment was made in, when it is not the gateway's current
 	 * mode. Stripe keeps test and live objects apart, so a refund made in one mode cannot be read
 	 * with the other mode's key once the gateway is switched; the device adapter refunds under the
@@ -507,7 +586,7 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 		if ( ! in_array( $mode, array( 'test', 'live' ), true ) || ( 'test' === $mode ) === Settings::is_test_mode() ) {
 			return null;
 		}
-		$key = (string) ( Settings::get_gateway_settings()[ 'test' === $mode ? 'test_secret_key' : 'secret_key' ] ?? '' );
+		$key = Settings::get_api_key_for_mode( $mode );
 		if ( '' === $key ) {
 			/* translators: %s: test or live. */
 			return self::error( sprintf( __( 'The refund was made in Stripe %s mode, which has no API key configured.', 'stripe-terminal-for-woocommerce' ), $mode ), 'stripe_mode_key_missing' );

@@ -318,15 +318,16 @@ class StripeTerminalService {
 	/**
 	 * Retrieve a POS intent without order mutations.
 	 *
-	 * @param string $id PaymentIntent ID.
+	 * @param string      $id      PaymentIntent ID.
+	 * @param null|string $api_key A key other than this service's, see `retrieve_refund()`.
 	 * @return array|WP_Error Intent or error.
 	 */
-	public function retrieve_payment_intent( string $id ) {
+	public function retrieve_payment_intent( string $id, ?string $api_key = null ) {
 		try {
 			$intent = $this->timed(
 				'retrieve_payment_intent',
-				function () use ( $id ) {
-					return $this->get_stripe_client()->paymentIntents->retrieve( $id, array( 'expand' => array( 'latest_charge' ) ) );
+				function () use ( $id, $api_key ) {
+					return $this->get_stripe_client()->paymentIntents->retrieve( $id, array( 'expand' => array( 'latest_charge' ) ), null === $api_key ? null : array( 'api_key' => $api_key ) );
 				}
 			);
 			return $intent->toArray();
@@ -338,15 +339,16 @@ class StripeTerminalService {
 	/**
 	 * Retrieve a charge without order mutations: a historical row may name the charge, not the intent.
 	 *
-	 * @param string $id Charge ID.
+	 * @param string      $id      Charge ID.
+	 * @param null|string $api_key A key other than this service's, see `retrieve_refund()`.
 	 * @return array|WP_Error Charge or error.
 	 */
-	public function retrieve_charge( string $id ) {
+	public function retrieve_charge( string $id, ?string $api_key = null ) {
 		try {
 			$charge = $this->timed(
 				'retrieve_charge',
-				function () use ( $id ) {
-					return $this->get_stripe_client()->charges->retrieve( $id );
+				function () use ( $id, $api_key ) {
+					return $this->get_stripe_client()->charges->retrieve( $id, null, null === $api_key ? null : array( 'api_key' => $api_key ) );
 				}
 			);
 			return $charge->toArray();

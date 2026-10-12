@@ -25,7 +25,9 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 	private $cancel_action = 'idle';
 	private $refund_status = 'succeeded';
 	private $refunds = array();
+	private $refund_keys = array();
 	private $lose_refund_body = false;
+	private $lose_refund_answer = null;
 	private $lost = false;
 	private $seq = 0;
 
@@ -54,6 +56,17 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 	 */
 	public function lose_next_refund_body(): void {
 		$this->lose_refund_body = true;
+	}
+
+	/**
+	 * The next refund create gets no answer at all: the connection drops after Stripe took it
+	 * (`taken`), or before the request arrived (`never`). A replay under the same key then returns
+	 * the refund Stripe holds, or makes it.
+	 *
+	 * @param string $when taken or never.
+	 */
+	public function lose_next_refund_answer( string $when ): void {
+		$this->lose_refund_answer = $when;
 	}
 
 	/**
@@ -204,16 +217,47 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 			return self::ok( $entry['data'] );
 		}
 		if ( '/v1/refunds' === $path && 'post' === $method ) {
+			if ( 'never' === $this->lose_refund_answer ) {
+				// The request never arrived: Stripe holds nothing and no key was used.
+				$this->lose_refund_answer = null;
+				throw \Stripe\Exception\ApiConnectionException::factory( 'Connection lost before the request arrived' );
+			}
 			$ref = $this->intent_id_for( (string) ( $params['payment_intent'] ?? $params['charge'] ?? '' ) );
 			if ( ! isset( $this->intents[ $ref ] ) || $mode !== $this->intents[ $ref ]['mode'] ) {
 				return self::error( 'resource_missing', 'No such payment_intent: ' . $ref, 404 );
 			}
-			$data = $this->intents[ $ref ]['data'];
-			if ( 'succeeded' !== $data['status'] || (int) ( $params['amount'] ?? $data['amount_received'] ) > $data['amount_received'] ) {
-				return self::error( 'charge_not_captured', 'Only a captured amount can be refunded.', 400 );
+			$mode_key = $mode . ':' . $key;
+			if ( '' !== $key && isset( $this->refund_keys[ $mode_key ] ) ) {
+				if ( $this->refund_keys[ $mode_key ]['params'] !== $params ) {
+					// The same key with another body: Stripe refuses rather than guess which was meant.
+					return array( wp_json_encode( array( 'error' => array( 'type' => 'idempotency_error', 'message' => 'Keys for idempotent requests can only be used with the same parameters they were first used with.' ) ) ), 400, array() );
+				}
+				// Stripe replays the first answer to the same key, and makes nothing new.
+				return self::ok( $this->refunds[ $this->refund_keys[ $mode_key ]['id'] ]['data'] );
+			}
+			$data     = $this->intents[ $ref ]['data'];
+			$refunded = 0;
+			foreach ( $this->refunds as $held ) {
+				if ( $ref === $held['data']['payment_intent'] && 'failed' !== $held['data']['status'] && 'canceled' !== $held['data']['status'] ) {
+					$refunded += (int) $held['data']['amount'];
+				}
+			}
+			if ( 'succeeded' !== $data['status'] || $refunded + (int) ( $params['amount'] ?? $data['amount_received'] ) > $data['amount_received'] ) {
+				return self::error( 'charge_already_refunded', 'The refund amount exceeds what is left of the charge.', 400 );
 			}
 			$refund = array( 'id' => 're_' . ( ++$this->seq ), 'object' => 'refund', 'status' => $this->refund_status, 'amount' => (int) ( $params['amount'] ?? $data['amount_received'] ), 'currency' => $data['currency'], 'payment_intent' => $ref, 'charge' => $data['latest_charge']['id'] ?? null, 'metadata' => $params['metadata'] ?? array() );
 			$this->refunds[ $refund['id'] ] = array( 'mode' => $mode, 'data' => $refund );
+			if ( '' !== $key ) {
+				$this->refund_keys[ $mode_key ] = array(
+					'id'     => $refund['id'],
+					'params' => $params,
+				);
+			}
+			if ( 'taken' === $this->lose_refund_answer ) {
+				// Stripe took it; the answer never came back.
+				$this->lose_refund_answer = null;
+				throw \Stripe\Exception\ApiConnectionException::factory( 'Connection lost after the refund was taken' );
+			}
 			if ( $this->lose_refund_body ) {
 				$this->lose_refund_body = false;
 				return self::ok( array( 'object' => 'refund' ) );

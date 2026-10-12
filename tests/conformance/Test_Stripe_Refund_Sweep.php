@@ -13,6 +13,7 @@ use WCPOS\WooCommercePOS\Payments\Contract\Payments_Sweeper;
 use WCPOS\WooCommercePOS\StripeTerminal\Settings;
 use WCPOS\WooCommercePOS\Tests\API\WCPOS_REST_Unit_Test_Case;
 use WCPOS\WooCommercePOSPro\Payments\Server\Reader_Curation;
+use WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask;
 use WCPOS\WooCommercePOSPro\Payments\Server\Refund_Sweep;
 
 require_once __DIR__ . '/Stripe_Conformance_Fixture.php';
@@ -198,7 +199,101 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 		$this->assertStringContainsString( 'mode=test answer=succeeded', $reads[0]['request'], 'Read under the recorded test key while the gateway sits in live mode' );
 	}
 
+	/** The connection dropped after Stripe took the refund: the record stands as pending, the same request is re-sent under the same key, Stripe replays the one refund it holds, and the sweep settles it. */
+	public function test_connection_lost_after_stripe_took_the_refund_is_recovered(): void {
+		$this->fixture->transport->lose_next_refund_answer( 'taken' );
+		list( $order, $id, $refund ) = $this->pending_refund();
+		$this->assertEmpty( $this->allocation( $order, $id )['provider_ref'] );
+		$this->assertSame( '0', $this->mark( $order ) );
+		$this->assertCount( 1, $this->fixture->transport->refund_ids(), 'Stripe holds the refund the till never heard about' );
+
+		$this->run_scheduled_reask( $refund );
+
+		$this->assertCount( 1, $this->fixture->transport->refund_ids(), 'The replay under the same key made nothing new' );
+		$this->assertNull( $this->scheduled_reask( $refund ), 'Stripe replayed its answer, so nothing more is queued' );
+		$this->fixture->transport->settle_refunds( 'succeeded' );
+		do_action( Payments_Sweeper::HOOK );
+
+		$allocation = $this->allocation( $order, $id );
+		$this->assertSame( 'succeeded', $allocation['status'] );
+		$this->assertSame( $this->first_refund_id(), $allocation['provider_ref'] );
+		$this->assertSame( '5.00', $this->stored( $order, $id )['refunded_amount'] );
+		$this->assertSame( '', $this->mark( $order ) );
+	}
+
+	/** The connection dropped before the request arrived: nothing at Stripe, so the re-send makes the refund, and the sweep settles it. */
+	public function test_connection_lost_before_stripe_got_the_refund_is_recovered(): void {
+		$this->fixture->transport->lose_next_refund_answer( 'never' );
+		list( $order, $id, $refund ) = $this->pending_refund();
+		$this->assertEmpty( $this->allocation( $order, $id )['provider_ref'] );
+		$this->assertCount( 0, $this->fixture->transport->refund_ids(), 'Stripe holds nothing' );
+
+		$this->run_scheduled_reask( $refund );
+
+		$this->assertCount( 1, $this->fixture->transport->refund_ids(), 'The re-send made the refund' );
+		$this->assertNull( $this->scheduled_reask( $refund ), 'Stripe answered, so nothing more is queued' );
+		$this->fixture->transport->settle_refunds( 'succeeded' );
+		do_action( Payments_Sweeper::HOOK );
+
+		$this->assertSame( 'succeeded', $this->allocation( $order, $id )['status'] );
+		$this->assertSame( $this->first_refund_id(), $this->allocation( $order, $id )['provider_ref'] );
+		$this->assertSame( '5.00', $this->stored( $order, $id )['refunded_amount'] );
+	}
+
+	/** Stripe refuses the re-sent create (the sale was refunded in full from the dashboard meanwhile): the refund was never made, the sweep records the allocation failed, and staff read Stripe's reason. */
+	public function test_refused_replay_fails_the_allocation(): void {
+		$this->fixture->transport->lose_next_refund_answer( 'never' );
+		list( $order, $id, $refund ) = $this->pending_refund();
+		$this->fixture->transport->dashboard_refund( $this->payment_intent( $order, $id ), 9295 );
+
+		$this->run_scheduled_reask( $refund );
+
+		$this->assertSame( 'The refund amount exceeds what is left of the charge.', wc_get_order( $refund->get_id() )->get_meta( Refund_Reask::REFUSED_META ) );
+		$this->assertStringContainsString( 'Stripe refused the POS refund of 5.00 EUR when it was sent again', $this->last_note( $order ) );
+		$this->assertStringNotContainsString( 'not made', $this->last_note( $order ), 'Only the sweep, after Stripe\'s list, says whether it was made' );
+		do_action( Payments_Sweeper::HOOK );
+
+		$this->assertSame( 'failed', $this->allocation( $order, $id )['status'] );
+		$this->assertSame( '0.00', $this->stored( $order, $id )['refunded_amount'] );
+		$this->assertSame( '', $this->mark( $order ) );
+		$this->assertStringContainsString( 'rejected by the provider', $this->last_note( $order ) );
+		$this->assertInstanceOf( \WC_Order_Refund::class, wc_get_order( $refund->get_id() ), 'The WooCommerce refund record stands' );
+	}
+
 	// ----------------------------------------------------------------------------------------------
+
+	/**
+	 * The re-send WP cron holds for this refund, as timestamp and event, or null.
+	 *
+	 * @param \WC_Order_Refund $refund The refund record.
+	 */
+	private function scheduled_reask( \WC_Order_Refund $refund ): ?array {
+		$found = null;
+		foreach ( (array) _get_cron_array() as $timestamp => $hooks ) {
+			foreach ( (array) ( $hooks[ Refund_Reask::HOOK ] ?? array() ) as $event ) {
+				if ( (int) $event['args'][0]['refund_id'] === $refund->get_id() ) {
+					$found = array( $timestamp, $event );
+				}
+			}
+		}
+		return $found;
+	}
+
+	/**
+	 * Run the one re-send WP cron holds for this refund, through its registered hook, and take it off
+	 * the schedule the way cron would.
+	 *
+	 * @param \WC_Order_Refund $refund The refund record.
+	 */
+	private function run_scheduled_reask( \WC_Order_Refund $refund ): void {
+		$found = $this->scheduled_reask( $refund );
+		$this->assertNotNull( $found, 'A re-send was scheduled' );
+		$this->assertEqualsWithDelta( time() + Refund_Reask::DELAYS[0], $found[0], 30 );
+		$this->assertSame( 0, $found[1]['args'][0]['attempt'] );
+		wp_unschedule_event( $found[0], Refund_Reask::HOOK, $found[1]['args'] );
+		do_action_ref_array( Refund_Reask::HOOK, $found[1]['args'] );
+	}
+
 
 	/**
 	 * A captured Stripe sale with a 5.00 refund Stripe answered `pending`.
