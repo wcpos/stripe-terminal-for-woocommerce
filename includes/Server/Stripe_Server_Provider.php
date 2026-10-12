@@ -342,9 +342,7 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 */
 	public function refund( array $row, int $refund_id, string $amount ) {
 		try {
-			// Pro stores the intent under `action`; the fetch/webhook refs carry it too, for a row restored
-			// without one; a historical webview row carries only the order's transaction id (intent or charge).
-			$ref = $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? $row['provider_refs']['transaction_id'] ?? '';
+			$ref = self::payment_of( $row );
 			if ( '' === $ref ) {
 				return self::error( __( 'No Stripe payment found for refund.', 'stripe-terminal-for-woocommerce' ), 'missing_payment_ref' );
 			}
@@ -387,10 +385,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 					'request_options' => array( 'idempotency_key' => $request['key'] ) + ( null === $key ? array() : array( 'api_key' => $key ) ),
 				)
 			);
-			if ( is_wp_error( $result ) && ( ! self::unanswered( $result ) || ! self::swept( $row ) ) ) {
-				// Stripe refused: nothing was made, and the record may go. An unanswered create on a
-				// row Pro's sweep never reads (a Bluetooth or Tap to Pay row) stays an error too:
-				// nothing would ever settle a pending there, so the till is told now.
+			if ( is_wp_error( $result ) && ! self::unanswered( $result ) ) {
+				// Stripe refused: nothing was made, and the record may go.
 				return self::error( $result );
 			}
 			if ( is_wp_error( $result ) || empty( $result['id'] ) ) {
@@ -443,8 +439,7 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 					'provider_ref' => null,
 				) : $key;
 			}
-			// The row names the intent (Pro's rows), or the intent or charge (a historical webview row).
-			$payment = (string) ( $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? $row['provider_refs']['transaction_id'] ?? '' );
+			$payment = self::payment_of( $row );
 			if ( '' !== $ref ) {
 				$refund = $this->service->retrieve_refund( $ref, $key );
 			} elseif ( '' !== $payment ) {
@@ -532,17 +527,6 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			}
 		}
 		return null;
-	}
-
-	/**
-	 * Whether Pro's refund sweep reads this row back. Pro sweeps server-mode rows and the
-	 * historical stand-in (which carries no capture mode); a Bluetooth or Tap to Pay row is never
-	 * read, so a pending left there would stand for good.
-	 *
-	 * @param array $row Ledger row.
-	 */
-	private static function swept( array $row ): bool {
-		return 'server' === ( $row['capture_mode'] ?? 'server' );
 	}
 
 	/**
@@ -768,6 +752,22 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 				return is_string( $value ) && '' !== $value;
 			}
 		);
+	}
+
+	/**
+	 * The Stripe payment a row's refund is made against, or '' when the row names none.
+	 *
+	 * Pro's smart-reader rows carry the intent under `action`; the fetch and webhook refs carry it
+	 * as `stripe_payment_intent`, for a row restored without one; a historical webview row carries
+	 * only the order's transaction id (intent or charge). A Bluetooth or Tap to Pay row keeps the
+	 * intent under Pro's own `payment_intent`, and a webhook that captured it before the till's own
+	 * capture left it with nothing else.
+	 *
+	 * @param array $row Ledger row.
+	 */
+	private static function payment_of( array $row ): string {
+		$refs = $row['provider_refs'] ?? array();
+		return (string) ( $refs['action'] ?? $refs['stripe_payment_intent'] ?? $refs['transaction_id'] ?? $refs['payment_intent'] ?? '' );
 	}
 
 	/**

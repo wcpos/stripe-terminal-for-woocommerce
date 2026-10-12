@@ -119,6 +119,17 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 		$this->assertSame( 'succeeded', $provider->fetch_refund( $row, $this->allocation() )['status'] );
 	}
 
+	/** A device row that carries only Pro's `payment_intent` is listed under it. */
+	public function test_no_reference_on_a_device_row_lists_by_pros_payment_intent(): void {
+		$row                  = $this->row();
+		$row['capture_mode']  = 'device';
+		$row['provider_refs'] = array( 'payment_intent' => 'pi_device' );
+		$mine                 = $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded', 'payment_intent' => 'pi_device' ) );
+		$provider             = $this->provider( array( $this->listing( array( $mine ) ) ) );
+		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_mine' ), $provider->fetch_refund( $row, $this->allocation( '' ) ) );
+		$this->assertSame( array( 'payment_intent' => 'pi_device', 'limit' => 100 ), $this->http->requests[0]['params'] );
+	}
+
 	/** Neither a refund id nor a payment to look under: nothing is read and nothing is guessed. */
 	public function test_no_reference_and_no_payment_is_not_read(): void {
 		$row                  = $this->row();

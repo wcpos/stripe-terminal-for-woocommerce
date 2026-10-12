@@ -80,13 +80,14 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		$this->assertSame( 'live', $this->scheduled[0]['args'][0]['mode'] );
 	}
 
-	/** A Bluetooth or Tap to Pay row is never read by Pro's sweep, so an unanswered create there stays an error and nothing is re-sent. */
-	public function test_unanswered_create_on_a_device_row_stays_an_error(): void {
+	/** A Bluetooth or Tap to Pay row is read back by Pro's sweep (Pro #633), so an unanswered create there is pending and re-sent like a smart-reader one. */
+	public function test_unanswered_create_on_a_device_row_is_pending_and_re_sent(): void {
 		$row                 = $this->row();
 		$row['capture_mode'] = 'device';
 		$provider            = $this->provider( array( new \Stripe\Exception\ApiConnectionException( 'timed out' ) ) );
-		$this->assertInstanceOf( \WP_Error::class, $provider->refund( $row, 123, '2.50' ) );
-		$this->assertCount( 0, $this->scheduled );
+		$this->assertSame( array( 'status' => 'pending', 'provider_ref' => null ), $provider->refund( $row, 123, '2.50' ) );
+		$this->assertCount( 1, $this->scheduled );
+		$this->assertSame( 'wcpos_refund_' . self::PAYMENT_ID . '_123', $this->scheduled[0]['args'][0]['key'] );
 	}
 
 	/** The row's mode has no key configured: no request, an error that names the mode. */
@@ -133,6 +134,16 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		$provider = $this->provider( array( new \Stripe\Exception\ApiConnectionException( 'timed out' ) ) );
 		$provider->refund( $this->row(), 123, '2.50' );
 		$this->assertSame( 'live', $this->scheduled[0]['args'][0]['mode'] );
+	}
+
+	/** A device row captured by webhook before the till's capture carries only Pro's `payment_intent`: the refund is made against it. */
+	public function test_device_row_with_only_pros_payment_intent_is_refunded_against_it(): void {
+		$row                  = $this->row();
+		$row['capture_mode']  = 'device';
+		$row['provider_refs'] = array( 'payment_intent' => 'pi_device' );
+		$provider             = $this->provider( array( $this->ok( array( 'id' => 're_device', 'status' => 'succeeded' ) ) ) );
+		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_device' ), $provider->refund( $row, 123, '2.50' ) );
+		$this->assertSame( 'pi_device', $this->http->requests[0]['params']['payment_intent'] );
 	}
 
 	public function test_missing_reference(): void {
