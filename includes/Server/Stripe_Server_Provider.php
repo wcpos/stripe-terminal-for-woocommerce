@@ -374,20 +374,163 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			if ( is_wp_error( $result ) ) {
 				return self::error( $result );
 			}
-			$states = array(
-				'succeeded' => 'succeeded',
-				'pending' => 'pending',
-				'requires_action' => 'pending',
-				'failed' => 'failed',
-				'canceled' => 'failed',
-			);
+			if ( empty( $result['id'] ) ) {
+				// Stripe took the refund (a 200) but the answer did not carry it. An error here would
+				// make WooCommerce delete the record, and a retry would refund again under a new key;
+				// a pending with no reference keeps the record, and `fetch_refund()` finds the refund
+				// by the metadata the create carried.
+				return array(
+					'status' => 'pending',
+					'provider_ref' => null,
+				);
+			}
 			return array(
-				'status' => $states[ $result['status'] ] ?? 'pending',
+				'status' => self::refund_status( (string) ( $result['status'] ?? '' ) ),
 				'provider_ref' => $result['id'],
 			);
 		} catch ( \Throwable $e ) {
 			return self::error( $e );
 		}
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * Reads the refund `refund()` made, by the id it returned, or (when Stripe's answer to the
+	 * create did not carry the id) finds it among the payment's refunds by the metadata the
+	 * create carried; nothing is created. The read uses the key of the mode the row's payment was
+	 * made in. Stripe answers most refunds `succeeded` at once; the sweep asks about the ones it
+	 * answered `pending` or `requires_action`, whatever the payment method, until Stripe settles
+	 * them.
+	 *
+	 * @param array $row        Ledger row (or the historical stand-in) the refund was allocated to.
+	 * @param array $allocation The pending allocation, with the refund id `refund()` returned.
+	 * @return array|\WP_Error Status and reference, or an error that keeps the question open.
+	 */
+	public function fetch_refund( array $row, array $allocation ) {
+		try {
+			$key = $this->key_for( $row );
+			if ( is_wp_error( $key ) ) {
+				return $key;
+			}
+			// The row names the intent (Pro's rows), or the intent or charge (a historical webview row).
+			$payment = (string) ( $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? $row['provider_refs']['transaction_id'] ?? '' );
+			$ref     = (string) ( $allocation['provider_ref'] ?? '' );
+			if ( '' !== $ref ) {
+				$refund = $this->service->retrieve_refund( $ref, $key );
+			} elseif ( '' !== $payment ) {
+				$refund = $this->find_refund( $payment, $row, $allocation, $key );
+				if ( null === $refund ) {
+					// Stripe took the create, so the refund should be among the payment's; until it
+					// shows, the question stays open and the sweep looks again.
+					return array(
+						'status' => 'pending',
+						'provider_ref' => null,
+					);
+				}
+			} else {
+				// Neither a refund id nor a payment to look under: nothing this plugin can read.
+				return self::error( __( 'No Stripe refund reference to read.', 'stripe-terminal-for-woocommerce' ), 'missing_refund_ref' );
+			}
+			if ( is_wp_error( $refund ) ) {
+				// A read Stripe refused (a key it rejects, a refund it cannot show under it) proves
+				// nothing about the refund: the question stays open, as it does when nothing answered.
+				return self::unanswered( $refund ) ? $this->indeterminate( 'stripe_refund_unanswered', $refund->get_error_message() ) : self::error( $refund );
+			}
+			if ( empty( $refund['id'] ) || empty( $refund['status'] ) ) {
+				// A success without the refund in it is no answer.
+				return $this->indeterminate( 'stripe_refund_unanswered', __( 'Stripe answered without the refund.', 'stripe-terminal-for-woocommerce' ) );
+			}
+			// The refund must belong to the row's payment: a reference bound to another sale, or to
+			// no payment this row can name, settles nothing here. The create named the intent for a
+			// `pi_` reference and the charge for any other, and a refund always carries that field.
+			$paid = (string) ( 0 === strpos( $payment, 'pi_' ) ? ( $refund['payment_intent'] ?? '' ) : ( $refund['charge'] ?? '' ) );
+			if ( '' !== $payment && $payment !== $paid ) {
+				return self::error( __( 'The Stripe refund belongs to another payment.', 'stripe-terminal-for-woocommerce' ), 'refund_payment_mismatch' );
+			}
+			return array(
+				'status' => self::refund_status( (string) $refund['status'] ),
+				'provider_ref' => $refund['id'],
+			);
+		} catch ( \Throwable $e ) {
+			return self::error( $e );
+		}
+	}
+
+	/**
+	 * The refund `refund()` made for this allocation, among the payment's refunds, by the
+	 * metadata the create carried (this row's id and the WooCommerce refund id).
+	 *
+	 * @param string      $payment    Intent or charge id.
+	 * @param array       $row        Ledger row.
+	 * @param array       $allocation The pending allocation.
+	 * @param null|string $key        The other mode's key, when the row's payment was made in it.
+	 * @return array|\WP_Error|null The refund, an error from the list, or null when none is this one.
+	 */
+	private function find_refund( string $payment, array $row, array $allocation, ?string $key ) {
+		$after = '';
+		// Each page is judged as it arrives, so a refund already seen is not lost to a later page's
+		// failure, and no page is asked for past the one that holds it.
+		for ( $page = 0; $page < StripeTerminalService::REFUND_PAGES_MAX; $page++ ) {
+			$list = $this->service->list_refunds( $payment, $key, $after );
+			if ( is_wp_error( $list ) ) {
+				return $list;
+			}
+			foreach ( $list['data'] as $refund ) {
+				$meta = $refund['metadata'] ?? array();
+				if ( (string) ( $meta['wcpos_refund_id'] ?? '' ) === (string) ( $allocation['id'] ?? '' ) && (string) ( $meta['wcpos_payment_id'] ?? '' ) === (string) ( $row['id'] ?? '' ) ) {
+					return $refund;
+				}
+			}
+			if ( ! $list['has_more'] || empty( $list['data'] ) ) {
+				break;
+			}
+			$after = (string) ( end( $list['data'] )['id'] ?? '' );
+			if ( '' === $after ) {
+				break;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The key of the mode the row's payment was made in, when it is not the gateway's current
+	 * mode. Stripe keeps test and live objects apart, so a refund made in one mode cannot be read
+	 * with the other mode's key once the gateway is switched; the device adapter refunds under the
+	 * recorded mode the same way. Null for a row in the current mode or without a recorded mode.
+	 *
+	 * @param array $row Ledger row.
+	 * @return string|null|\WP_Error The key, null for the current one, an error when that mode has none.
+	 */
+	private function key_for( array $row ) {
+		$mode = $row['provider_refs']['stripe_mode'] ?? null;
+		if ( ! in_array( $mode, array( 'test', 'live' ), true ) || ( 'test' === $mode ) === Settings::is_test_mode() ) {
+			return null;
+		}
+		$key = (string) ( Settings::get_gateway_settings()[ 'test' === $mode ? 'test_secret_key' : 'secret_key' ] ?? '' );
+		if ( '' === $key ) {
+			/* translators: %s: test or live. */
+			return self::error( sprintf( __( 'The refund was made in Stripe %s mode, which has no API key configured.', 'stripe-terminal-for-woocommerce' ), $mode ), 'stripe_mode_key_missing' );
+		}
+		return $key;
+	}
+
+	/**
+	 * Pro's three refund states from Stripe's five. `requires_action` is a refund waiting on the
+	 * customer (some bank-based methods); `canceled` is one Stripe gave up on. An unknown state is
+	 * still pending, never money returned.
+	 *
+	 * @param string $status Stripe refund status.
+	 */
+	private static function refund_status( string $status ): string {
+		$states = array(
+			'succeeded' => 'succeeded',
+			'pending' => 'pending',
+			'requires_action' => 'pending',
+			'failed' => 'failed',
+			'canceled' => 'failed',
+		);
+		return $states[ $status ] ?? 'pending';
 	}
 
 	/**

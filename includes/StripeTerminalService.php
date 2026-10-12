@@ -35,6 +35,13 @@ class StripeTerminalService {
 	private $api_key;
 
 	/**
+	 * Pages of 100 refunds a caller of `list_refunds()` reads for one payment. Five hundred refunds
+	 * of one POS sale is beyond any till; past that the question stays open rather than the sweep
+	 * paging on.
+	 */
+	const REFUND_PAGES_MAX = 5;
+
+	/**
 	 * Stripe client instance.
 	 *
 	 * @var null|\Stripe\StripeClient
@@ -62,7 +69,10 @@ class StripeTerminalService {
 	 */
 	public function get_stripe_client(): \Stripe\StripeClient {
 		if ( ! $this->stripe_client ) {
-			$this->stripe_client = new \Stripe\StripeClient( $this->api_key );
+			// The SDK refuses an empty key at construction but accepts none, and then requires the key
+			// on each request: a read under another mode's key must not depend on the current mode
+			// having one (a merchant who ticked test mode without entering test keys).
+			$this->stripe_client = new \Stripe\StripeClient( '' === $this->api_key ? array( 'api_key' => null ) : $this->api_key );
 		}
 
 		return $this->stripe_client;
@@ -337,6 +347,64 @@ class StripeTerminalService {
 			return $charge->toArray();
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'retrieve_charge_error' );
+		}
+	}
+
+	/**
+	 * Read one refund without order mutations: Pro's refund sweep asks about a refund this plugin
+	 * answered `pending`.
+	 *
+	 * @param string      $id      Refund ID.
+	 * @param null|string $api_key A key other than this service's, for a refund made in the other
+	 *                             mode; sent with the request only, nothing global changes.
+	 * @return array|WP_Error Refund or error.
+	 */
+	public function retrieve_refund( string $id, ?string $api_key = null ) {
+		try {
+			$refund = $this->timed(
+				'retrieve_refund',
+				function () use ( $id, $api_key ) {
+					return $this->get_stripe_client()->refunds->retrieve( $id, null, null === $api_key ? null : array( 'api_key' => $api_key ) );
+				}
+			);
+			return $refund->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'retrieve_refund_error' );
+		}
+	}
+
+	/**
+	 * One page of a payment's refunds, newest first, Stripe's largest page: the way back to a
+	 * refund whose create was answered without its id. The caller follows `has_more` with the
+	 * last id as `starting_after`, up to `REFUND_PAGES_MAX` pages.
+	 *
+	 * @param string      $charge_or_intent_id Intent or charge ID, as `refund_payment()` takes it.
+	 * @param null|string $api_key             A key other than this service's, see `retrieve_refund()`.
+	 * @param string      $starting_after      The last refund id of the page before, for the next page.
+	 * @return array|WP_Error The page (`data`, `has_more`) or error.
+	 */
+	public function list_refunds( string $charge_or_intent_id, ?string $api_key = null, string $starting_after = '' ) {
+		try {
+			$id_parameter = 0 === strpos( $charge_or_intent_id, 'pi_' ) ? 'payment_intent' : 'charge';
+			$params       = array(
+				$id_parameter => $charge_or_intent_id,
+				'limit'       => 100,
+			);
+			if ( '' !== $starting_after ) {
+				$params['starting_after'] = $starting_after;
+			}
+			$page = $this->timed(
+				'list_refunds',
+				function () use ( $params, $api_key ) {
+					return $this->get_stripe_client()->refunds->all( $params, null === $api_key ? null : array( 'api_key' => $api_key ) )->toArray();
+				}
+			);
+			return array(
+				'data'     => $page['data'] ?? array(),
+				'has_more' => ! empty( $page['has_more'] ),
+			);
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'list_refunds_error' );
 		}
 	}
 
