@@ -128,13 +128,36 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 		$this->assertCount( 0, $this->http->requests );
 	}
 
-	/** The re-sent create was refused under the same key: the refund was never made, and the allocation is reported failed without a read. */
-	public function test_refused_replay_is_reported_failed_without_a_read(): void {
+	/** The re-sent create was refused under the same key, and Stripe's list shows nothing of this allocation's: never made, so the allocation is reported failed. */
+	public function test_refused_replay_with_nothing_listed_is_reported_failed(): void {
 		$refund = \Mockery::mock( 'WC_Order_Refund' );
 		$refund->shouldReceive( 'get_meta' )->with( \WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask::REFUSED_META )->andReturn( 'Charge already refunded' );
 		$this->orders = array( 123 => $refund );
-		$provider     = $this->provider();
+		$provider     = $this->provider( array( $this->listing( array() ) ) );
 		$this->assertSame( array( 'status' => 'failed', 'provider_ref' => null ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+		$this->assertCount( 1, $this->http->requests, 'The list is Stripe\'s word; the mark alone is not' );
+	}
+
+	/** A refused mark the list contradicts (the refund IS there under this allocation's metadata) is not believed: the refund is reported as Stripe has it. */
+	public function test_refused_mark_is_overruled_by_a_listed_refund(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->with( \WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask::REFUSED_META )->andReturn( 'Invalid API Key provided' );
+		$this->orders = array( 123 => $refund );
+		$provider     = $this->provider( array( $this->listing( array( $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded' ) ) ) ) ) );
+		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_mine' ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+	}
+
+	/** A refused mark with no key to look under, or no payment to look under: the record's word stands. */
+	public function test_refused_mark_without_a_way_to_look_is_reported_failed(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->andReturn( 'Charge already refunded' );
+		$this->orders = array( 123 => $refund );
+		$row                                 = $this->row();
+		$row['provider_refs']['stripe_mode'] = 'live';
+		$provider                            = $this->provider();
+		$this->assertSame( array( 'status' => 'failed', 'provider_ref' => null ), $provider->fetch_refund( $row, $this->allocation( '' ) ), 'No live key configured' );
+		$row['provider_refs'] = array();
+		$this->assertSame( array( 'status' => 'failed', 'provider_ref' => null ), $provider->fetch_refund( $row, $this->allocation( '' ) ), 'No payment to list under' );
 		$this->assertCount( 0, $this->http->requests );
 	}
 

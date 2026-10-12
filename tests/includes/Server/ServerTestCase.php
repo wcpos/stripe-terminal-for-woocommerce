@@ -17,12 +17,23 @@ abstract class ServerTestCase extends \PHPUnit\Framework\TestCase {
 	protected $scheduled = array();
 	/** Orders and refund records `wc_get_order()` answers with, by id. */
 	protected $orders = array();
+	/** What `wp_schedule_single_event()` answers. */
+	protected $schedule_answer = true;
+	/** What `wc_get_logger()` answers: a recorder of warnings. */
+	protected $logger;
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
 		$GLOBALS['stwc_payment_id_for_action'] = array();
-		$this->scheduled = array();
-		$this->orders    = array();
+		$this->scheduled       = array();
+		$this->orders          = array();
+		$this->schedule_answer = true;
+		$this->logger          = new class() {
+			public $warnings = array();
+			public function warning( $message, $context = array() ) {
+				$this->warnings[] = array( $message, $context );
+			}
+		};
 		$this->options   = array(
 			'woocommerce_stripe_terminal_for_woocommerce_settings' => array(
 				'test_mode'               => 'yes',
@@ -64,7 +75,10 @@ abstract class ServerTestCase extends \PHPUnit\Framework\TestCase {
 				},
 				'wp_schedule_single_event' => function ( $timestamp, $hook, $args = array() ) {
 					$this->scheduled[] = array( 'timestamp' => $timestamp, 'hook' => $hook, 'args' => $args );
-					return true;
+					return $this->schedule_answer;
+				},
+				'wc_get_logger'    => function () {
+					return $this->logger;
 				},
 			)
 		);

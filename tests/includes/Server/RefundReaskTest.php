@@ -24,6 +24,7 @@ class RefundReaskTest extends ServerTestCase {
 				'mode'      => 'test',
 				'refund_id' => 123,
 				'attempt'   => 0,
+				'requested_at' => time(),
 			),
 			$overrides
 		);
@@ -112,6 +113,64 @@ class RefundReaskTest extends ServerTestCase {
 		Refund_Reask::run( $this->request() );
 
 		$this->assertCount( 0, $this->scheduled );
+	}
+
+	/**
+	 * An answer that says nothing about the refund (the key refused, Stripe throttling, a lock timeout)
+	 * leaves the question open: the next try is queued and nothing is marked refused.
+	 *
+	 * @dataProvider non_answers
+	 */
+	public function test_non_answers_queue_the_next_try( array $response ): void {
+		$this->stripe( array( $response ) );
+		$refund = Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldNotReceive( 'update_meta_data' );
+		$this->orders = array( 123 => $refund );
+
+		Refund_Reask::run( $this->request() );
+
+		$this->assertCount( 1, $this->scheduled );
+	}
+
+	public function non_answers(): array {
+		return array(
+			'401 wrong key'       => array( array( 'body' => array( 'error' => array( 'type' => 'invalid_request_error', 'message' => 'Invalid API Key provided' ) ), 'status' => 401 ) ),
+			'403 permission'      => array( array( 'body' => array( 'error' => array( 'type' => 'invalid_request_error', 'message' => 'Not allowed' ) ), 'status' => 403 ) ),
+			'429 rate limit'      => array( array( 'body' => array( 'error' => array( 'type' => 'rate_limit_error', 'code' => 'rate_limit', 'message' => 'Too many requests' ) ), 'status' => 429 ) ),
+			'400 lock timeout'    => array( array( 'body' => array( 'error' => array( 'type' => 'invalid_request_error', 'code' => 'lock_timeout', 'message' => 'This object is being updated by another request' ) ), 'status' => 400 ) ),
+			'500 unknown'         => array( array( 'body' => array( 'error' => array( 'type' => 'api_error', 'message' => 'Stripe is down' ) ), 'status' => 500 ) ),
+		);
+	}
+
+	/** Past the replay window Stripe may have forgotten the key: nothing is sent and nothing is queued; the sweep's metadata recovery and give-up take over. */
+	public function test_a_late_event_sends_nothing(): void {
+		$this->stripe( array( $this->ok( array( 'id' => 're_test', 'object' => 'refund', 'status' => 'succeeded' ) ) ) );
+
+		Refund_Reask::run( $this->request( array( 'requested_at' => time() - Refund_Reask::REPLAY_WINDOW - 60 ) ) );
+
+		$this->assertCount( 0, $this->http->requests );
+		$this->assertCount( 0, $this->scheduled );
+	}
+
+	/** The request's own time travels with every re-queue, so the window is measured from the till's request. */
+	public function test_requeue_keeps_the_original_request_time(): void {
+		$this->stripe( array( new \Stripe\Exception\ApiConnectionException( 'timed out' ) ) );
+		$then = time() - 1000;
+
+		Refund_Reask::run( $this->request( array( 'requested_at' => $then ) ) );
+
+		$this->assertSame( $then, $this->scheduled[0]['args'][0]['requested_at'] );
+	}
+
+	/** WordPress could not save the event: the refund stays pending (the caller's answer), and the failure is logged with the refund id. */
+	public function test_scheduling_failure_is_logged(): void {
+		$this->schedule_answer = false;
+
+		Refund_Reask::schedule( $this->request() );
+
+		$this->assertCount( 1, $this->logger->warnings );
+		$this->assertSame( 'Stripe refund re-send could not be scheduled', $this->logger->warnings[0][0] );
+		$this->assertSame( 123, $this->logger->warnings[0][1]['refund_id'] );
 	}
 
 	/** The till's mode has no key any more: nothing can be sent, and nothing is queued. */

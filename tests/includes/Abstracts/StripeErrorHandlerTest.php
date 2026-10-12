@@ -420,12 +420,7 @@ class StripeErrorHandlerTest extends TestCase {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Test RateLimitException is matched as InvalidRequestException.
-	 *
-	 * RateLimitException extends InvalidRequestException, so the handler's
-	 * elseif chain matches InvalidRequestException first (status 400).
-	 * The RateLimitException branch (status 429) is unreachable in the
-	 * current implementation.
+	 * Test RateLimitException maps to 429 although it extends InvalidRequestException.
 	 */
 	public function test_rate_limit_exception_matched_as_invalid_request(): void {
 		$exception = \Stripe\Exception\RateLimitException::factory(
@@ -438,8 +433,7 @@ class StripeErrorHandlerTest extends TestCase {
 		$this->assertInstanceOf( WP_Error::class, $result );
 
 		$data = $result->get_error_data();
-		// Returns 400 because InvalidRequestException is checked before RateLimitException.
-		$this->assertSame( 400, $data['status'] );
+		$this->assertSame( 429, $data['status'] );
 	}
 
 	// -----------------------------------------------------------------------

@@ -210,6 +210,7 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 		$this->run_scheduled_reask( $refund );
 
 		$this->assertCount( 1, $this->fixture->transport->refund_ids(), 'The replay under the same key made nothing new' );
+		$this->assertNull( $this->scheduled_reask( $refund ), 'Stripe replayed its answer, so nothing more is queued' );
 		$this->fixture->transport->settle_refunds( 'succeeded' );
 		do_action( Payments_Sweeper::HOOK );
 
@@ -230,6 +231,7 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 		$this->run_scheduled_reask( $refund );
 
 		$this->assertCount( 1, $this->fixture->transport->refund_ids(), 'The re-send made the refund' );
+		$this->assertNull( $this->scheduled_reask( $refund ), 'Stripe answered, so nothing more is queued' );
 		$this->fixture->transport->settle_refunds( 'succeeded' );
 		do_action( Payments_Sweeper::HOOK );
 
@@ -260,12 +262,11 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 	// ----------------------------------------------------------------------------------------------
 
 	/**
-	 * Run the one re-send WP cron holds for this refund, through its registered hook, and take it off
-	 * the schedule the way cron would.
+	 * The re-send WP cron holds for this refund, as timestamp and event, or null.
 	 *
 	 * @param \WC_Order_Refund $refund The refund record.
 	 */
-	private function run_scheduled_reask( \WC_Order_Refund $refund ): void {
+	private function scheduled_reask( \WC_Order_Refund $refund ): ?array {
 		$found = null;
 		foreach ( (array) _get_cron_array() as $timestamp => $hooks ) {
 			foreach ( (array) ( $hooks[ Refund_Reask::HOOK ] ?? array() ) as $event ) {
@@ -274,6 +275,17 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 				}
 			}
 		}
+		return $found;
+	}
+
+	/**
+	 * Run the one re-send WP cron holds for this refund, through its registered hook, and take it off
+	 * the schedule the way cron would.
+	 *
+	 * @param \WC_Order_Refund $refund The refund record.
+	 */
+	private function run_scheduled_reask( \WC_Order_Refund $refund ): void {
+		$found = $this->scheduled_reask( $refund );
 		$this->assertNotNull( $found, 'A re-send was scheduled' );
 		$this->assertEqualsWithDelta( time() + Refund_Reask::DELAYS[0], $found[0], 30 );
 		$this->assertSame( 0, $found[1]['args'][0]['attempt'] );

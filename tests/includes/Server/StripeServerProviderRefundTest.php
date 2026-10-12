@@ -52,6 +52,9 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		$this->assertCount( 1, $this->scheduled );
 		$this->assertSame( \WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask::HOOK, $this->scheduled[0]['hook'] );
 		$this->assertEqualsWithDelta( time() + \WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask::DELAYS[0], $this->scheduled[0]['timestamp'], 5 );
+		$request = $this->scheduled[0]['args'][0];
+		$this->assertEqualsWithDelta( time(), $request['requested_at'], 5 );
+		unset( $request['requested_at'] );
 		$this->assertSame(
 			array(
 				'payment'   => 'pi_test',
@@ -62,8 +65,37 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 				'refund_id' => 123,
 				'attempt'   => 0,
 			),
-			$this->scheduled[0]['args'][0]
+			$request
 		);
+	}
+
+	/** A row made in live mode while the gateway sits in test mode: the refund goes under the live key, and so would its re-send. */
+	public function test_refund_of_a_live_row_in_test_mode_goes_under_the_live_key(): void {
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['secret_key'] = 'sk_live_fake';
+		$row                                 = $this->row();
+		$row['provider_refs']['stripe_mode'] = 'live';
+		$provider                            = $this->provider( array( new \Stripe\Exception\ApiConnectionException( 'timed out' ) ) );
+		$this->assertSame( array( 'status' => 'pending', 'provider_ref' => null ), $provider->refund( $row, 123, '2.50' ) );
+		$this->assertContains( 'Authorization: Bearer sk_live_fake', $this->http->requests[0]['headers'] );
+		$this->assertSame( 'live', $this->scheduled[0]['args'][0]['mode'] );
+	}
+
+	/** A Bluetooth or Tap to Pay row is never read by Pro's sweep, so an unanswered create there stays an error and nothing is re-sent. */
+	public function test_unanswered_create_on_a_device_row_stays_an_error(): void {
+		$row                 = $this->row();
+		$row['capture_mode'] = 'device';
+		$provider            = $this->provider( array( new \Stripe\Exception\ApiConnectionException( 'timed out' ) ) );
+		$this->assertInstanceOf( \WP_Error::class, $provider->refund( $row, 123, '2.50' ) );
+		$this->assertCount( 0, $this->scheduled );
+	}
+
+	/** The row's mode has no key configured: no request, an error that names the mode. */
+	public function test_refund_of_a_row_whose_mode_has_no_key_is_an_error(): void {
+		$row                                 = $this->row();
+		$row['provider_refs']['stripe_mode'] = 'live';
+		$provider                            = $this->provider();
+		$this->assert_provider_error( $provider->refund( $row, 123, '2.50' ), 'stripe_mode_key_missing' );
+		$this->assertCount( 0, $this->http->requests );
 	}
 
 	public function unanswered_creates(): array {

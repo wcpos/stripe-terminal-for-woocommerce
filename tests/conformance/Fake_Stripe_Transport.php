@@ -228,8 +228,12 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 			}
 			$mode_key = $mode . ':' . $key;
 			if ( '' !== $key && isset( $this->refund_keys[ $mode_key ] ) ) {
+				if ( $this->refund_keys[ $mode_key ]['params'] !== $params ) {
+					// The same key with another body: Stripe refuses rather than guess which was meant.
+					return array( wp_json_encode( array( 'error' => array( 'type' => 'idempotency_error', 'message' => 'Keys for idempotent requests can only be used with the same parameters they were first used with.' ) ) ), 400, array() );
+				}
 				// Stripe replays the first answer to the same key, and makes nothing new.
-				return self::ok( $this->refunds[ $this->refund_keys[ $mode_key ] ]['data'] );
+				return self::ok( $this->refunds[ $this->refund_keys[ $mode_key ]['id'] ]['data'] );
 			}
 			$data     = $this->intents[ $ref ]['data'];
 			$refunded = 0;
@@ -244,7 +248,10 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 			$refund = array( 'id' => 're_' . ( ++$this->seq ), 'object' => 'refund', 'status' => $this->refund_status, 'amount' => (int) ( $params['amount'] ?? $data['amount_received'] ), 'currency' => $data['currency'], 'payment_intent' => $ref, 'charge' => $data['latest_charge']['id'] ?? null, 'metadata' => $params['metadata'] ?? array() );
 			$this->refunds[ $refund['id'] ] = array( 'mode' => $mode, 'data' => $refund );
 			if ( '' !== $key ) {
-				$this->refund_keys[ $mode_key ] = $refund['id'];
+				$this->refund_keys[ $mode_key ] = array(
+					'id'     => $refund['id'],
+					'params' => $params,
+				);
 			}
 			if ( 'taken' === $this->lose_refund_answer ) {
 				// Stripe took it; the answer never came back.
