@@ -77,6 +77,15 @@ final class Recording_Stripe_Provider extends Stripe_Server_Provider {
 	}
 
 	/** {@inheritDoc} */
+	public function fetch_refund( array $row, array $allocation ) {
+		self::pin();
+		$result = parent::fetch_refund( $row, $allocation );
+		$ref    = (string) ( $row['provider_refs']['action'] ?? $row['provider_refs']['stripe_payment_intent'] ?? $row['provider_refs']['transaction_id'] ?? '' );
+		self::$fixture->record( 'fetch_refund', $ref, 'refund=' . ( '' === (string) ( $allocation['provider_ref'] ?? '' ) ? 'by_metadata' : 'by_id' ) . ' mode=' . self::$fixture->transport->last_mode . ' answer=' . ( is_wp_error( $result ) ? $result->get_error_code() : $result['status'] ) );
+		return $result;
+	}
+
+	/** {@inheritDoc} */
 	public function verify_webhook( \WP_REST_Request $request ) {
 		self::pin();
 		$event = json_decode( (string) $request->get_body(), true );

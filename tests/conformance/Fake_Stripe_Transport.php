@@ -24,6 +24,8 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 	private $scenario = 'create_ok';
 	private $cancel_action = 'idle';
 	private $refund_status = 'succeeded';
+	private $refunds = array();
+	private $lose_refund_body = false;
 	private $lost = false;
 	private $seq = 0;
 
@@ -43,6 +45,44 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 		$this->cancel_action = $cancel_action;
 		$this->refund_status = $refund_status;
 		$this->lost          = false;
+	}
+
+	/**
+	 * The next refund create is taken but answered without the refund in the body (a 200 whose
+	 * body Stripe never finished): the refund exists on this side, the adapter holds no id for it.
+	 */
+	public function lose_next_refund_body(): void {
+		$this->lose_refund_body = true;
+	}
+
+	/**
+	 * Stripe decides every refund it holds: what a later read observes.
+	 *
+	 * @param string $status succeeded, pending, requires_action, failed or canceled.
+	 */
+	public function settle_refunds( string $status ): void {
+		foreach ( $this->refunds as &$refund ) {
+			$refund['data']['status'] = $status;
+		}
+		unset( $refund );
+	}
+
+	/**
+	 * A refund made from the Stripe dashboard on a sale: no metadata, nothing of the till's about it.
+	 *
+	 * @param string $payment_intent The sale.
+	 * @param int    $amount         Minor units.
+	 */
+	public function dashboard_refund( string $payment_intent, int $amount ): string {
+		$intent = $this->intents[ $payment_intent ];
+		$refund = array( 'id' => 're_' . ( ++$this->seq ), 'object' => 'refund', 'status' => 'succeeded', 'amount' => $amount, 'currency' => $intent['data']['currency'], 'payment_intent' => $payment_intent, 'charge' => $intent['data']['latest_charge']['id'] ?? null, 'metadata' => array() );
+		$this->refunds[ $refund['id'] ] = array( 'mode' => $intent['mode'], 'data' => $refund );
+		return $refund['id'];
+	}
+
+	/** Ids of every refund this Stripe holds, in the order they were made. */
+	public function refund_ids(): array {
+		return array_keys( $this->refunds );
 	}
 
 	/** Called by the recording adapter on entry to fetch(): the intent moves to its next scripted state. */
@@ -171,7 +211,37 @@ final class Fake_Stripe_Transport implements \Stripe\HttpClient\ClientInterface 
 			if ( 'succeeded' !== $data['status'] || (int) ( $params['amount'] ?? $data['amount_received'] ) > $data['amount_received'] ) {
 				return self::error( 'charge_not_captured', 'Only a captured amount can be refunded.', 400 );
 			}
-			return self::ok( array( 'id' => 're_' . ( ++$this->seq ), 'object' => 'refund', 'status' => $this->refund_status, 'amount' => (int) ( $params['amount'] ?? $data['amount_received'] ), 'currency' => $data['currency'], 'payment_intent' => $ref, 'charge' => $data['latest_charge']['id'] ?? null, 'metadata' => $params['metadata'] ?? array() ) );
+			$refund = array( 'id' => 're_' . ( ++$this->seq ), 'object' => 'refund', 'status' => $this->refund_status, 'amount' => (int) ( $params['amount'] ?? $data['amount_received'] ), 'currency' => $data['currency'], 'payment_intent' => $ref, 'charge' => $data['latest_charge']['id'] ?? null, 'metadata' => $params['metadata'] ?? array() );
+			$this->refunds[ $refund['id'] ] = array( 'mode' => $mode, 'data' => $refund );
+			if ( $this->lose_refund_body ) {
+				$this->lose_refund_body = false;
+				return self::ok( array( 'object' => 'refund' ) );
+			}
+			return self::ok( $refund );
+		}
+		if ( '/v1/refunds' === $path && 'get' === $method ) {
+			// Newest first, as Stripe lists; `starting_after` continues past the named refund.
+			$payment = $this->intent_id_for( (string) ( $params['payment_intent'] ?? $params['charge'] ?? '' ) );
+			$listed  = array();
+			$after   = (string) ( $params['starting_after'] ?? '' );
+			$skip    = '' !== $after;
+			foreach ( array_reverse( $this->refunds ) as $id => $refund ) {
+				if ( $skip ) {
+					$skip = $id !== $after;
+					continue;
+				}
+				if ( $mode === $refund['mode'] && ( '' === $payment || $payment === $refund['data']['payment_intent'] ) ) {
+					$listed[] = $refund['data'];
+				}
+			}
+			$limit = (int) ( $params['limit'] ?? 10 );
+			return self::ok( array( 'object' => 'list', 'data' => array_slice( $listed, 0, $limit ), 'has_more' => count( $listed ) > $limit, 'url' => '/v1/refunds' ) );
+		}
+		if ( preg_match( '#^/v1/refunds/([^/]+)$#', $path, $m ) ) {
+			if ( ! isset( $this->refunds[ $m[1] ] ) || $mode !== $this->refunds[ $m[1] ]['mode'] ) {
+				return self::error( 'resource_missing', 'No such refund: ' . $m[1], 404 );
+			}
+			return self::ok( $this->refunds[ $m[1] ]['data'] );
 		}
 		if ( preg_match( '#^/v1/charges/([^/]+)$#', $path, $m ) && isset( $this->charges[ $m[1] ] ) ) {
 			return self::ok( $this->intents[ $this->charges[ $m[1] ] ]['data']['latest_charge'] );
