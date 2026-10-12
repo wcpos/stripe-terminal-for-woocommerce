@@ -163,6 +163,14 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 		$this->assertCount( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::REFUND_PAGES_MAX, $this->http->requests );
 	}
 
+	/** The refund on the first page is answered from it: no later page is asked for, so a later page's failure cannot lose it. */
+	public function test_no_reference_stops_at_the_page_that_holds_the_refund(): void {
+		$first    = $this->ok( array( 'object' => 'list', 'data' => array( $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded' ) ) ), 'has_more' => true ) );
+		$provider = $this->provider( array( $first, array( 'body' => array( 'error' => array( 'type' => 'api_error', 'message' => 'Stripe is down' ) ), 'status' => 500 ) ) );
+		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_mine' ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+		$this->assertCount( 1, $this->http->requests );
+	}
+
 	/** The payment's refunds are listed under the charge when the row names one. */
 	public function test_no_reference_on_a_charge_row_lists_by_charge(): void {
 		$provider = $this->provider( array( $this->listing( array( $this->refund( array( 'status' => 'pending' ) ) ) ) ) );

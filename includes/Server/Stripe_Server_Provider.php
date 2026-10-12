@@ -468,14 +468,26 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 * @return array|\WP_Error|null The refund, an error from the list, or null when none is this one.
 	 */
 	private function find_refund( string $payment, array $row, array $allocation, ?string $key ) {
-		$refunds = $this->service->list_refunds( $payment, $key );
-		if ( is_wp_error( $refunds ) ) {
-			return $refunds;
-		}
-		foreach ( $refunds as $refund ) {
-			$meta = $refund['metadata'] ?? array();
-			if ( (string) ( $meta['wcpos_refund_id'] ?? '' ) === (string) ( $allocation['id'] ?? '' ) && (string) ( $meta['wcpos_payment_id'] ?? '' ) === (string) ( $row['id'] ?? '' ) ) {
-				return $refund;
+		$after = '';
+		// Each page is judged as it arrives, so a refund already seen is not lost to a later page's
+		// failure, and no page is asked for past the one that holds it.
+		for ( $page = 0; $page < StripeTerminalService::REFUND_PAGES_MAX; $page++ ) {
+			$list = $this->service->list_refunds( $payment, $key, $after );
+			if ( is_wp_error( $list ) ) {
+				return $list;
+			}
+			foreach ( $list['data'] as $refund ) {
+				$meta = $refund['metadata'] ?? array();
+				if ( (string) ( $meta['wcpos_refund_id'] ?? '' ) === (string) ( $allocation['id'] ?? '' ) && (string) ( $meta['wcpos_payment_id'] ?? '' ) === (string) ( $row['id'] ?? '' ) ) {
+					return $refund;
+				}
+			}
+			if ( ! $list['has_more'] || empty( $list['data'] ) ) {
+				break;
+			}
+			$after = (string) ( end( $list['data'] )['id'] ?? '' );
+			if ( '' === $after ) {
+				break;
 			}
 		}
 		return null;

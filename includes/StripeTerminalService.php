@@ -35,8 +35,9 @@ class StripeTerminalService {
 	private $api_key;
 
 	/**
-	 * Pages of 100 refunds `list_refunds()` will read for one payment. Five hundred refunds of one
-	 * POS sale is beyond any till; past that the question stays open rather than the sweep paging on.
+	 * Pages of 100 refunds a caller of `list_refunds()` reads for one payment. Five hundred refunds
+	 * of one POS sale is beyond any till; past that the question stays open rather than the sweep
+	 * paging on.
 	 */
 	const REFUND_PAGES_MAX = 5;
 
@@ -370,35 +371,35 @@ class StripeTerminalService {
 	}
 
 	/**
-	 * Every refund of a payment, newest first, in pages of Stripe's largest size, up to
-	 * `REFUND_PAGES_MAX`: the way back to a refund whose create was answered without its id.
+	 * One page of a payment's refunds, newest first, Stripe's largest page: the way back to a
+	 * refund whose create was answered without its id. The caller follows `has_more` with the
+	 * last id as `starting_after`, up to `REFUND_PAGES_MAX` pages.
 	 *
 	 * @param string      $charge_or_intent_id Intent or charge ID, as `refund_payment()` takes it.
 	 * @param null|string $api_key             A key other than this service's, see `retrieve_refund()`.
-	 * @return array|WP_Error Refund objects or error.
+	 * @param string      $starting_after      The last refund id of the page before, for the next page.
+	 * @return array|WP_Error The page (`data`, `has_more`) or error.
 	 */
-	public function list_refunds( string $charge_or_intent_id, ?string $api_key = null ) {
+	public function list_refunds( string $charge_or_intent_id, ?string $api_key = null, string $starting_after = '' ) {
 		try {
 			$id_parameter = 0 === strpos( $charge_or_intent_id, 'pi_' ) ? 'payment_intent' : 'charge';
 			$params       = array(
 				$id_parameter => $charge_or_intent_id,
 				'limit'       => 100,
 			);
-			$refunds      = array();
-			for ( $page = 0; $page < self::REFUND_PAGES_MAX; $page++ ) {
-				$list = $this->timed(
-					'list_refunds',
-					function () use ( $params, $api_key ) {
-						return $this->get_stripe_client()->refunds->all( $params, null === $api_key ? null : array( 'api_key' => $api_key ) )->toArray();
-					}
-				);
-				$refunds = array_merge( $refunds, $list['data'] ?? array() );
-				if ( empty( $list['has_more'] ) || empty( $list['data'] ) ) {
-					break;
-				}
-				$params['starting_after'] = end( $list['data'] )['id'];
+			if ( '' !== $starting_after ) {
+				$params['starting_after'] = $starting_after;
 			}
-			return $refunds;
+			$page = $this->timed(
+				'list_refunds',
+				function () use ( $params, $api_key ) {
+					return $this->get_stripe_client()->refunds->all( $params, null === $api_key ? null : array( 'api_key' => $api_key ) )->toArray();
+				}
+			);
+			return array(
+				'data'     => $page['data'] ?? array(),
+				'has_more' => ! empty( $page['has_more'] ),
+			);
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'list_refunds_error' );
 		}
