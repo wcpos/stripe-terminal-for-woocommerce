@@ -543,8 +543,10 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	}
 
 	/**
-	 * The mode the row's payment was made in: recorded on the row, else the gateway's current mode
-	 * (a historical row records none and was made under the mode the gateway is in).
+	 * The mode the row's payment was made in: recorded on the row, else the gateway's current mode.
+	 * A historical row records none and was made under the mode the gateway is in; a row a webhook
+	 * captured before the till's own capture records none either (the webhook patch carries no
+	 * refs), so after a test/live switch its refund is read under the new mode's key.
 	 *
 	 * @param array $row Ledger row.
 	 */
@@ -757,8 +759,8 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	/**
 	 * The Stripe payment a row's refund is made against, or '' when the row names none.
 	 *
-	 * Pro's smart-reader rows carry the intent under `action`; the fetch and webhook refs carry it
-	 * as `stripe_payment_intent`, for a row restored without one; a historical webview row carries
+	 * Pro's smart-reader rows carry the intent under `action`; the fetch refs (`normalize()`) carry
+	 * it as `stripe_payment_intent`, for a row restored without one; a historical webview row carries
 	 * only the order's transaction id (intent or charge). A Bluetooth or Tap to Pay row keeps the
 	 * intent under Pro's own `payment_intent`, and a webhook that captured it before the till's own
 	 * capture left it with nothing else.

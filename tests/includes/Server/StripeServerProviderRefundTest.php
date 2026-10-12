@@ -146,6 +146,15 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		$this->assertSame( 'pi_device', $this->http->requests[0]['params']['payment_intent'] );
 	}
 
+	/** Pro's `payment_intent` is the last resort: a row that also names the intent under `action` is refunded against that. */
+	public function test_action_wins_over_pros_payment_intent(): void {
+		$row                  = $this->row();
+		$row['provider_refs'] = array( 'payment_intent' => 'pi_b', 'action' => 'pi_a' );
+		$provider             = $this->provider( array( $this->ok( array( 'id' => 're_a', 'status' => 'succeeded' ) ) ) );
+		$provider->refund( $row, 123, '2.50' );
+		$this->assertSame( 'pi_a', $this->http->requests[0]['params']['payment_intent'] );
+	}
+
 	public function test_missing_reference(): void {
 		$row                  = $this->row();
 		$row['provider_refs'] = array();
