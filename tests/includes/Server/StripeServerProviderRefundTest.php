@@ -211,6 +211,23 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		$this->assertSame( 'pi_device', $this->http->requests[0]['params']['payment_intent'] );
 	}
 
+	/** An offline device row the webhook captured first holds only the webhook's refs: refunded against its intent, under the row's own mode, with no stamp on the record. */
+	public function test_device_row_captured_by_the_webhook_is_refunded_against_the_intent_under_its_mode(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldNotReceive( 'update_meta_data' );
+		$refund->shouldNotReceive( 'save' );
+		$this->orders[123] = $refund;
+		$row = $this->row();
+		$row['capture_mode'] = 'device';
+		$patch = Stripe_Server_Provider::webhook_patch( $this->intent( array( 'status' => 'succeeded', 'livemode' => false ) ), 'evt_1' );
+		$row['provider_refs'] = $patch['provider_refs'] ?? array();
+		$provider = $this->provider( array( $this->ok( array( 'id' => 're_test', 'status' => 'succeeded' ) ) ) );
+		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_test' ), $provider->refund( $row, 123, '2.50' ) );
+		$this->assertSame( 'post', $this->http->requests[0]['method'] );
+		$this->assertSame( 'pi_test', $this->http->requests[0]['params']['payment_intent'] );
+		$this->assertContains( 'Authorization: Bearer sk_test_fake', $this->http->requests[0]['headers'] );
+	}
+
 	/** Pro's `payment_intent` is the last resort: a row that also names the intent under `action` is refunded against that. */
 	public function test_action_wins_over_pros_payment_intent(): void {
 		$row                  = $this->row();

@@ -40,7 +40,23 @@ class StripeServerProviderWebhookTest extends ServerTestCase {
 		$this->assertSame( '15.00', $result['patch']['amount'] );
 		$this->assertSame( 'USD', $result['patch']['currency'] );
 		$this->assertSame( '4242', $result['patch']['receipt']['card_last4'] );
-		$this->assertArrayNotHasKey( 'provider_refs', $result['patch'] );
+		$this->assertSame(
+			array(
+				'stripe_payment_intent' => 'pi_test',
+				'stripe_charge' => 'ch_test',
+				'stripe_mode' => 'test',
+				'transaction_id' => 'pi_test',
+			),
+			$result['patch']['provider_refs'] ?? array()
+		);
+	}
+
+	/** Pro's keys (`payment_intent`, `action`, `reader`) are the till's to write; a webhook never carries them. */
+	public function test_success_patch_carries_no_pro_owned_reference(): void {
+		$patch = Provider::webhook_patch( $this->intent( array( 'status' => 'succeeded' ) ), 'evt_1' );
+		foreach ( array( 'payment_intent', 'action', 'reader' ) as $key ) {
+			$this->assertArrayNotHasKey( $key, $patch['provider_refs'] ?? array() );
+		}
 	}
 
 	/** @dataProvider reader_events */
@@ -71,6 +87,11 @@ class StripeServerProviderWebhookTest extends ServerTestCase {
 					'amount'   => '12.50',
 					'currency' => 'USD',
 					'receipt'  => array(),
+					'provider_refs' => array(
+						'stripe_payment_intent' => 'pi_test',
+						'stripe_mode' => 'test',
+						'transaction_id' => 'pi_test',
+					),
 				),
 			),
 			array( 'terminal.reader.action_failed', 'requires_payment_method', array( 'event_id' => 'evt_test' ) ),
