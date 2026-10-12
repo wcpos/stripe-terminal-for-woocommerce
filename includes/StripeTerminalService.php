@@ -344,20 +344,51 @@ class StripeTerminalService {
 	 * Read one refund without order mutations: Pro's refund sweep asks about a refund this plugin
 	 * answered `pending`.
 	 *
-	 * @param string $id Refund ID.
+	 * @param string      $id      Refund ID.
+	 * @param null|string $api_key A key other than this service's, for a refund made in the other
+	 *                             mode; sent with the request only, nothing global changes.
 	 * @return array|WP_Error Refund or error.
 	 */
-	public function retrieve_refund( string $id ) {
+	public function retrieve_refund( string $id, ?string $api_key = null ) {
 		try {
 			$refund = $this->timed(
 				'retrieve_refund',
-				function () use ( $id ) {
-					return $this->get_stripe_client()->refunds->retrieve( $id );
+				function () use ( $id, $api_key ) {
+					return $this->get_stripe_client()->refunds->retrieve( $id, null, null === $api_key ? null : array( 'api_key' => $api_key ) );
 				}
 			);
 			return $refund->toArray();
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'retrieve_refund_error' );
+		}
+	}
+
+	/**
+	 * List a payment's refunds, newest first, one page of Stripe's largest size: the way back to
+	 * a refund whose create was answered without its id.
+	 *
+	 * @param string      $charge_or_intent_id Intent or charge ID, as `refund_payment()` takes it.
+	 * @param null|string $api_key             A key other than this service's, see `retrieve_refund()`.
+	 * @return array|WP_Error Refund objects or error.
+	 */
+	public function list_refunds( string $charge_or_intent_id, ?string $api_key = null ) {
+		try {
+			$id_parameter = 0 === strpos( $charge_or_intent_id, 'pi_' ) ? 'payment_intent' : 'charge';
+			$refunds      = $this->timed(
+				'list_refunds',
+				function () use ( $id_parameter, $charge_or_intent_id, $api_key ) {
+					return $this->get_stripe_client()->refunds->all(
+						array(
+							$id_parameter => $charge_or_intent_id,
+							'limit'       => 100,
+						),
+						null === $api_key ? null : array( 'api_key' => $api_key )
+					);
+				}
+			);
+			return $refunds->toArray()['data'] ?? array();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'list_refunds_error' );
 		}
 	}
 

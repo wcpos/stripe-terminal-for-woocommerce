@@ -39,6 +39,12 @@ class StripeServerProviderRefundTest extends ServerTestCase {
 		return array( array( 'succeeded', 'succeeded' ), array( 'pending', 'pending' ), array( 'requires_action', 'pending' ), array( 'failed', 'failed' ), array( 'canceled', 'failed' ) );
 	}
 
+	/** Stripe took the refund but answered without it: the record stays, as a pending the sweep finds by metadata; an error would delete it and a retry would refund twice. */
+	public function test_success_without_the_refund_is_pending_without_a_reference(): void {
+		$provider = $this->provider( array( $this->ok( array( 'object' => 'refund' ) ) ) );
+		$this->assertSame( array( 'status' => 'pending', 'provider_ref' => null ), $provider->refund( $this->row(), 123, '2.50' ) );
+	}
+
 	public function test_missing_reference(): void {
 		$row                  = $this->row();
 		$row['provider_refs'] = array();
