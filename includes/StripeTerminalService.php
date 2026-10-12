@@ -59,7 +59,12 @@ class StripeTerminalService {
 		$http_client = \Stripe\HttpClient\CurlClient::instance();
 		$http_client->setConnectTimeout( apply_filters( 'stwc_stripe_connect_timeout', 10 ) );
 		$http_client->setTimeout( apply_filters( 'stwc_stripe_request_timeout', 80 ) );
-		\Stripe\ApiRequestor::setHttpClient( $http_client );
+		// The SDK's requestor is process-wide. Its default is this same curl client, so it is
+		// installed only when nothing else is: a client installed on purpose (a host's logging
+		// client, a test's fake) is not replaced by a service built later in the same process.
+		if ( \Stripe\ApiRequestor::httpClient() instanceof \Stripe\HttpClient\CurlClient ) {
+			\Stripe\ApiRequestor::setHttpClient( $http_client );
+		}
 	}
 
 	/**
