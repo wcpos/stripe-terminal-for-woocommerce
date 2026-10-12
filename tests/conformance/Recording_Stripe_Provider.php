@@ -20,8 +20,9 @@ final class Recording_Stripe_Provider extends Stripe_Server_Provider {
 	public static $fixture;
 
 	/**
-	 * Every StripeTerminalService constructor (the gateway builds one too) installs the SDK's global
-	 * curl client, so the scripted one is pinned again on entry to each operation.
+	 * The fixture's uninstall restores the SDK's curl client between cases, and a
+	 * StripeTerminalService built over a curl client (the gateway builds one too) installs its own,
+	 * so the scripted one is pinned again on entry to each operation.
 	 */
 	private static function pin(): void {
 		\Stripe\ApiRequestor::setHttpClient( self::$fixture->transport );

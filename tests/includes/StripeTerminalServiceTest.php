@@ -42,6 +42,21 @@ class StripeHttpClientFake implements \Stripe\HttpClient\ClientInterface {
 		if ( $response instanceof \Throwable ) {
 			throw $response;
 		}
+		if ( null === $response ) {
+			// Nothing queued for this request: refuse it the way Stripe refuses a key it does not
+			// know, so a test that expects a WP_Error gets one without any request leaving the
+			// process. The service catches everything into a WP_Error, so a test that queued too few
+			// answers never failed loudly; this message, inside that WP_Error, at least names the ask.
+			$response = array(
+				'body'   => array(
+					'error' => array(
+						'type'    => 'invalid_request_error',
+						'message' => 'StripeHttpClientFake: no response queued for ' . $method . ' ' . $abs_url,
+					),
+				),
+				'status' => 401,
+			);
+		}
 
 		return array( wp_json_encode( $response['body'] ), $response['status'], array() );
 	}
@@ -59,6 +74,9 @@ class StripeTerminalServiceTest extends TestCase {
 		parent::setUp();
 		Monkey\setUp();
 		$GLOBALS['stwc_payment_id_for_action'] = array();
+		// No test here talks to api.stripe.com: a fake with nothing queued refuses every request
+		// locally, and a test that needs answers installs its own.
+		$this->install_fake_stripe_client( array() );
 
 		// Stub common WP functions used by the error handler.
 		Functions\stubs(
@@ -86,6 +104,7 @@ class StripeTerminalServiceTest extends TestCase {
 	 * Tear down Brain\Monkey after each test.
 	 */
 	protected function tearDown(): void {
+		\Stripe\ApiRequestor::setHttpClient( \Stripe\HttpClient\CurlClient::instance() );
 		Monkey\tearDown();
 		parent::tearDown();
 	}
@@ -133,6 +152,7 @@ class StripeTerminalServiceTest extends TestCase {
 		$client = \Stripe\HttpClient\CurlClient::instance();
 		$client->setConnectTimeout( 30 );
 		$client->setTimeout( 30 );
+		\Stripe\ApiRequestor::setHttpClient( $client );
 
 		Functions\when( 'apply_filters' )->alias(
 			function ( $hook, $value ) {
@@ -145,6 +165,24 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertSame( 7, $client->getConnectTimeout() );
 		$this->assertSame( 83, $client->getTimeout() );
 		$this->assertSame( $client, \Stripe\ApiRequestor::httpClient() );
+	}
+
+	/** A client installed on purpose before the service is built stays installed; over the SDK's default the plugin's curl client is installed. */
+	public function test_constructor_keeps_an_installed_custom_http_client(): void {
+		$fake = $this->install_fake_stripe_client( array() );
+
+		new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$this->assertSame( $fake, \Stripe\ApiRequestor::httpClient() );
+		$this->assertSame( 10, \Stripe\HttpClient\CurlClient::instance()->getConnectTimeout() );
+
+		$other = new \Stripe\HttpClient\CurlClient();
+		\Stripe\ApiRequestor::setHttpClient( $other );
+
+		new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$this->assertSame( \Stripe\HttpClient\CurlClient::instance(), \Stripe\ApiRequestor::httpClient() );
+		$this->assertNotSame( $other, \Stripe\ApiRequestor::httpClient() );
 	}
 
 	/**
@@ -425,8 +463,8 @@ class StripeTerminalServiceTest extends TestCase {
 	/**
 	 * Install a queue-backed Stripe HTTP client and return it.
 	 *
-	 * Must run after the service is constructed: the constructor installs
-	 * its own CurlClient with the plugin's timeouts.
+	 * The service constructor leaves an installed fake in place (it installs its own curl client
+	 * only when nothing else is), so this may run before or after the service is built.
 	 *
 	 * @param array $responses Queued fake responses.
 	 */

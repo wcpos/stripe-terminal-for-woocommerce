@@ -311,7 +311,7 @@ class StripeDeviceProviderTest extends ServerTestCase {
 				),
 			)
 		);
-		// Service construction resets the HTTP client, so replace its singleton at the network boundary.
+		// Service construction installs the curl singleton over any curl client, so replace the singleton itself at the network boundary.
 		$instance = new \ReflectionProperty( \Stripe\HttpClient\CurlClient::class, 'instance' );
 		if ( PHP_VERSION_ID < 80100 ) {
 			$instance->setAccessible( true );
