@@ -14,6 +14,14 @@ use WCPOS\WooCommercePOS\StripeTerminal\Utils\CurrencyConverter;
 /** Smart-reader provider, independent of the legacy order-pay flow. */
 class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Abstract_Provider_Adapter {
 	/**
+	 * Refund-record meta: the Stripe mode (test or live) the refund was made in, written only when
+	 * the row records none (a row a webhook captured before the till's own capture, or a
+	 * historical order-pay row), so a test/live switch while the refund is pending does not send
+	 * the sweep's read under the wrong key for thirty days.
+	 */
+	public const REFUND_MODE_META = '_stwc_refund_mode';
+
+	/**
 	 * Stripe transport.
 	 *
 	 * @var StripeTerminalService
@@ -348,9 +356,17 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 			}
 			// The row's payment was made in a recorded mode; everything about its refund happens under
 			// that mode's key, whatever mode the gateway is in now.
-			$key = $this->key_for( $row );
+			$key = $this->key_for( $row, $refund_id );
 			if ( is_wp_error( $key ) ) {
 				return $key;
+			}
+			$mode = self::mode_of( $row, $refund_id );
+			if ( ! in_array( $row['provider_refs']['stripe_mode'] ?? null, array( 'test', 'live' ), true ) ) {
+				$refund = wc_get_order( $refund_id );
+				if ( $refund instanceof \WC_Order_Refund ) {
+					$refund->update_meta_data( self::REFUND_MODE_META, $mode );
+					$refund->save();
+				}
 			}
 			if ( 'CAD' === strtoupper( $row['currency'] ) ) {
 				// A historical row may name the charge rather than the intent; read whichever it names.
@@ -372,7 +388,7 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 					'wcpos_refund_id' => (string) $refund_id,
 				),
 				'key'       => 'wcpos_refund_' . $row['id'] . '_' . $refund_id,
-				'mode'      => self::mode_of( $row ),
+				'mode'      => $mode,
 				'refund_id' => $refund_id,
 			);
 			// The time of the till's own request: a re-send is only safe while Stripe still holds the key.
@@ -417,8 +433,9 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 *
 	 * Reads the refund `refund()` made, by the id it returned, or (when Stripe's answer to the
 	 * create did not carry the id) finds it among the payment's refunds by the metadata the
-	 * create carried; nothing is created. The read uses the key of the mode the row's payment was
-	 * made in. Stripe answers most refunds `succeeded` at once; the sweep asks about the ones it
+	 * create carried; nothing is created. The read uses the key of the mode the refund was made
+	 * in (the row's, else the one stamped on the refund record). Stripe answers most refunds
+	 * `succeeded` at once; the sweep asks about the ones it
 	 * answered `pending` or `requires_action`, whatever the payment method, until Stripe settles
 	 * them.
 	 *
@@ -430,7 +447,7 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 		try {
 			$ref     = (string) ( $allocation['provider_ref'] ?? '' );
 			$refused = '' === $ref && '' !== self::refused_reason( (int) ( $allocation['id'] ?? 0 ) );
-			$key     = $this->key_for( $row );
+			$key     = $this->key_for( $row, (int) ( $allocation['id'] ?? 0 ) );
 			if ( is_wp_error( $key ) ) {
 				// The re-sent create was refused and there is no key to look under: the record is
 				// the only word, and it says never made.
@@ -543,32 +560,46 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	}
 
 	/**
-	 * The mode the row's payment was made in: recorded on the row, else the gateway's current mode.
-	 * A historical row records none and was made under the mode the gateway is in; a row a webhook
-	 * captured before the till's own capture records none either (the webhook patch carries no
-	 * refs), so after a test/live switch its refund is read under the new mode's key.
+	 * The mode the refund was made in, as far as anything recorded it: the row's `stripe_mode`,
+	 * else the stamp `refund()` left on the refund record, else null (nothing recorded; the
+	 * gateway's current mode is the only guess).
 	 *
-	 * @param array $row Ledger row.
+	 * @param array $row       Ledger row.
+	 * @param int   $refund_id WooCommerce refund id.
 	 */
-	private static function mode_of( array $row ): string {
+	private static function recorded_mode( array $row, int $refund_id ): ?string {
 		$mode = $row['provider_refs']['stripe_mode'] ?? null;
 		if ( in_array( $mode, array( 'test', 'live' ), true ) ) {
 			return $mode;
 		}
-		return Settings::is_test_mode() ? 'test' : 'live';
+		$refund = 0 < $refund_id ? wc_get_order( $refund_id ) : false;
+		$mode   = $refund instanceof \WC_Order_Refund ? $refund->get_meta( self::REFUND_MODE_META ) : null;
+		return in_array( $mode, array( 'test', 'live' ), true ) ? $mode : null;
 	}
 
 	/**
-	 * The key of the mode the row's payment was made in, when it is not the gateway's current
+	 * The row's mode, else the refund record's stamp, else the gateway's current mode.
+	 *
+	 * @param array $row       Ledger row.
+	 * @param int   $refund_id WooCommerce refund id.
+	 */
+	private static function mode_of( array $row, int $refund_id = 0 ): string {
+		return self::recorded_mode( $row, $refund_id ) ?? ( Settings::is_test_mode() ? 'test' : 'live' );
+	}
+
+	/**
+	 * The key for the row's mode, else the refund record's stamp, else the gateway's current
 	 * mode. Stripe keeps test and live objects apart, so a refund made in one mode cannot be read
 	 * with the other mode's key once the gateway is switched; the device adapter refunds under the
-	 * recorded mode the same way. Null for a row in the current mode or without a recorded mode.
+	 * recorded mode the same way. Null when the recorded mode is the gateway's current one, or
+	 * when neither the row nor the record recorded a mode.
 	 *
-	 * @param array $row Ledger row.
+	 * @param array $row       Ledger row.
+	 * @param int   $refund_id WooCommerce refund id.
 	 * @return string|null|\WP_Error The key, null for the current one, an error when that mode has none.
 	 */
-	private function key_for( array $row ) {
-		$mode = $row['provider_refs']['stripe_mode'] ?? null;
+	private function key_for( array $row, int $refund_id = 0 ) {
+		$mode = self::recorded_mode( $row, $refund_id );
 		if ( ! in_array( $mode, array( 'test', 'live' ), true ) || ( 'test' === $mode ) === Settings::is_test_mode() ) {
 			return null;
 		}

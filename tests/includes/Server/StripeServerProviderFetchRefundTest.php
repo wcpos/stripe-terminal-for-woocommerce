@@ -1,5 +1,6 @@
 <?php
 namespace WCPOS\WooCommercePOS\StripeTerminal\Tests\Server;
+use WCPOS\WooCommercePOS\StripeTerminal\Server\Stripe_Server_Provider;
 require_once __DIR__ . '/ServerTestCase.php';
 
 /** Pro's refund sweep reads a refund `refund()` answered `pending` back through `fetch_refund()`. */
@@ -142,6 +143,7 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 	/** The re-sent create was refused under the same key, and Stripe's list shows nothing of this allocation's: never made, so the allocation is reported failed. */
 	public function test_refused_replay_with_nothing_listed_is_reported_failed(): void {
 		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->with( Stripe_Server_Provider::REFUND_MODE_META )->andReturn( '' );
 		$refund->shouldReceive( 'get_meta' )->with( \WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask::REFUSED_META )->andReturn( 'Charge already refunded' );
 		$this->orders = array( 123 => $refund );
 		$provider     = $this->provider( array( $this->listing( array() ) ) );
@@ -152,6 +154,7 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 	/** A refused mark the list contradicts (the refund IS there under this allocation's metadata) is not believed: the refund is reported as Stripe has it. */
 	public function test_refused_mark_is_overruled_by_a_listed_refund(): void {
 		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->with( Stripe_Server_Provider::REFUND_MODE_META )->andReturn( '' );
 		$refund->shouldReceive( 'get_meta' )->with( \WCPOS\WooCommercePOS\StripeTerminal\Server\Refund_Reask::REFUSED_META )->andReturn( 'Invalid API Key provided' );
 		$this->orders = array( 123 => $refund );
 		$provider     = $this->provider( array( $this->listing( array( $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded' ) ) ) ) ) );
@@ -266,6 +269,45 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 		$this->assert_indeterminate( $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
 		$provider = $this->provider( array( array( 'body' => array( 'error' => array( 'type' => 'invalid_request_error', 'code' => 'resource_missing', 'message' => 'No such payment_intent' ) ), 'status' => 404 ) ) );
 		$this->assert_provider_error( $provider->fetch_refund( $this->row(), $this->allocation( '' ) ), 'resource_missing' );
+	}
+
+	/** A mode-less row reads under the stamp even after the gateway switches. */
+	public function test_reads_under_the_mode_stamped_on_the_record(): void {
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['test_secret_key'] = 'sk_test_fake';
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['secret_key'] = 'sk_live_fake';
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->andReturnUsing( static function ( $key ) {
+			return Stripe_Server_Provider::REFUND_MODE_META === $key ? 'live' : '';
+		} );
+		$this->orders[123] = $refund;
+		$provider = $this->provider( array( $this->listing( array( $this->refund( array( 'status' => 'succeeded' ) ) ) ) ) );
+		$this->assertSame( 'succeeded', $provider->fetch_refund( $this->row(), $this->allocation( '' ) )['status'] );
+		$this->assertContains( 'Authorization: Bearer sk_live_fake', $this->http->requests[0]['headers'] );
+	}
+
+	/** The row's mode is authoritative even when the refund record disagrees. */
+	public function test_the_rows_mode_wins_over_the_records(): void {
+		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings']['secret_key'] = 'sk_live_fake';
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->andReturnUsing( static function ( $key ) {
+			return Stripe_Server_Provider::REFUND_MODE_META === $key ? 'live' : '';
+		} );
+		$this->orders[123] = $refund;
+		$row = $this->row();
+		$row['provider_refs']['stripe_mode'] = 'test';
+		$provider = $this->provider( array( $this->ok( $this->refund( array( 'status' => 'succeeded' ) ) ) ) );
+		$this->assertSame( 'succeeded', $provider->fetch_refund( $row, $this->allocation() )['status'] );
+		$this->assertContains( 'Authorization: Bearer sk_test_fake', $this->http->requests[0]['headers'] );
+	}
+
+	/** An unstamped record leaves a mode-less row on the gateway's key. */
+	public function test_a_record_without_a_stamp_reads_under_the_gateway_key(): void {
+		$refund = \Mockery::mock( 'WC_Order_Refund' );
+		$refund->shouldReceive( 'get_meta' )->andReturn( '' );
+		$this->orders[123] = $refund;
+		$provider = $this->provider( array( $this->ok( $this->refund( array( 'status' => 'succeeded' ) ) ) ) );
+		$this->assertSame( 'succeeded', $provider->fetch_refund( $this->row(), $this->allocation() )['status'] );
+		$this->assertContains( 'Authorization: Bearer sk_test_fake', $this->http->requests[0]['headers'] );
 	}
 
 	/** A payment made in live mode is read with the live key while the gateway sits in test mode, and the other way round. */
