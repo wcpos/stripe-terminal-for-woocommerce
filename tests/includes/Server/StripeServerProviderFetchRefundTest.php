@@ -141,6 +141,28 @@ class StripeServerProviderFetchRefundTest extends ServerTestCase {
 		$this->assertSame( array( 'payment_intent' => 'pi_test', 'limit' => 100 ), $this->http->requests[0]['params'] );
 	}
 
+	/** A payment with more refunds than one page holds is read page by page until the refund shows, or the pages end. */
+	public function test_no_reference_follows_later_pages(): void {
+		$others = array();
+		for ( $i = 0; $i < 3; $i++ ) {
+			$others[] = $this->refund( array( 'id' => 're_other_' . $i, 'status' => 'succeeded', 'metadata' => array( 'wcpos_payment_id' => self::PAYMENT_ID, 'wcpos_refund_id' => (string) ( 900 + $i ) ) ) );
+		}
+		$first    = $this->ok( array( 'object' => 'list', 'data' => $others, 'has_more' => true ) );
+		$second   = $this->listing( array( $this->refund( array( 'id' => 're_mine', 'status' => 'succeeded' ) ) ) );
+		$provider = $this->provider( array( $first, $second ) );
+		$this->assertSame( array( 'status' => 'succeeded', 'provider_ref' => 're_mine' ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+		$this->assertCount( 2, $this->http->requests );
+		$this->assertSame( 're_other_2', $this->http->requests[1]['params']['starting_after'] );
+
+		$pages = array();
+		for ( $i = 0; $i < \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::REFUND_PAGES_MAX + 1; $i++ ) {
+			$pages[] = $this->ok( array( 'object' => 'list', 'data' => $others, 'has_more' => true ) );
+		}
+		$provider = $this->provider( $pages );
+		$this->assertSame( array( 'status' => 'pending', 'provider_ref' => null ), $provider->fetch_refund( $this->row(), $this->allocation( '' ) ) );
+		$this->assertCount( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::REFUND_PAGES_MAX, $this->http->requests );
+	}
+
 	/** The payment's refunds are listed under the charge when the row names one. */
 	public function test_no_reference_on_a_charge_row_lists_by_charge(): void {
 		$provider = $this->provider( array( $this->listing( array( $this->refund( array( 'status' => 'pending' ) ) ) ) ) );
