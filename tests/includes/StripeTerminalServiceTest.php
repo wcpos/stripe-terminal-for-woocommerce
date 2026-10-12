@@ -45,7 +45,8 @@ class StripeHttpClientFake implements \Stripe\HttpClient\ClientInterface {
 		if ( null === $response ) {
 			// Nothing queued for this request: refuse it the way Stripe refuses a key it does not
 			// know, so a test that expects a WP_Error gets one without any request leaving the
-			// process, and a test that queued too few answers fails on a message that says so.
+			// process. The service catches everything into a WP_Error, so a test that queued too few
+			// answers never failed loudly; this message, inside that WP_Error, at least names the ask.
 			$response = array(
 				'body'   => array(
 					'error' => array(
@@ -166,7 +167,7 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertSame( $client, \Stripe\ApiRequestor::httpClient() );
 	}
 
-	/** A client installed on purpose before the service is built stays installed. */
+	/** A client installed on purpose before the service is built stays installed; over the SDK's default the plugin's curl client is installed. */
 	public function test_constructor_keeps_an_installed_custom_http_client(): void {
 		$fake = $this->install_fake_stripe_client( array() );
 
@@ -174,6 +175,14 @@ class StripeTerminalServiceTest extends TestCase {
 
 		$this->assertSame( $fake, \Stripe\ApiRequestor::httpClient() );
 		$this->assertSame( 10, \Stripe\HttpClient\CurlClient::instance()->getConnectTimeout() );
+
+		$other = new \Stripe\HttpClient\CurlClient();
+		\Stripe\ApiRequestor::setHttpClient( $other );
+
+		new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$this->assertSame( \Stripe\HttpClient\CurlClient::instance(), \Stripe\ApiRequestor::httpClient() );
+		$this->assertNotSame( $other, \Stripe\ApiRequestor::httpClient() );
 	}
 
 	/**
