@@ -20,8 +20,9 @@ An administrator saves the Stripe Terminal gateway settings with a Stripe key to
 The gateway settings show the POS webhook URL and whether its signing secret is stored; the legacy webhook is not replaced.
 Dashboard-configured on-reader tips are recorded by POS as a Tip order fee.
 The POS Legacy tab (the order-pay page) runs through Pro's shared order-pay panel, so a payment taken there is a ledger row like a keypad payment: it refunds from the till, counts in reports and drives the customer display. With **Phone Order** (MOTO) enabled, Stripe's own order-pay panel stays, because keyed entry has no home in the shared panel yet.
-Bluetooth readers (Stripe Reader M2, WisePad 3) and Tap to Pay on iPhone and Android are driven by the WooCommerce POS 2.0 app for iOS and Android through the app-side `device` mode; the web and desktop apps keep the smart-reader tile above.
-Both need a Terminal **Location** chosen in the gateway settings for the selected test/live mode; without one the till reports `stripe_location_missing` when it connects a reader.
+Bluetooth readers (Stripe Reader M2, WisePad 3) and Tap to Pay on iPhone and Android are driven by the WooCommerce POS 2.0 mobile app through the app-side `device` mode.
+The **POS connection** setting on the gateway page chooses, for the whole store, whether the POS app drives a Bluetooth reader or Tap to Pay or the store drives a smart reader: a store set to the app's readers shows the Stripe tile as unavailable in the web and desktop apps, and a store set to smart readers offers no Bluetooth or Tap to Pay. New installs default to the app's readers; an install with a saved smart reader keeps smart readers until the setting is changed.
+Bluetooth readers and Tap to Pay need a Terminal **Location** chosen in the gateway settings for the selected test/live mode; without one the till reports `stripe_location_missing` when it connects a reader.
 A Bluetooth reader queues payments taken offline and forwards them when the connection returns; Tap to Pay needs a connection.
 Tap to Pay on iPhone also asks the merchant to sign in with an Apple ID and accept Apple's terms in the app, once per Stripe account.
 
