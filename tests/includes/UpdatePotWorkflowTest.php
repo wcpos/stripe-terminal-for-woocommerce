@@ -62,7 +62,8 @@ class UpdatePotWorkflowTest extends TestCase {
 		$workflow = file_get_contents( self::WORKFLOW );
 
 		$this->assertIsString( $workflow );
-		$this->assertStringContainsString( 'uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1', $workflow );
+		// Dependabot bumps the pinned SHA; the contract is a full-SHA pin on this action, not one SHA.
+		$this->assertMatchesRegularExpression( '~uses: actions/create-github-app-token@[0-9a-f]{40} # v\d+~', $workflow );
 		$this->assertStringContainsString( 'client-id: ${{ vars.WCPOS_MINI_APP_ID }}', $workflow );
 		$this->assertStringContainsString( 'private-key: ${{ secrets.WCPOS_MINI_APP_PRIVATE_KEY }}', $workflow );
 		$this->assertStringContainsString( 'repositories: ${{ github.event.repository.name }}', $workflow );
