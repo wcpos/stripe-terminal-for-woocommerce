@@ -1,11 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.0.38 - 2026-10-15
+
+### Changed
+
+- **The plugin now ships stripe-php 22, which pins Stripe API version 2026-09-30.endive** (it was on stripe-php 21 and API version 2026-08-26.dahlia). The first attempt at this update was reverted on 2026-10-08 because the newer API rejects the `payment_method_types` parameter the plugin sent on every Terminal PaymentIntent; the fix below makes the update safe, and this release's test-mode smoke run (a connection token, a card-present intent and a refund against the new API version) was green before it was published. (#143, #147, #158, #174)
 
 ### Fixed
 
-- **The unreleased stripe-php 22 update was reverted because its pinned Stripe API version rejected `payment_method_types`.** The update (#143) pinned the plugin to Stripe API version 2026-09-30; the live smoke test exposed the rejection, so the plugin stays on stripe-php 21 (API version 2026-08-26.dahlia). Dependabot no longer proposes stripe-php majors; a move to the newer API is a deliberate change.
-- Terminal and phone-order PaymentIntents are created with `allowed_payment_method_types`, which the current Stripe API version accepts and which replaces the `payment_method_types` parameter removed in API 2026-09-30.endive. A later upgrade to stripe-php 22, which pins that version, no longer breaks payment creation.
+- Terminal and phone-order PaymentIntents are created with `allowed_payment_method_types`, which replaces the `payment_method_types` parameter removed in Stripe API 2026-09-30.endive. Without this, every Terminal intent fails on that API version. (#149)
 - **A Terminal payment's order is no longer left unpaid when its webhook arrives while another request is completing it.** The `payment_intent.succeeded` webhook used to acknowledge the event even when it found the order's completion claim held, so Stripe never redelivered it, and if the request holding the claim died before completing the order, nothing completed it. The webhook now answers HTTP 409 in that case, Stripe retries the delivery with backoff, and the retry completes the order or finds it already paid.
 
 ## 0.0.37 - 2026-10-05
