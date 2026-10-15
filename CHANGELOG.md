@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+### Changed
+
 - A Bluetooth or Tap to Pay payment taken offline that Stripe's webhook captured before the till's own capture now has its PaymentIntent and its test/live mode on the ledger row: the webhook writes them, and the free plugin 2.0 merges them into the row instead of replacing the till's own references. Such a payment can be refunded from the POS where before it reported "No Stripe payment found for refund". (wcpos/roadmap#426)
 - A POS payment whose create Stripe did not answer (a dropped connection or timeout) now stays pending and resumes on the same PaymentIntent when the till retries or the sweeper runs; before, the leg was dropped while the intent could already be on the reader.
 - A decline Stripe reports by webhook fails the POS leg the way polling does, after a fresh read of the intent: a retry already on the reader is left to polling, a paid intent reports its money, and a confirmed decline is retired so nothing can charge it again. A stale decline arriving after the payment was captured reports the capture; a provider record that contradicts captured money is refused and logged instead of ignored.
@@ -27,9 +29,15 @@
 - Key POS PaymentIntent creation idempotently by payment attempt to prevent duplicate intents on retries.
 - Report Dashboard-configured on-reader tips to POS, which records them as a Tip order fee.
 
+## 0.0.38 - 2026-10-15
+
+### Changed
+
+- **The plugin now ships stripe-php 22, which pins Stripe API version 2026-09-30.endive** (it was on stripe-php 21 and API version 2026-08-26.dahlia). The first attempt at this update was reverted on 2026-10-08 because the newer API rejects the `payment_method_types` parameter the plugin sent on every Terminal PaymentIntent; the fix below makes the update safe, and this release's test-mode smoke run (a connection token, a card-present intent and a refund against the new API version) was green before it was published. (#143, #147, #158, #174)
+
 ### Fixed
 
-- **Taking a Terminal payment no longer fails with "The `payment_method_types` parameter is no longer supported".** Today's dependency update to stripe-php 22 (#143, unreleased) pinned the plugin to Stripe API version 2026-09-30, which rejects the `payment_method_types` parameter every Terminal PaymentIntent is created with; the live smoke test proved it and the update is reverted to stripe-php 21 (API version 2026-06-24). Dependabot no longer proposes stripe-php majors; a move to the newer API is a deliberate change.
+- Terminal and phone-order PaymentIntents are created with `allowed_payment_method_types`, which replaces the `payment_method_types` parameter removed in Stripe API 2026-09-30.endive. Without this, every Terminal intent fails on that API version. (#149)
 - **A Terminal payment's order is no longer left unpaid when its webhook arrives while another request is completing it.** The `payment_intent.succeeded` webhook used to acknowledge the event even when it found the order's completion claim held, so Stripe never redelivered it, and if the request holding the claim died before completing the order, nothing completed it. The webhook now answers HTTP 409 in that case, Stripe retries the delivery with backoff, and the retry completes the order or finds it already paid.
 
 ## 0.0.37 - 2026-10-05
