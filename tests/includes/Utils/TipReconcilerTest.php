@@ -119,33 +119,61 @@ class TipReconcilerTest extends TestCase {
 		$this->assertSame( 12.5, $state->total );
 	}
 
-	public function test_status_check_reconciles_tip_before_recovered_payment_completes(): void {
+	/**
+	 * @testWith [false]
+	 *           [true]
+	 */
+	public function test_status_check_reconciles_tip_before_recovered_payment_completes( bool $webhook_race ): void {
 		list( $order, $state ) = $this->tip_order( 10.00 );
 		$state->meta['_stripe_terminal_payment_intent_id'] = 'pi_recovered_tip';
 		$order->shouldReceive( 'get_id' )->andReturn( 42 );
 		$order->shouldReceive( 'get_transaction_id' )->andReturn( '' );
-		$order->shouldReceive( 'is_paid' )->andReturn( false );
+		$state->paid = false;
+		$order->shouldReceive( 'is_paid' )->andReturnUsing( fn() => $state->paid );
 		$order->shouldReceive( 'get_status' )->andReturn( 'pending' );
 		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' );
 		$order->shouldReceive( 'read_meta_data' )->with( true );
-		$order->shouldReceive( 'set_transaction_id' )->with( 'ch_recovered_tip' );
+		$order->shouldReceive( 'set_transaction_id' )->with( $webhook_race ? 'pi_recovered_tip' : 'ch_recovered_tip' );
 		$order->shouldReceive( 'get_payment_method' )->andReturn( 'stripe_terminal_for_woocommerce' );
 		$order->shouldReceive( 'get_payment_method_title' )->andReturn( 'Stripe Terminal' );
-		$order->shouldReceive( 'payment_complete' )->once()->with( 'ch_recovered_tip' )->andReturnUsing( function () use ( $state ) {
+		$order->shouldReceive( 'payment_complete' )->once()->with( $webhook_race ? 'pi_recovered_tip' : 'ch_recovered_tip' )->andReturnUsing( function () use ( $state ) {
 			$state->completed_total = $state->total;
+			$state->paid = true;
 		} );
 		Functions\when( 'apply_filters' )->alias( fn( $hook, $value ) => $value );
 		Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
 		Functions\when( 'wp_generate_uuid4' )->justReturn( 'uuid-tip-recovery' );
-		Functions\when( 'wc_get_order' )->justReturn( $order );
+		Functions\when( 'wc_get_order' )->alias( function () use ( $order, $state ) {
+			if ( $state->paid ) {
+				$this->assertArrayHasKey( 'stwc_lock_order_42_complete_payment', $GLOBALS['wpdb']->rows );
+			}
+			return $order;
+		} );
+		$gateways = \Mockery::mock();
+		$gateways->shouldReceive( 'payment_gateways' )->andReturn( array() );
+		$woocommerce = \Mockery::mock();
+		$woocommerce->shouldReceive( 'payment_gateways' )->andReturn( $gateways );
+		Functions\when( 'WC' )->justReturn( $woocommerce );
+		$checked_order = $order;
+		if ( $webhook_race ) {
+			list( $checked_order, $stale ) = $this->tip_order( 10.00 );
+			$stale->meta = $state->meta;
+			$stale->fees =& $state->fees; // Fees are persisted separately from the stale order metadata.
+			$checked_order->shouldReceive( 'get_id' )->andReturn( 42 );
+			$checked_order->shouldReceive( 'get_transaction_id' )->andReturn( '' );
+			$checked_order->shouldReceive( 'is_paid' )->andReturn( false );
+			$checked_order->shouldReceive( 'get_status' )->andReturn( 'pending' );
+			$checked_order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' );
+		}
 		Functions\when( 'clean_post_cache' )->justReturn( null );
 
 		$service = new \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService( 'sk_test_status_key' );
 		$client  = \Mockery::mock( \Stripe\HttpClient\ClientInterface::class );
-		$client->shouldReceive( 'request' )->twice()->andReturn(
+		$responses = array(
 			array( json_encode( array(
 				'id'                   => 'pi_recovered_tip',
 				'object'               => 'payment_intent',
+				'metadata'             => array( 'order_id' => 42 ),
 				'status'               => 'succeeded',
 				'amount'               => 1250,
 				'currency'             => 'usd',
@@ -166,14 +194,24 @@ class TipReconcilerTest extends TestCase {
 				) ),
 			) ), 200, array() )
 		);
+		$client->shouldReceive( 'request' )->twice()->andReturnUsing( function () use ( &$responses, $webhook_race, $service ) {
+			$response = array_shift( $responses );
+			if ( $webhook_race && 1 === count( $responses ) ) {
+				$handler = new \ReflectionMethod( $service, 'handle_payment_intent_succeeded' );
+				$handler->setAccessible( true );
+				$handler->invoke( $service, \Stripe\PaymentIntent::constructFrom( json_decode( $response[0], true ) ) );
+			}
+			return $response;
+		} );
 		\Stripe\ApiRequestor::setHttpClient( $client );
 		$previous_wpdb   = $GLOBALS['wpdb'] ?? null;
 		$GLOBALS['wpdb'] = new \WCPOS\WooCommercePOS\StripeTerminal\Tests\Support\FakeWpdb();
 		try {
-			$result = $service->check_payment_status_from_stripe( $order );
-			$this->assertTrue( $result['metadata_saved'] );
+			$result = $service->check_payment_status_from_stripe( $checked_order );
+			$this->assertCount( 1, $state->fees );
+			$this->assertSame( ! $webhook_race, $result['metadata_saved'] );
 			// Complete through the same boundary used by Gateway::process_payment().
-			$this->assertSame( 'completed', \WCPOS\WooCommercePOS\StripeTerminal\OrderCompletion::complete( $order, $result['charge']['id'] ) );
+			$this->assertSame( $webhook_race ? 'already_paid' : 'completed', \WCPOS\WooCommercePOS\StripeTerminal\OrderCompletion::complete( $order, $result['charge']['id'] ) );
 			$this->assertSame( 12.5, $state->completed_total );
 			$this->assertCount( 1, $state->fees );
 			$this->assertSame( 'Tip', $state->fees[0]->name );
