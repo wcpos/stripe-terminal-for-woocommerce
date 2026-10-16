@@ -10,6 +10,8 @@ use Brain\Monkey\Functions;
 use PHPUnit\Framework\TestCase;
 use WCPOS\WooCommercePOS\StripeTerminal\Utils\TipReconciler;
 
+require_once __DIR__ . '/../../stubs/class-wc-payment-gateway.php';
+
 /**
  * @covers \WCPOS\WooCommercePOS\StripeTerminal\Utils\TipReconciler
  */
@@ -115,6 +117,73 @@ class TipReconcilerTest extends TestCase {
 		$this->assertCount( 1, $state->fees );
 		$this->assertSame( 2.5, $state->fees[0]->total );
 		$this->assertSame( 12.5, $state->total );
+	}
+
+	public function test_status_check_reconciles_tip_before_recovered_payment_completes(): void {
+		list( $order, $state ) = $this->tip_order( 10.00 );
+		$state->meta['_stripe_terminal_payment_intent_id'] = 'pi_recovered_tip';
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_transaction_id' )->andReturn( '' );
+		$order->shouldReceive( 'is_paid' )->andReturn( false );
+		$order->shouldReceive( 'get_status' )->andReturn( 'pending' );
+		$order->shouldReceive( 'delete_meta_data' )->with( '_stripe_terminal_moto' );
+		$order->shouldReceive( 'read_meta_data' )->with( true );
+		$order->shouldReceive( 'set_transaction_id' )->with( 'ch_recovered_tip' );
+		$order->shouldReceive( 'get_payment_method' )->andReturn( 'stripe_terminal_for_woocommerce' );
+		$order->shouldReceive( 'get_payment_method_title' )->andReturn( 'Stripe Terminal' );
+		$order->shouldReceive( 'payment_complete' )->once()->with( 'ch_recovered_tip' )->andReturnUsing( function () use ( $state ) {
+			$state->completed_total = $state->total;
+		} );
+		Functions\when( 'apply_filters' )->alias( fn( $hook, $value ) => $value );
+		Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
+		Functions\when( 'wp_generate_uuid4' )->justReturn( 'uuid-tip-recovery' );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+		Functions\when( 'clean_post_cache' )->justReturn( null );
+
+		$service = new \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService( 'sk_test_status_key' );
+		$client  = \Mockery::mock( \Stripe\HttpClient\ClientInterface::class );
+		$client->shouldReceive( 'request' )->twice()->andReturn(
+			array( json_encode( array(
+				'id'                   => 'pi_recovered_tip',
+				'object'               => 'payment_intent',
+				'status'               => 'succeeded',
+				'amount'               => 1250,
+				'currency'             => 'usd',
+				'created'              => 1700000000,
+				'payment_method_types' => array( 'card_present' ),
+				'amount_details'       => array( 'tip' => array( 'amount' => 250 ) ),
+			) ), 200, array() ),
+			array( json_encode( array(
+				'object' => 'list',
+				'data'   => array( array(
+					'id'       => 'ch_recovered_tip',
+					'object'   => 'charge',
+					'status'   => 'succeeded',
+					'paid'     => true,
+					'amount'   => 1250,
+					'currency' => 'usd',
+					'created'  => 1700000000,
+				) ),
+			) ), 200, array() )
+		);
+		\Stripe\ApiRequestor::setHttpClient( $client );
+		$previous_wpdb   = $GLOBALS['wpdb'] ?? null;
+		$GLOBALS['wpdb'] = new \WCPOS\WooCommercePOS\StripeTerminal\Tests\Support\FakeWpdb();
+		try {
+			$result = $service->check_payment_status_from_stripe( $order );
+			$this->assertTrue( $result['metadata_saved'] );
+			// Complete through the same boundary used by Gateway::process_payment().
+			$this->assertSame( 'completed', \WCPOS\WooCommercePOS\StripeTerminal\OrderCompletion::complete( $order, $result['charge']['id'] ) );
+			$this->assertSame( 12.5, $state->completed_total );
+			$this->assertCount( 1, $state->fees );
+			$this->assertSame( 'Tip', $state->fees[0]->name );
+			$this->assertSame( 2.5, $state->fees[0]->total );
+			$this->assertSame( 2.5, $state->meta['_stripe_terminal_tip_amount'] );
+			$this->assertSame( 'pi_recovered_tip', $state->meta['_stripe_terminal_tip_payment_intent_id'] );
+		} finally {
+			$GLOBALS['wpdb'] = $previous_wpdb;
+			\Stripe\ApiRequestor::setHttpClient( \Stripe\HttpClient\CurlClient::instance() );
+		}
 	}
 
 	private function payment_intent_with_tip( int $tip, string $currency, string $id ) {

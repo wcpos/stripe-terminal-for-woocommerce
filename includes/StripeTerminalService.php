@@ -907,6 +907,9 @@ class StripeTerminalService {
 				// If we found a fully succeeded PaymentIntent and charge but the order isn't paid yet, save metadata.
 				$metadata_saved = false;
 			if ( $latest_charge && $latest_charge->paid && 'succeeded' === $payment_intent->status && ! $order->is_paid() ) {
+				// Reconcile the tip before the gateway completes the recovered payment.
+				$this->update_order_from_payment_intent( $order, $payment_intent );
+
 				// Save payment metadata instead of completing the order.
 				$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 				$order->update_meta_data( '_stripe_terminal_charge_id', $latest_charge->id );
