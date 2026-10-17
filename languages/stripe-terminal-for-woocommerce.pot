@@ -177,6 +177,12 @@ msgstr ""
 msgid "•••••••••••••••• (saved; leave blank to keep)"
 msgstr ""
 
+#: includes/Gateway.php:526
+#: includes/Gateway.php:571
+#: includes/Utils/TipReconciler.php:36
+msgid "Payment is processing, please try again."
+msgstr ""
+
 #. translators: 1: Payment intent ID, 2: charge ID.
 #: includes/Gateway.php:367
 #, php-format

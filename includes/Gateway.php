@@ -522,6 +522,10 @@ class Gateway extends WC_Payment_Gateway {
 		if ( $payment_intent_id && $charge_id && 'succeeded' === $payment_status ) {
 				// We have successful payment metadata, complete the order.
 			$completion = OrderCompletion::complete( $order, $charge_id );
+			if ( OrderCompletion::BUSY === $completion ) {
+				wc_add_notice( __( 'Payment is processing, please try again.', 'stripe-terminal-for-woocommerce' ), 'error' );
+				return array( 'result' => 'failure' );
+			}
 
 			if ( OrderCompletion::COMPLETED === $completion ) {
 				// Add order note.
@@ -563,6 +567,10 @@ class Gateway extends WC_Payment_Gateway {
 				$payment_intent_id = $status_result['payment_intent']['id'];
 
 				$completion = OrderCompletion::complete( $order, $charge_id );
+				if ( OrderCompletion::BUSY === $completion ) {
+					wc_add_notice( __( 'Payment is processing, please try again.', 'stripe-terminal-for-woocommerce' ), 'error' );
+					return array( 'result' => 'failure' );
+				}
 
 				if ( OrderCompletion::COMPLETED === $completion ) {
 					// Add order note.
