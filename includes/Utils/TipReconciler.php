@@ -25,7 +25,7 @@ class TipReconciler {
 	 *
 	 * @param \WC_Order $order          The WooCommerce order.
 	 * @param object    $payment_intent The server-retrieved Payment Intent.
-	 * @throws \RuntimeException When another request holds the tip claim.
+	 * @throws TipClaimBusyException When another request holds the tip claim.
 	 */
 	public static function maybe_add_tip_to_order( &$order, $payment_intent ): void {
 		if ( ( $payment_intent->amount_details->tip->amount ?? 0 ) <= 0 ) {
@@ -33,7 +33,7 @@ class TipReconciler {
 		}
 		$order_id = $order->get_id();
 		if ( ! PaymentLock::acquire( $order_id, 'reconcile_tip' ) ) {
-			throw new \RuntimeException( esc_html__( 'Payment is processing, please try again.', 'stripe-terminal-for-woocommerce' ) );
+			throw new TipClaimBusyException( esc_html__( 'Payment is processing, please try again.', 'stripe-terminal-for-woocommerce' ) );
 		}
 		try {
 			$order = OrderCompletion::reload_order( $order );

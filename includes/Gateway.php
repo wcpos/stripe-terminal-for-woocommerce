@@ -389,6 +389,10 @@ class Gateway extends WC_Payment_Gateway {
 		// Only recover from Stripe when this order has evidence of a prior Terminal attempt.
 		if ( $this->stripe_service && ( $order->get_transaction_id() || $payment_intent_id ) ) {
 			$status_result = $this->stripe_service->check_payment_status_from_stripe( $order );
+			if ( is_wp_error( $status_result ) && 'stwc_payment_busy' === $status_result->get_error_code() ) {
+				wc_add_notice( __( 'Payment is processing, please try again.', 'stripe-terminal-for-woocommerce' ), 'error' );
+				return array( 'result' => 'failure' );
+			}
 
 			if (
 				! is_wp_error( $status_result ) &&
