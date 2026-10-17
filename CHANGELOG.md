@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Checking the payment status of an order with an on-reader tip, while another request is still adding that tip, reports the payment as processing** and asks to try again. It used to answer "No successful payment found for this order" although Stripe had confirmed the charge, which could lead the cashier to take the payment a second time.
+
 ## 0.0.39 - 2026-10-17
 
 ### Fixed
