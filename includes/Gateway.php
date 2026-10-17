@@ -552,6 +552,10 @@ class Gateway extends WC_Payment_Gateway {
 		// transaction id Free copied from a Pro ledger leg is a partial payment, not one to complete.
 		if ( $this->stripe_service && ( $payment_intent_id || $this->has_legacy_charge( $order ) ) ) {
 			$status_result = $this->stripe_service->check_payment_status_from_stripe( $order );
+			if ( is_wp_error( $status_result ) && 'stwc_payment_busy' === $status_result->get_error_code() ) {
+				wc_add_notice( __( 'Payment is processing, please try again.', 'stripe-terminal-for-woocommerce' ), 'error' );
+				return array( 'result' => 'failure' );
+			}
 
 			if (
 				! is_wp_error( $status_result ) &&
