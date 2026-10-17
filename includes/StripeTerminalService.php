@@ -11,6 +11,7 @@ use Exception;
 use WC_Order;
 use WCPOS\WooCommercePOS\StripeTerminal\Abstracts\StripeErrorHandler;
 use WCPOS\WooCommercePOS\StripeTerminal\Utils\CurrencyConverter;
+use WCPOS\WooCommercePOS\StripeTerminal\Utils\TipClaimBusyException;
 use WCPOS\WooCommercePOS\StripeTerminal\Utils\TipReconciler;
 use WP_Error;
 
@@ -1302,6 +1303,9 @@ class StripeTerminalService {
 				'metadata_saved'  => $metadata_saved,
 				'return_url'      => $return_url,
 			);
+		} catch ( TipClaimBusyException $e ) {
+			// Stripe confirmed the charge; another request is still writing the tip.
+			return new WP_Error( 'stwc_payment_busy', $e->getMessage(), array( 'status' => 409 ) );
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
 		}

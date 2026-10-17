@@ -258,6 +258,80 @@ class TipReconcilerTest extends TestCase {
 		}
 	}
 
+	/**
+	 * Greptile P2 on #185: when another request holds the tip claim, the
+	 * order-pay status check must report the payment as still processing.
+	 * It used to answer "No successful payment found" for a charge Stripe had
+	 * confirmed, which invites the cashier to take the payment again.
+	 */
+	public function test_order_pay_status_check_with_tip_claim_held_reports_processing(): void {
+		list( $order, $state ) = $this->tip_order( 10.00 );
+		$state->meta['_stripe_terminal_payment_intent_id'] = 'pi_busy_tip';
+		$order->shouldReceive( 'get_transaction_id' )->andReturn( '' );
+		$order->shouldReceive( 'is_paid' )->andReturn( false );
+		$order->shouldReceive( 'payment_complete' )->never();
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+		Functions\when( 'apply_filters' )->alias( fn( $hook, $value ) => $value );
+		$notices = array();
+		Functions\when( 'wc_add_notice' )->alias(
+			function ( $message, $type ) use ( &$notices ) {
+				$notices[] = array( $message, $type );
+			}
+		);
+		$held = json_encode( array( 'token' => 'other-request', 'expires_at' => time() + 60 ) );
+		$GLOBALS['wpdb']->rows['stwc_lock_order_42_reconcile_tip'] = $held;
+
+		// The service constructor installs stripe-php's curl client, so swap the fake in after it.
+		$service = new \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService( 'sk_test_status_key' );
+		$client  = \Mockery::mock( \Stripe\HttpClient\ClientInterface::class );
+		$client->shouldReceive( 'request' )->twice()->andReturn(
+			array( json_encode( array(
+				'id'                   => 'pi_busy_tip',
+				'object'               => 'payment_intent',
+				'metadata'             => array( 'order_id' => 42 ),
+				'status'               => 'succeeded',
+				'amount'               => 1250,
+				'currency'             => 'usd',
+				'created'              => 1700000000,
+				'payment_method_types' => array( 'card_present' ),
+				'amount_details'       => array( 'tip' => array( 'amount' => 250 ) ),
+			) ), 200, array() ),
+			array( json_encode( array(
+				'object' => 'list',
+				'data'   => array( array(
+					'id'       => 'ch_busy_tip',
+					'object'   => 'charge',
+					'status'   => 'succeeded',
+					'paid'     => true,
+					'amount'   => 1250,
+					'currency' => 'usd',
+					'created'  => 1700000000,
+				) ),
+			) ), 200, array() )
+		);
+		\Stripe\ApiRequestor::setHttpClient( $client );
+		$gateway  = ( new \ReflectionClass( \WCPOS\WooCommercePOS\StripeTerminal\Gateway::class ) )->newInstanceWithoutConstructor();
+		$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
+		$property = new \ReflectionProperty( \WCPOS\WooCommercePOS\StripeTerminal\Gateway::class, 'stripe_service' );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$property->setAccessible( true );
+		}
+		$property->setValue( $gateway, $service );
+		$_POST['woocommerce_pay'] = '1';
+		try {
+			$result = $gateway->process_payment( 42 );
+		} finally {
+			unset( $_POST['woocommerce_pay'] );
+			\Stripe\ApiRequestor::setHttpClient( \Stripe\HttpClient\CurlClient::instance() );
+		}
+
+		$this->assertSame( array( 'result' => 'failure' ), $result );
+		$this->assertSame( array( array( 'Payment is processing, please try again.', 'error' ) ), $notices );
+		$this->assertSame( array(), $state->fees );
+		$this->assertArrayNotHasKey( '_stripe_terminal_charge_id', $state->meta );
+		$this->assertSame( $held, $GLOBALS['wpdb']->rows['stwc_lock_order_42_reconcile_tip'], 'a request must not release a claim it does not hold' );
+	}
+
 	public function test_racing_tip_writer_cannot_bypass_the_shared_lock(): void {
 		list( $order, $state ) = $this->tip_order( 10.00 );
 		$intent = $this->payment_intent_with_tip( 250, 'usd', 'pi_race' );
