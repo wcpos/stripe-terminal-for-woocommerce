@@ -9,6 +9,9 @@
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Utils;
 
+use WCPOS\WooCommercePOS\StripeTerminal\OrderCompletion;
+use WCPOS\WooCommercePOS\StripeTerminal\PaymentLock;
+
 /**
  * TipReconciler class.
  */
@@ -22,8 +25,31 @@ class TipReconciler {
 	 *
 	 * @param \WC_Order $order          The WooCommerce order.
 	 * @param object    $payment_intent The server-retrieved Payment Intent.
+	 * @throws \RuntimeException When another request holds the tip claim.
 	 */
-	public static function maybe_add_tip_to_order( $order, $payment_intent ): void {
+	public static function maybe_add_tip_to_order( &$order, $payment_intent ): void {
+		if ( ( $payment_intent->amount_details->tip->amount ?? 0 ) <= 0 ) {
+			return;
+		}
+		$order_id = $order->get_id();
+		if ( ! PaymentLock::acquire( $order_id, 'reconcile_tip' ) ) {
+			throw new \RuntimeException( esc_html__( 'Payment is processing, please try again.', 'stripe-terminal-for-woocommerce' ) );
+		}
+		try {
+			$order = OrderCompletion::reload_order( $order );
+			self::add_tip_under_lock( $order, $payment_intent );
+		} finally {
+			PaymentLock::release( $order_id, 'reconcile_tip' );
+		}
+	}
+
+	/**
+	 * Reconcile only after acquiring the tip claim and reloading the order.
+	 *
+	 * @param \WC_Order $order          Fresh order.
+	 * @param object    $payment_intent Authoritative Payment Intent.
+	 */
+	private static function add_tip_under_lock( $order, $payment_intent ): void {
 		$tip = $payment_intent->amount_details->tip->amount ?? 0;
 		if ( $tip <= 0 || $payment_intent->id === $order->get_meta( '_stripe_terminal_tip_payment_intent_id' ) ) {
 			return;

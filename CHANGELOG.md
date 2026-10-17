@@ -29,6 +29,13 @@
 - Key POS PaymentIntent creation idempotently by payment attempt to prevent duplicate intents on retries.
 - Report Dashboard-configured on-reader tips to POS, which records them as a Tip order fee.
 
+## 0.0.39 - 2026-10-17
+
+### Fixed
+
+- **A payment confirmed through the manual status check keeps its tip.** When an order was recovered by checking the payment status before Stripe's webhook arrived, the tip was left off the order total and the first receipt. (#181)
+- **A checkout that finds another request already completing the same order reports it as still processing** and asks to try again, instead of answering success. (#181)
+
 ## 0.0.38 - 2026-10-15
 
 ### Changed
