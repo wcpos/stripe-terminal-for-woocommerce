@@ -828,7 +828,6 @@ class StripeTerminalService {
 	 * @return array|WP_Error The payment status information or error.
 	 */
 	private function check_payment_status_with_read_timeout( WC_Order $order ) {
-		$reconciliation_locked = false;
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
@@ -906,17 +905,12 @@ class StripeTerminalService {
 			}
 
 			if ( $latest_charge && $latest_charge->paid && 'succeeded' === $payment_intent->status ) {
-				// Share OrderCompletion's claim and lifetime; Stripe reads stay outside the lock.
-				$reconciliation_locked = PaymentLock::acquire( $order_id, 'complete_payment', 120 );
-				if ( $reconciliation_locked ) {
-					// A webhook may have reconciled the tip and completed the order during the lookup.
-					$order = OrderCompletion::reload_order( $order );
-				}
+				$order = OrderCompletion::reload_order( $order );
 			}
 
 				// If we found a fully succeeded PaymentIntent and charge but the order isn't paid yet, save metadata.
 				$metadata_saved = false;
-			if ( $reconciliation_locked && ! $order->is_paid() ) {
+			if ( $latest_charge && $latest_charge->paid && 'succeeded' === $payment_intent->status && ! $order->is_paid() ) {
 				// Reconcile the tip before the gateway completes the recovered payment.
 				$this->update_order_from_payment_intent( $order, $payment_intent );
 
@@ -988,10 +982,6 @@ class StripeTerminalService {
 			);
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
-		} finally {
-			if ( $reconciliation_locked ) {
-				PaymentLock::release( $order_id, 'complete_payment' );
-			}
 		}
 	}
 

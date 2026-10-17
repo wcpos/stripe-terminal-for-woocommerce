@@ -551,6 +551,8 @@ class API extends Abstracts\APIController {
 			return true;
 		}
 
+		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
+
 		// Save payment metadata before completing the order.
 		$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 		$order->update_meta_data( '_stripe_terminal_payment_status', 'succeeded' );
@@ -565,7 +567,6 @@ class API extends Abstracts\APIController {
 			$order->delete_meta_data( '_stripe_terminal_moto' );
 		}
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
-		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
 		$order->save();
 
 		if ( 'succeeded' === $payment_intent->status && $order->needs_payment() ) {
@@ -662,6 +663,8 @@ class API extends Abstracts\APIController {
 			return;
 		}
 
+		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
+
 		// Save payment metadata instead of completing the order immediately.
 		$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent_id );
 		$order->update_meta_data( '_stripe_terminal_charge_id', $charge->id );
@@ -677,7 +680,6 @@ class API extends Abstracts\APIController {
 			$order->delete_meta_data( '_stripe_terminal_moto' );
 		}
 		$order->update_meta_data( '_stripe_terminal_payment_method', $payment_method );
-		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
 		$order->save();
 
 		// Add detailed order note.

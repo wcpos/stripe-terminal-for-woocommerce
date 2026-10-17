@@ -16,13 +16,22 @@ require_once __DIR__ . '/../../stubs/class-wc-payment-gateway.php';
  * @covers \WCPOS\WooCommercePOS\StripeTerminal\Utils\TipReconciler
  */
 class TipReconcilerTest extends TestCase {
+	private $previous_wpdb;
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
 		Functions\when( '__' )->returnArg();
+		Functions\when( 'esc_html__' )->returnArg();
+		Functions\when( 'wp_generate_uuid4' )->alias( fn() => uniqid() );
+		Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
+		$this->previous_wpdb = $GLOBALS['wpdb'] ?? null;
+		$GLOBALS['wpdb'] = new \WCPOS\WooCommercePOS\StripeTerminal\Tests\Support\FakeWpdb();
+		Functions\when( 'wc_get_order' )->justReturn( null );
+		Functions\when( 'clean_post_cache' )->justReturn( null );
 	}
 
 	protected function tearDown(): void {
+		$GLOBALS['wpdb'] = $this->previous_wpdb;
 		\Mockery::close();
 		Monkey\tearDown();
 		parent::tearDown();
@@ -77,7 +86,10 @@ class TipReconcilerTest extends TestCase {
 		$payment_intent       = $this->payment_intent_with_tip( 150, 'usd', 'pi_duplicate' );
 
 		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
-		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
+		list( $stale, $stale_state ) = $this->tip_order( 10.00 );
+		$stale_state->fees =& $state->fees;
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+		TipReconciler::maybe_add_tip_to_order( $stale, $payment_intent );
 
 		$this->assertCount( 1, $state->fees );
 		$this->assertSame( 11.5, $state->total );
@@ -143,12 +155,7 @@ class TipReconcilerTest extends TestCase {
 		Functions\when( 'apply_filters' )->alias( fn( $hook, $value ) => $value );
 		Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
 		Functions\when( 'wp_generate_uuid4' )->justReturn( 'uuid-tip-recovery' );
-		Functions\when( 'wc_get_order' )->alias( function () use ( $order, $state ) {
-			if ( $state->paid ) {
-				$this->assertArrayHasKey( 'stwc_lock_order_42_complete_payment', $GLOBALS['wpdb']->rows );
-			}
-			return $order;
-		} );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
 		$gateways = \Mockery::mock();
 		$gateways->shouldReceive( 'payment_gateways' )->andReturn( array() );
 		$woocommerce = \Mockery::mock();
@@ -208,6 +215,7 @@ class TipReconcilerTest extends TestCase {
 		$GLOBALS['wpdb'] = new \WCPOS\WooCommercePOS\StripeTerminal\Tests\Support\FakeWpdb();
 		try {
 			$result = $service->check_payment_status_from_stripe( $checked_order );
+			$this->assertNotInstanceOf( \WP_Error::class, $result, is_wp_error( $result ) ? $result->get_error_message() : '' );
 			$this->assertCount( 1, $state->fees );
 			$this->assertSame( ! $webhook_race, $result['metadata_saved'] );
 			// Complete through the same boundary used by Gateway::process_payment().
@@ -222,6 +230,22 @@ class TipReconcilerTest extends TestCase {
 			$GLOBALS['wpdb'] = $previous_wpdb;
 			\Stripe\ApiRequestor::setHttpClient( \Stripe\HttpClient\CurlClient::instance() );
 		}
+	}
+
+	public function test_racing_tip_writer_cannot_bypass_the_shared_lock(): void {
+		list( $order, $state ) = $this->tip_order( 10.00 );
+		$intent = $this->payment_intent_with_tip( 250, 'usd', 'pi_race' );
+		$state->during_tip_read = function () use ( $order, $intent ) {
+			try {
+				TipReconciler::maybe_add_tip_to_order( $order, $intent );
+			} catch ( \RuntimeException $e ) {
+				$this->assertStringContainsString( 'try again', $e->getMessage() );
+			}
+		};
+		TipReconciler::maybe_add_tip_to_order( $order, $intent );
+		$this->assertCount( 1, $state->fees );
+		$this->assertSame( 12.5, $state->total );
+		$this->assertSame( array(), $GLOBALS['wpdb']->rows );
 	}
 
 	private function payment_intent_with_tip( int $tip, string $currency, string $id ) {
@@ -242,10 +266,19 @@ class TipReconcilerTest extends TestCase {
 			'save_count' => 0,
 		);
 		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'read_meta_data' )->with( true );
 		$order->shouldReceive( 'get_meta' )->andReturnUsing( function ( $key ) use ( $state ) {
-			return $state->meta[ $key ] ?? '';
+			$value = $state->meta[ $key ] ?? '';
+			if ( '_stripe_terminal_tip_payment_intent_id' === $key && isset( $state->during_tip_read ) ) {
+				$callback = $state->during_tip_read;
+				unset( $state->during_tip_read );
+				$callback();
+			}
+			return $value;
 		} );
 		$order->shouldReceive( 'add_item' )->andReturnUsing( function ( $fee ) use ( $state ) {
+			$this->assertArrayNotHasKey( 'stwc_lock_order_42_complete_payment', $GLOBALS['wpdb']->rows );
 			$state->fees[] = $fee;
 		} );
 		$order->shouldReceive( 'update_meta_data' )->andReturnUsing( function ( $key, $value ) use ( $state ) {

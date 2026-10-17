@@ -457,12 +457,19 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertFalse( $this->claim_is_held() );
 		}
 
-		public function test_held_claim_skips_completion_and_still_redirects_order_pay(): void {
+		/**
+		 * @testWith [false]
+		 *           [true]
+		 */
+		public function test_busy_completion_returns_failure_without_redirect( bool $recover ): void {
+			if ( $recover ) {
+				unset( $this->row['meta']['_stripe_terminal_charge_id'] );
+			}
 			$held                                 = json_encode( array( 'token' => 'other-request', 'expires_at' => time() + 60 ) );
 			$this->wpdb->rows[ self::CLAIM_KEY ] = $held;
 			$before                               = $this->row;
 
-			$result = $this->run_order_pay();
+			$result = $this->run_order_pay( $recover ? $this->succeeded_stripe_service() : null );
 			$this->run_webhook();
 
 			$this->assertSame( 0, $this->payment_complete_calls );
@@ -470,8 +477,8 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$this->assertSame( 'pending', $this->row['status'] );
 			$this->assertSame( $before['transaction_id'], $this->row['transaction_id'] );
 			$this->assertSame( $held, $this->wpdb->rows[ self::CLAIM_KEY ], 'a request must not release a claim it does not hold' );
-			$this->assertSame( 'success', $result['result'] );
-			$this->assertSame( 'https://example.test/checkout/order-received/42/?key=wc_order_key', $result['redirect'] );
+			$this->assertSame( 'failure', $result['result'] );
+			$this->assertArrayNotHasKey( 'redirect', $result );
 		}
 
 		public function test_expired_claim_is_taken_over(): void {
