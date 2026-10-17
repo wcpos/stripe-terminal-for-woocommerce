@@ -640,7 +640,7 @@ class StripeTerminalService {
 	 *
 	 * @return void
 	 */
-	public function update_order_from_payment_intent( WC_Order $order, \Stripe\PaymentIntent $payment_intent ): void {
+	public function update_order_from_payment_intent( WC_Order &$order, \Stripe\PaymentIntent $payment_intent ): void {
 		// Reconcile an on-reader tip before the order is completed, even when
 		// the charge is not expanded on the intent.
 		TipReconciler::maybe_add_tip_to_order( $order, $payment_intent );
@@ -904,9 +904,16 @@ class StripeTerminalService {
 				$latest_charge = $charges->data[0];
 			}
 
+			if ( $latest_charge && $latest_charge->paid && 'succeeded' === $payment_intent->status ) {
+				$order = OrderCompletion::reload_order( $order );
+			}
+
 				// If we found a fully succeeded PaymentIntent and charge but the order isn't paid yet, save metadata.
 				$metadata_saved = false;
 			if ( $latest_charge && $latest_charge->paid && 'succeeded' === $payment_intent->status && ! $order->is_paid() ) {
+				// Reconcile the tip before the gateway completes the recovered payment.
+				$this->update_order_from_payment_intent( $order, $payment_intent );
+
 				// Save payment metadata instead of completing the order.
 				$order->update_meta_data( '_stripe_terminal_payment_intent_id', $payment_intent->id );
 				$order->update_meta_data( '_stripe_terminal_charge_id', $latest_charge->id );
