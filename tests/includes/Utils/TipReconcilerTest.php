@@ -131,6 +131,32 @@ class TipReconcilerTest extends TestCase {
 		$this->assertSame( 12.5, $state->total );
 	}
 
+	public function test_service_choke_point_hands_the_reloaded_order_back_to_its_caller(): void {
+		list( $order, $stale_state ) = $this->tip_order( 10.00 );
+		list( $fresh, $fresh_state ) = $this->tip_order( 10.00 );
+		$fresh->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		Functions\when( 'wc_get_order' )->justReturn( $fresh );
+		$payment_intent = \Stripe\PaymentIntent::constructFrom(
+			array(
+				'id'             => 'pi_reloaded',
+				'currency'       => 'usd',
+				'status'         => 'succeeded',
+				'amount_details' => array( 'tip' => array( 'amount' => 250 ) ),
+				'charges'        => array( 'data' => array() ),
+			)
+		);
+		$service = ( new \ReflectionClass( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class ) )->newInstanceWithoutConstructor();
+
+		$service->update_order_from_payment_intent( $order, $payment_intent );
+
+		// The caller keeps reading status and paid state from $order after this call,
+		// so it must now hold the instance the tip was written to, not the stale one.
+		$this->assertSame( $fresh, $order );
+		$this->assertCount( 1, $fresh_state->fees );
+		$this->assertCount( 0, $stale_state->fees );
+	}
+
 	/**
 	 * @testWith [false]
 	 *           [true]
