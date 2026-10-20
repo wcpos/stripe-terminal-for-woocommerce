@@ -264,7 +264,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				array(
 					'is_checkout'              => false,
 					'is_checkout_pay_page'     => true,
-					'woocommerce_pos_request'  => true,
+					'wcpos_request'            => true,
 					'wp_enqueue_style'         => true,
 					'wp_enqueue_script'        => true,
 					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
@@ -322,7 +322,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				array(
 					'is_checkout'              => false,
 					'is_checkout_pay_page'     => true,
-					'woocommerce_pos_request'  => true,
+					'wcpos_request'            => true,
 					'wp_enqueue_style'         => true,
 					'wp_enqueue_script'        => true,
 					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
@@ -369,7 +369,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 				array(
 					'is_checkout'              => false,
 					'is_checkout_pay_page'     => true,
-					'woocommerce_pos_request'  => false,
+					'wcpos_request'            => false,
 					'wp_enqueue_style'         => true,
 					'wp_enqueue_script'        => true,
 					'admin_url'                => 'https://example.test/wp-admin/admin-ajax.php',
@@ -412,7 +412,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			Functions\stubs(
 				array(
-					'woocommerce_pos_request' => false,
+					'wcpos_request' => false,
 				)
 			);
 
@@ -1099,7 +1099,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 
 			Functions\stubs(
 				array(
-					'woocommerce_pos_request' => $is_pos_request,
+					'wcpos_request'           => $is_pos_request,
 					'wp_unslash'              => function ( $value ) {
 						return $value;
 					},

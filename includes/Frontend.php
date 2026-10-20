@@ -25,8 +25,8 @@ class Frontend {
 	public function enqueue_assets(): void {
 		// Only enqueue on the POS checkout 'order-pay' endpoint.
 		if (
-			! \function_exists( 'woocommerce_pos_request' )
-			 || ! woocommerce_pos_request()
+			! \function_exists( 'wcpos_request' )
+			 || ! wcpos_request()
 			 || ! get_query_var( 'order-pay' )
 		) {
 			return;
