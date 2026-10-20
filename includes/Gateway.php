@@ -187,8 +187,8 @@ class Gateway extends WC_Payment_Gateway {
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- This read-only recovery path authenticates with WooCommerce's order key below.
 		$is_pay_submission = isset( $_POST['woocommerce_pay'] );
 		if (
-			! \function_exists( 'woocommerce_pos_request' )
-			|| ! woocommerce_pos_request()
+			! \function_exists( 'wcpos_request' )
+			|| ! wcpos_request()
 			|| ! $is_pay_submission
 			|| ! isset( $wp->query_vars['order-pay'] )
 		) {
@@ -810,7 +810,7 @@ class Gateway extends WC_Payment_Gateway {
 	 * @return string
 	 */
 	private function create_ajax_nonce( ?WC_Abstract_Order $order = null ): string {
-		if ( ! \function_exists( 'woocommerce_pos_request' ) || ! woocommerce_pos_request() ) {
+		if ( ! \function_exists( 'wcpos_request' ) || ! wcpos_request() ) {
 			return wp_create_nonce( 'stripe_terminal_nonce' );
 		}
 
@@ -955,7 +955,7 @@ class Gateway extends WC_Payment_Gateway {
 		global $wp;
 
 		// Check whether this is a POS request.
-		if ( ! \function_exists( 'woocommerce_pos_request' ) || ! woocommerce_pos_request() || ! isset( $wp->query_vars['order-pay'] ) ) {
+		if ( ! \function_exists( 'wcpos_request' ) || ! wcpos_request() || ! isset( $wp->query_vars['order-pay'] ) ) {
 			return $order_received_url;
 		}
 
