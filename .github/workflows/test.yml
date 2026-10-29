@@ -187,7 +187,9 @@ jobs:
 
   e2e-tests:
     name: E2E Tests
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest became 26.04 on 2026-10-29 and Playwright has no
+    # chromium build for it ("does not support chromium on ubuntu26.04-x64").
+    runs-on: ubuntu-24.04
     needs: php-tests
 
     steps:
