@@ -75,7 +75,16 @@ jobs:
         if: steps.check_version.outputs.release == 'true'
         run: |
           rm -rf packages # Remove the packages folder
-          zip -r stripe-terminal-for-woocommerce.zip . -x "*.git*"
+          # WordPress 7.1.4+ unpacks packages into a randomly suffixed folder and installs a flat zip
+          # there, so the zip must hold the installed folder (catalog slug) as its only top-level entry.
+          mkdir -p "$RUNNER_TEMP/stage/stripe-terminal-for-woocommerce"
+          rsync -a --exclude='.git*' ./ "$RUNNER_TEMP/stage/stripe-terminal-for-woocommerce/"
+          (cd "$RUNNER_TEMP/stage" && zip -r "$GITHUB_WORKSPACE/stripe-terminal-for-woocommerce.zip" "stripe-terminal-for-woocommerce" -x "*.git*")
+          TOP_LEVEL=$(unzip -Z1 stripe-terminal-for-woocommerce.zip | cut -d/ -f1 | sort -u)
+          if [ "$TOP_LEVEL" != "stripe-terminal-for-woocommerce" ]; then
+            echo "::error::stripe-terminal-for-woocommerce.zip must contain only stripe-terminal-for-woocommerce/ at the top level, found: $TOP_LEVEL"
+            exit 1
+          fi
           gh release upload v${{ env.VERSION }} stripe-terminal-for-woocommerce.zip --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
