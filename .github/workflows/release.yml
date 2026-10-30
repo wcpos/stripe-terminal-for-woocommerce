@@ -32,10 +32,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          VERSION=$(grep -oP "Version:\s*\K[0-9]+\.[0-9]+\.[0-9]+(-beta[0-9]+)?" stripe-terminal-for-woocommerce.php)
+          VERSION=$(grep -oP "Version:\s*\K\S+" stripe-terminal-for-woocommerce.php)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta[0-9]+)?$ ]]; then
+            echo "::error::Version header '$VERSION' is neither X.Y.Z nor X.Y.Z-betaN"
+            exit 1
+          fi
           if [[ "$VERSION" == *-beta* ]]; then
-            if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
-              echo "::error::$VERSION is a beta; a beta is cut only by dispatching this workflow, never by a push to main"
+            if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$GITHUB_REF" != "refs/heads/next" ]; then
+              echo "::error::$VERSION is a beta; a beta is cut only by dispatching this workflow on next, never by a push to main or from another ref"
               exit 1
             fi
             PRERELEASE=true
@@ -96,7 +100,8 @@ jobs:
           if [ "$PRERELEASE" = "true" ]; then
             PRERELEASE_ARGS=(--prerelease)
           fi
-          gh release create "v$VERSION" --title "Release v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" "${PRERELEASE_ARGS[@]}"
+          # Without --target a missing tag is created from the default branch, not the commit built here.
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Release v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" "${PRERELEASE_ARGS[@]}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
