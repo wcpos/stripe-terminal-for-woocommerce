@@ -34,7 +34,7 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 
 	public function setUp(): void {
 		$this->fixture = new Stripe_Conformance_Fixture();
-		add_filter( 'woocommerce_pos_payment_gateways_settings', array( $this, 'enable_gateway' ) );
+		add_filter( 'wcpos_payment_gateways_settings', array( $this, 'enable_gateway' ) );
 		parent::setUp();
 		$this->old_logger = wc_get_logger();
 		$this->logger     = new \WC_Logger( array( $this->getMockForAbstractClass( \WC_Log_Handler::class ) ), 'debug' );
@@ -51,7 +51,7 @@ class Test_Stripe_Refund_Sweep extends WCPOS_REST_Unit_Test_Case {
 			$this->logger = $this->old_logger;
 			wc_get_logger();
 			remove_filter( 'woocommerce_logging_class', array( $this, 'logging_class' ) );
-			remove_filter( 'woocommerce_pos_payment_gateways_settings', array( $this, 'enable_gateway' ) );
+			remove_filter( 'wcpos_payment_gateways_settings', array( $this, 'enable_gateway' ) );
 			parent::tearDown();
 		}
 	}
