@@ -237,12 +237,12 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$key->setAccessible( true );
 			$key->setValue( $gateway, 'sk_test_fake' );
 			$gateway->options['enabled'] = 'yes';
-			Functions\when( 'woocommerce_pos_request' )->justReturn( false );
+			Functions\when( 'wcpos_request' )->justReturn( false );
 			Functions\when( 'is_checkout_pay_page' )->justReturn( false );
 			$this->assertFalse( $gateway->is_available() );
 
 			$gateway->options['enabled'] = 'no';
-			Functions\when( 'woocommerce_pos_request' )->justReturn( true );
+			Functions\when( 'wcpos_request' )->justReturn( true );
 			$this->assertTrue( $gateway->is_available() );
 			$key->setValue( $gateway, '' );
 			$this->assertFalse( $gateway->is_available() );
@@ -254,7 +254,7 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			$key = new \ReflectionProperty( Gateway::class, 'api_key' );
 			$key->setAccessible( true );
 			$key->setValue( $gateway, 'sk_test_fake' );
-			Functions\when( 'woocommerce_pos_request' )->justReturn( false );
+			Functions\when( 'wcpos_request' )->justReturn( false );
 			Functions\when( 'is_checkout_pay_page' )->justReturn( true );
 			Functions\expect( 'current_user_can' )->twice()->with( 'access_woocommerce_pos' )->andReturn( false, true );
 			$this->assertFalse( $gateway->is_available() );
