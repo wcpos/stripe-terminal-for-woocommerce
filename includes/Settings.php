@@ -14,10 +14,25 @@ class Settings {
 	/** Stable gateway ID used by the Pro provider registry. */
 	public const GATEWAY_ID = 'stripe_terminal_for_woocommerce';
 
-	/** Use device mode for new setups, retaining existing smart-reader defaults. */
-	public static function get_wcpos_connection(): string {
+	/** Allowed connections in server/device order, retaining saved selections. */
+	public static function get_wcpos_connections(): array {
 		$settings = self::get_gateway_settings();
-		return (string) ( $settings['wcpos_connection'] ?? ( ! empty( $settings['default_reader'] ) ? 'server' : 'device' ) );
+		if ( array_key_exists( 'wcpos_connection_server', $settings ) || array_key_exists( 'wcpos_connection_device', $settings ) ) {
+			$connections = array();
+			foreach ( array( 'server', 'device' ) as $connection ) {
+				if ( 'yes' === ( $settings[ 'wcpos_connection_' . $connection ] ?? 'no' ) ) {
+					$connections[] = $connection;
+				}
+			}
+			return $connections;
+		}
+		if ( array_key_exists( 'wcpos_connection', $settings ) ) {
+			return in_array( $settings['wcpos_connection'], array( 'server', 'device' ), true ) ? array( $settings['wcpos_connection'] ) : array();
+		}
+		if ( isset( $settings['default_reader'] ) && is_string( $settings['default_reader'] ) && '' !== $settings['default_reader'] ) {
+			return array( 'server' );
+		}
+		return array( 'server', 'device' );
 	}
 
 	/**

@@ -32,9 +32,12 @@ final class Registration {
 			return false;
 		}
 		if ( ! self::$registered ) {
-			wcpos_pro_register_server_provider( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
+			$connections = Settings::get_wcpos_connections();
+			if ( in_array( 'server', $connections, true ) ) {
+				wcpos_pro_register_server_provider( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
+			}
 			Refund_Reask::register();
-			if ( 'device' === Settings::get_wcpos_connection() && function_exists( 'wcpos_pro_register_device_provider' ) ) {
+			if ( in_array( 'device', $connections, true ) && function_exists( 'wcpos_pro_register_device_provider' ) ) {
 				wcpos_pro_register_device_provider( Settings::GATEWAY_ID, Stripe_Device_Provider::class );
 			}
 			self::$registered = true;
