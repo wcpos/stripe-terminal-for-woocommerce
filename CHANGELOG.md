@@ -4,6 +4,7 @@
 
 ### Changed
 
+- A store can now run smart readers and the app's Bluetooth readers and Tap to Pay at once, with the matching WooCommerce POS and Pro 2.0 release. The POS connection select on the gateway page is now two checkboxes, and each till pays with the reader it selects in the app. Saved settings keep their meaning. (wcpos/roadmap#523)
 - A Bluetooth or Tap to Pay payment taken offline that Stripe's webhook captured before the till's own capture now has its PaymentIntent and its test/live mode on the ledger row: the webhook writes them, and the free plugin 2.0 merges them into the row instead of replacing the till's own references. Such a payment can be refunded from the POS where before it reported "No Stripe payment found for refund". (wcpos/roadmap#426)
 - A POS payment whose create Stripe did not answer (a dropped connection or timeout) now stays pending and resumes on the same PaymentIntent when the till retries or the sweeper runs; before, the leg was dropped while the intent could already be on the reader.
 - A decline Stripe reports by webhook fails the POS leg the way polling does, after a fresh read of the intent: a retry already on the reader is left to polling, a paid intent reports its money, and a confirmed decline is retired so nothing can charge it again. A stale decline arriving after the payment was captured reports the capture; a provider record that contradicts captured money is refused and logged instead of ignored.
