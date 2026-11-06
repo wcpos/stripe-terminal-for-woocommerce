@@ -73,7 +73,7 @@ class DeviceSettingsTest extends ServerTestCase {
 		$this->assertTrue( Registration::register() );
 		$this->assertTrue( Registration::register() );
 		$this->assertSame(
-			in_array( 'device', $expected, true ) ? array( array( Settings::GATEWAY_ID, Stripe_Device_Provider::class ) ) : array(),
+			array( array( Settings::GATEWAY_ID, Stripe_Device_Provider::class ) ),
 			$GLOBALS['stwc_device_provider_registrations']
 		);
 	}
