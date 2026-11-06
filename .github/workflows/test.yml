@@ -179,11 +179,11 @@ jobs:
           repositories: woocommerce-pos-pro
           permission-contents: read
 
-      - name: Checkout Pro next as sibling
+      - name: Checkout Pro main as sibling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: wcpos/woocommerce-pos-pro
-          ref: next
+          ref: main
           path: woocommerce-pos-pro
           token: ${{ steps.pro-token.outputs.token }}
           persist-credentials: false
@@ -282,11 +282,11 @@ jobs:
           repositories: woocommerce-pos-pro
           permission-contents: read
 
-      - name: Checkout Pro next into the E2E site
+      - name: Checkout Pro main into the E2E site
         uses: actions/checkout@v7
         with:
           repository: wcpos/woocommerce-pos-pro
-          ref: next
+          ref: main
           path: e2e/pro/woocommerce-pos-pro
           token: ${{ steps.pro-token.outputs.token }}
           persist-credentials: false
