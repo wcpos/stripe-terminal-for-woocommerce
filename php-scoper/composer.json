@@ -1,0 +1,13 @@
+{
+  "name": "wcpos/stripe-terminal-for-woocommerce-scoper",
+  "description": "Build-only tooling: prefixes the Stripe PHP SDK for the release zip. See docs/dependency-scoping.md.",
+  "type": "project",
+  "license": "GPL-3.0+",
+  "require": {
+    "php": ">=8.2",
+    "humbug/php-scoper": "0.18.20"
+  },
+  "config": {
+    "sort-packages": true
+  }
+}

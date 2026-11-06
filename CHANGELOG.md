@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The release zip ships its own prefixed copy of the Stripe PHP SDK, so another plugin that bundles a different `stripe/stripe-php` no longer causes a fatal error or mixed Stripe classes. (#65)
 - A store can now run smart readers and the app's Bluetooth readers and Tap to Pay at once, with the matching WooCommerce POS and Pro 2.0 release. The POS connection select on the gateway page is now two checkboxes, and each till pays with the reader it selects in the app. Saved settings keep their meaning. (wcpos/roadmap#523)
 - A Bluetooth or Tap to Pay payment taken offline that Stripe's webhook captured before the till's own capture now has its PaymentIntent and its test/live mode on the ledger row: the webhook writes them, and the free plugin 2.0 merges them into the row instead of replacing the till's own references. Such a payment can be refunded from the POS where before it reported "No Stripe payment found for refund". (wcpos/roadmap#426)
 - A POS payment whose create Stripe did not answer (a dropped connection or timeout) now stays pending and resumes on the same PaymentIntent when the till retries or the sweeper runs; before, the leg was dropped while the intent could already be on the reader.

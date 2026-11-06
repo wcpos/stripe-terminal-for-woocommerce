@@ -27,6 +27,11 @@ if ( ! \defined( 'ABSPATH' ) ) {
 \define( 'STWC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 \define( 'STWC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
+// The release zip ships the Stripe SDK prefixed; see docs/dependency-scoping.md.
+if ( file_exists( STWC_PLUGIN_DIR . 'vendor_prefixed/autoload.php' ) ) {
+	require_once STWC_PLUGIN_DIR . 'vendor_prefixed/autoload.php';
+}
+
 // Include Composer's autoloader.
 if ( file_exists( STWC_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
 	require_once STWC_PLUGIN_DIR . 'vendor/autoload.php';
