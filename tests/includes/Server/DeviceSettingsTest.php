@@ -7,6 +7,7 @@
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Tests\Server;
 
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 use WCPOS\WooCommercePOS\StripeTerminal\Gateway;
 use WCPOS\WooCommercePOS\StripeTerminal\Settings;
@@ -59,11 +60,7 @@ class DeviceSettingsTest extends ServerTestCase {
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = $settings;
 		Functions\when( 'wcpos_pro_requires' )->justReturn( true );
 		Functions\expect( 'update_option' )->never();
-		if ( in_array( 'server', $expected, true ) ) {
-			Functions\expect( 'wcpos_pro_register_server_provider' )->once()->with( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
-		} else {
-			Functions\expect( 'wcpos_pro_register_server_provider' )->never();
-		}
+		Functions\expect( 'wcpos_pro_register_server_provider' )->once()->with( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
 		$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 		$gateway->init_form_fields();
 		foreach ( array( 'server', 'device' ) as $connection ) {
@@ -81,6 +78,49 @@ class DeviceSettingsTest extends ServerTestCase {
 		);
 	}
 
+	/** Allowed capture modes restrict till payments, not other gateways or server registration. */
+	public function test_capture_modes_follow_allowed_connections(): void {
+		Functions\when( 'wcpos_pro_requires' )->justReturn( true );
+		Functions\expect( 'wcpos_pro_register_server_provider' )->once()->with( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
+		$callback = null;
+		Filters\expectAdded( 'wcpos_payment_method_capture_modes' )->once()->with(
+			\Mockery::on(
+				function ( $filter ) use ( &$callback ) {
+					$callback = $filter;
+					return is_callable( $filter );
+				}
+			),
+			20,
+			2
+		);
+		$this->assertTrue( Registration::register() );
+		$this->assertIsCallable( $callback );
+		Functions\when( 'apply_filters' )->alias(
+			function ( $hook, $mode_keys, $gateway ) use ( $callback ) {
+				return 'wcpos_payment_method_capture_modes' === $hook ? $callback( $mode_keys, $gateway ) : $mode_keys;
+			}
+		);
+		$gateway = new \WC_Payment_Gateway();
+		$mode_keys = array( 'server', 'device:stripe' );
+		foreach ( array(
+			array( 'yes', 'no', array( 'server' ) ),
+			array( 'no', 'yes', array( 'device:stripe' ) ),
+			array( 'no', 'no', array() ),
+			array( 'yes', 'yes', array( 'server', 'device:stripe' ) ),
+		) as $case ) {
+			$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = array(
+				'wcpos_connection_server' => $case[0],
+				'wcpos_connection_device' => $case[1],
+			);
+			$gateway->id = Settings::GATEWAY_ID;
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Exercise Free's descriptor filter.
+			$this->assertSame( $case[2], apply_filters( 'wcpos_payment_method_capture_modes', $mode_keys, $gateway ) );
+			$gateway->id = 'other_gateway';
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Exercise Free's descriptor filter.
+			$this->assertSame( $mode_keys, apply_filters( 'wcpos_payment_method_capture_modes', $mode_keys, $gateway ) );
+		}
+	}
+
 	/** Connection defaults, legacy selections and explicit allowed sets. */
 	public function connections(): array {
 		return array(
@@ -95,6 +135,7 @@ class DeviceSettingsTest extends ServerTestCase {
 				array( 'device' ),
 			),
 			array( array( 'wcpos_connection' => 'server' ), array( 'server' ) ),
+			array( array( 'wcpos_connection' => 'unexpected' ), array( 'server' ) ),
 			array(
 				array(
 					'wcpos_connection_server' => 'yes',

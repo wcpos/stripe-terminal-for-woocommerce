@@ -19,15 +19,19 @@ class Settings {
 		$settings = self::get_gateway_settings();
 		if ( array_key_exists( 'wcpos_connection_server', $settings ) || array_key_exists( 'wcpos_connection_device', $settings ) ) {
 			$connections = array();
-			foreach ( array( 'server', 'device' ) as $connection ) {
-				if ( 'yes' === ( $settings[ 'wcpos_connection_' . $connection ] ?? 'no' ) ) {
+			foreach ( array(
+				'server' => 'wcpos_connection_server',
+				'device' => 'wcpos_connection_device',
+			) as $connection => $field ) {
+				if ( 'yes' === ( $settings[ $field ] ?? 'no' ) ) {
 					$connections[] = $connection;
 				}
 			}
 			return $connections;
 		}
 		if ( array_key_exists( 'wcpos_connection', $settings ) ) {
-			return in_array( $settings['wcpos_connection'], array( 'server', 'device' ), true ) ? array( $settings['wcpos_connection'] ) : array();
+			// Anything but a saved 'device' meant smart readers before the checkboxes existed.
+			return 'device' === $settings['wcpos_connection'] ? array( 'device' ) : array( 'server' );
 		}
 		if ( isset( $settings['default_reader'] ) && is_string( $settings['default_reader'] ) && '' !== $settings['default_reader'] ) {
 			return array( 'server' );

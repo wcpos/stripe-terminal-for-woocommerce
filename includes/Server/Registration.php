@@ -33,13 +33,32 @@ final class Registration {
 		}
 		if ( ! self::$registered ) {
 			$connections = Settings::get_wcpos_connections();
-			if ( in_array( 'server', $connections, true ) ) {
-				wcpos_pro_register_server_provider( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
-			}
+			wcpos_pro_register_server_provider( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
 			Refund_Reask::register();
 			if ( in_array( 'device', $connections, true ) && function_exists( 'wcpos_pro_register_device_provider' ) ) {
 				wcpos_pro_register_device_provider( Settings::GATEWAY_ID, Stripe_Device_Provider::class );
 			}
+			// Adapters say what Stripe OFFERS and stay registered for webhooks, refunds and the legacy panel.
+			// This filter says what the store ALLOWS its tills to pay with.
+			add_filter(
+				'wcpos_payment_method_capture_modes',
+				static function ( array $mode_keys, \WC_Payment_Gateway $gateway ): array {
+					if ( Settings::GATEWAY_ID !== $gateway->id ) {
+						return $mode_keys;
+					}
+					$connections = Settings::get_wcpos_connections();
+					return array_values(
+						array_filter(
+							$mode_keys,
+							static function ( string $mode_key ) use ( $connections ): bool {
+								return in_array( explode( ':', $mode_key, 2 )[0], $connections, true );
+							}
+						)
+					);
+				},
+				20,
+				2
+			);
 			self::$registered = true;
 		}
 		return true;
