@@ -100,6 +100,7 @@ class Gateway extends WC_Payment_Gateway {
 	 */
 	public function init_form_fields(): void {
 		$terminal_options = $this->fetch_terminal_options();
+		$connections = Settings::get_wcpos_connections();
 		$this->form_fields = array(
 			'title' => array(
 				'title'       => __( 'Title', 'stripe-terminal-for-woocommerce' ),
@@ -158,15 +159,18 @@ class Gateway extends WC_Payment_Gateway {
 				'desc_tip'    => true,
 				'default'     => 'no',
 			),
-			'wcpos_connection' => array(
-				'title'       => __( 'POS connection', 'stripe-terminal-for-woocommerce' ),
-				'type'        => 'select',
-				'options'     => array(
-					'device' => __( 'Bluetooth reader or Tap to Pay (the POS app drives the reader)', 'stripe-terminal-for-woocommerce' ),
-					'server' => __( 'Smart reader (the store drives the reader)', 'stripe-terminal-for-woocommerce' ),
-				),
-				'default'     => Settings::get_wcpos_connection(),
-				'description' => __( 'Choose whether the POS app or the store controls the reader.', 'stripe-terminal-for-woocommerce' ),
+			'wcpos_connection_server' => array(
+				'title'       => __( 'POS connections', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'label'       => __( 'Smart readers (the store drives the reader over the network)', 'stripe-terminal-for-woocommerce' ),
+				'default'     => in_array( 'server', $connections, true ) ? 'yes' : 'no',
+			),
+			'wcpos_connection_device' => array(
+				'title'       => '',
+				'type'        => 'checkbox',
+				'label'       => __( 'Bluetooth readers and Tap to Pay (the POS app drives the reader)', 'stripe-terminal-for-woocommerce' ),
+				'default'     => in_array( 'device', $connections, true ) ? 'yes' : 'no',
+				'description' => __( 'Tick every kind of reader this store allows. Each till pays with the reader it picks in the app.', 'stripe-terminal-for-woocommerce' ),
 			),
 			'wcpos_location_test' => array(
 				'title'       => __( 'Terminal location (testing)', 'stripe-terminal-for-woocommerce' ),

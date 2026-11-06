@@ -14,10 +14,29 @@ class Settings {
 	/** Stable gateway ID used by the Pro provider registry. */
 	public const GATEWAY_ID = 'stripe_terminal_for_woocommerce';
 
-	/** Use device mode for new setups, retaining existing smart-reader defaults. */
-	public static function get_wcpos_connection(): string {
+	/** Allowed connections in server/device order, retaining saved selections. */
+	public static function get_wcpos_connections(): array {
 		$settings = self::get_gateway_settings();
-		return (string) ( $settings['wcpos_connection'] ?? ( ! empty( $settings['default_reader'] ) ? 'server' : 'device' ) );
+		if ( array_key_exists( 'wcpos_connection_server', $settings ) || array_key_exists( 'wcpos_connection_device', $settings ) ) {
+			$connections = array();
+			foreach ( array(
+				'server' => 'wcpos_connection_server',
+				'device' => 'wcpos_connection_device',
+			) as $connection => $field ) {
+				if ( 'yes' === ( $settings[ $field ] ?? 'no' ) ) {
+					$connections[] = $connection;
+				}
+			}
+			return $connections;
+		}
+		if ( array_key_exists( 'wcpos_connection', $settings ) ) {
+			// Anything but a saved 'device' meant smart readers before the checkboxes existed.
+			return 'device' === $settings['wcpos_connection'] ? array( 'device' ) : array( 'server' );
+		}
+		if ( isset( $settings['default_reader'] ) && is_string( $settings['default_reader'] ) && '' !== $settings['default_reader'] ) {
+			return array( 'server' );
+		}
+		return array( 'server', 'device' );
 	}
 
 	/**

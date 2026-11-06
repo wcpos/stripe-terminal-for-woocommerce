@@ -7,6 +7,7 @@
 
 namespace WCPOS\WooCommercePOS\StripeTerminal\Tests\Server;
 
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 use WCPOS\WooCommercePOS\StripeTerminal\Gateway;
 use WCPOS\WooCommercePOS\StripeTerminal\Settings;
@@ -52,41 +53,121 @@ class DeviceSettingsTest extends ServerTestCase {
 	 * Saved selections win; existing default terminals keep the server path.
 	 *
 	 * @dataProvider connections
-	 * @param array  $settings Saved gateway settings.
-	 * @param string $expected Selected mode.
+	 * @param array $settings Saved gateway settings.
+	 * @param array $expected Allowed connections.
 	 */
-	public function test_connection_default_and_registration( array $settings, string $expected ): void {
+	public function test_connection_default_and_registration( array $settings, array $expected ): void {
 		$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = $settings;
 		Functions\when( 'wcpos_pro_requires' )->justReturn( true );
+		Functions\expect( 'update_option' )->never();
 		Functions\expect( 'wcpos_pro_register_server_provider' )->once()->with( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
-		$this->assertSame( $expected, Settings::get_wcpos_connection() );
 		$gateway = ( new \ReflectionClass( Gateway::class ) )->newInstanceWithoutConstructor();
 		$gateway->init_form_fields();
-		$this->assertSame( $expected, $gateway->form_fields['wcpos_connection']['default'] );
-		$this->assertSame( 'select', $gateway->form_fields['wcpos_connection']['type'] );
-		$this->assertSame( array( 'device', 'server' ), array_keys( $gateway->form_fields['wcpos_connection']['options'] ) );
+		foreach ( array( 'server', 'device' ) as $connection ) {
+			$field = 'wcpos_connection_' . $connection;
+			$this->assertArrayHasKey( $field, $gateway->form_fields );
+			$this->assertSame( 'checkbox', $gateway->form_fields[ $field ]['type'] );
+			$this->assertSame( in_array( $connection, $expected, true ) ? 'yes' : 'no', $gateway->form_fields[ $field ]['default'] );
+		}
+		$this->assertSame( $expected, Settings::get_wcpos_connections() );
 		$this->assertTrue( Registration::register() );
 		$this->assertTrue( Registration::register() );
 		$this->assertSame(
-			'device' === $expected ? array( array( Settings::GATEWAY_ID, Stripe_Device_Provider::class ) ) : array(),
+			in_array( 'device', $expected, true ) ? array( array( Settings::GATEWAY_ID, Stripe_Device_Provider::class ) ) : array(),
 			$GLOBALS['stwc_device_provider_registrations']
 		);
 	}
 
-	/** Connection default and explicit selection cases. */
+	/** Allowed capture modes restrict till payments, not other gateways or server registration. */
+	public function test_capture_modes_follow_allowed_connections(): void {
+		Functions\when( 'wcpos_pro_requires' )->justReturn( true );
+		Functions\expect( 'wcpos_pro_register_server_provider' )->once()->with( Settings::GATEWAY_ID, Stripe_Server_Provider::class );
+		$callback = null;
+		Filters\expectAdded( 'wcpos_payment_method_capture_modes' )->once()->with(
+			\Mockery::on(
+				function ( $filter ) use ( &$callback ) {
+					$callback = $filter;
+					return is_callable( $filter );
+				}
+			),
+			20,
+			2
+		);
+		$this->assertTrue( Registration::register() );
+		$this->assertIsCallable( $callback );
+		Functions\when( 'apply_filters' )->alias(
+			function ( $hook, $mode_keys, $gateway ) use ( $callback ) {
+				return 'wcpos_payment_method_capture_modes' === $hook ? $callback( $mode_keys, $gateway ) : $mode_keys;
+			}
+		);
+		$gateway = new \WC_Payment_Gateway();
+		$mode_keys = array( 'server', 'device:stripe' );
+		foreach ( array(
+			array( 'yes', 'no', array( 'server' ) ),
+			array( 'no', 'yes', array( 'device:stripe' ) ),
+			array( 'no', 'no', array() ),
+			array( 'yes', 'yes', array( 'server', 'device:stripe' ) ),
+		) as $case ) {
+			$this->options['woocommerce_stripe_terminal_for_woocommerce_settings'] = array(
+				'wcpos_connection_server' => $case[0],
+				'wcpos_connection_device' => $case[1],
+			);
+			$gateway->id = Settings::GATEWAY_ID;
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Exercise Free's descriptor filter.
+			$this->assertSame( $case[2], apply_filters( 'wcpos_payment_method_capture_modes', $mode_keys, $gateway ) );
+			$gateway->id = 'other_gateway';
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Exercise Free's descriptor filter.
+			$this->assertSame( $mode_keys, apply_filters( 'wcpos_payment_method_capture_modes', $mode_keys, $gateway ) );
+		}
+	}
+
+	/** Connection defaults, legacy selections and explicit allowed sets. */
 	public function connections(): array {
 		return array(
-			array( array(), 'device' ),
-			array( array( 'default_reader' => '' ), 'device' ),
-			array( array( 'default_reader' => 'tmr_saved' ), 'server' ),
+			array( array(), array( 'server', 'device' ) ),
+			array( array( 'default_reader' => '' ), array( 'server', 'device' ) ),
+			array( array( 'default_reader' => 'tmr_saved' ), array( 'server' ) ),
 			array(
 				array(
 					'default_reader' => 'tmr_saved',
 					'wcpos_connection' => 'device',
 				),
-				'device',
+				array( 'device' ),
 			),
-			array( array( 'wcpos_connection' => 'server' ), 'server' ),
+			array( array( 'wcpos_connection' => 'server' ), array( 'server' ) ),
+			array( array( 'wcpos_connection' => 'unexpected' ), array( 'server' ) ),
+			array(
+				array(
+					'wcpos_connection_server' => 'yes',
+					'wcpos_connection_device' => 'no',
+				),
+				array( 'server' ),
+			),
+			array(
+				array(
+					'wcpos_connection_server' => 'yes',
+					'wcpos_connection_device' => 'yes',
+				),
+				array( 'server', 'device' ),
+			),
+			array(
+				array(
+					'wcpos_connection_server' => 'no',
+					'wcpos_connection_device' => 'no',
+					'wcpos_connection' => 'device',
+					'default_reader' => 'tmr_saved',
+				),
+				array(),
+			),
+			array( array( 'wcpos_connection_server' => 'yes' ), array( 'server' ) ),
+			array( array( 'wcpos_connection_device' => 'yes' ), array( 'device' ) ),
+			array(
+				array(
+					'wcpos_connection_device' => 'no',
+					'default_reader' => 'tmr_saved',
+				),
+				array(),
+			),
 		);
 	}
 

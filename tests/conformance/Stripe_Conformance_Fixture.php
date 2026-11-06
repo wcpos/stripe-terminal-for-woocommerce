@@ -55,7 +55,18 @@ final class Stripe_Conformance_Fixture implements Conformance_Fixture {
 		$this->old_options  = get_option( 'woocommerce_' . Settings::GATEWAY_ID . '_settings', array() );
 		$this->old_currency = get_option( 'woocommerce_currency' );
 		update_option( 'woocommerce_currency', 'EUR' );
-		update_option( 'woocommerce_' . Settings::GATEWAY_ID . '_settings', array( 'enabled' => 'yes', 'test_mode' => 'yes', 'test_secret_key' => 'sk_test_conformance', 'secret_key' => 'sk_live_conformance', 'test_pos_webhook_secret' => self::SECRET, 'wcpos_connection' => 'server' ) );
+		update_option(
+			'woocommerce_' . Settings::GATEWAY_ID . '_settings',
+			array(
+				'enabled' => 'yes',
+				'test_mode' => 'yes',
+				'test_secret_key' => 'sk_test_conformance',
+				'secret_key' => 'sk_live_conformance',
+				'test_pos_webhook_secret' => self::SECRET,
+				'wcpos_connection_server' => 'yes',
+				'wcpos_connection_device' => 'no',
+			)
+		);
 		$this->transport                   = new Fake_Stripe_Transport();
 		Recording_Stripe_Provider::$fixture = $this;
 		$this->registry_property = new \ReflectionProperty( Server_Providers::class, 'instance' );
@@ -63,8 +74,7 @@ final class Stripe_Conformance_Fixture implements Conformance_Fixture {
 		$this->old_registry = $this->registry_property->getValue();
 		$this->registry_property->setValue( null, null );
 		wcpos_pro_register_server_provider( Settings::GATEWAY_ID, Recording_Stripe_Provider::class );
-		// The plugin registered its device provider at boot (no connection mode was saved yet), and
-		// Pro routes a gateway with one to device mode; the server configuration under test has none.
+		// Clear any device provider registered at boot: this fixture tests the server connection alone.
 		$this->device_registry_property = new \ReflectionProperty( Device_Providers::class, 'instance' );
 		$this->device_registry_property->setAccessible( true );
 		$this->old_device_registry = $this->device_registry_property->getValue();
