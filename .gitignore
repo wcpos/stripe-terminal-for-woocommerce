@@ -38,3 +38,4 @@ tests/logs/junit.xml
 .env.local
 # The E2E site's Pro checkout (fetched by CI).
 e2e/pro/
+vendor_prefixed/

@@ -61,9 +61,26 @@ jobs:
             echo "release=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Set up PHP
+        if: steps.check_version.outputs.release == 'true'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+
       - name: Install composer dependencies
         if: steps.check_version.outputs.release == 'true'
         run: composer install --no-dev
+
+      # The zip ships the Stripe SDK prefixed so another plugin's stripe/stripe-php cannot collide
+      # with it (docs/dependency-scoping.md). This runs before Create Release, so a failure publishes nothing.
+      - name: Scope the Stripe SDK
+        if: steps.check_version.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          bash scripts/scope-release.sh
+          php php-scoper/scope-source.php check --skip-tests .
+          php php-scoper/smoke-test.php .
 
       - name: Install and Build payment-frontend
         if: steps.check_version.outputs.release == 'true'
@@ -112,7 +129,10 @@ jobs:
           # WordPress 7.1.4+ unpacks packages into a randomly suffixed folder and installs a flat zip
           # there, so the zip must hold the installed folder (catalog slug) as its only top-level entry.
           mkdir -p "$RUNNER_TEMP/stage/stripe-terminal-for-woocommerce"
-          rsync -a --exclude='.git*' ./ "$RUNNER_TEMP/stage/stripe-terminal-for-woocommerce/"
+          rsync -a --exclude='.git*' --exclude=php-scoper --exclude=tests ./ "$RUNNER_TEMP/stage/stripe-terminal-for-woocommerce/"
+          # Last gate on exactly what ships, run from the workspace's php-scoper/ (the stage has none).
+          php php-scoper/smoke-test.php "$RUNNER_TEMP/stage/stripe-terminal-for-woocommerce"
+          php php-scoper/scope-source.php check "$RUNNER_TEMP/stage/stripe-terminal-for-woocommerce"
           (cd "$RUNNER_TEMP/stage" && zip -r "$GITHUB_WORKSPACE/stripe-terminal-for-woocommerce.zip" "stripe-terminal-for-woocommerce" -x "*.git*")
           TOP_LEVEL=$(unzip -Z1 stripe-terminal-for-woocommerce.zip | cut -d/ -f1 | sort -u)
           if [ "$TOP_LEVEL" != "stripe-terminal-for-woocommerce" ]; then
