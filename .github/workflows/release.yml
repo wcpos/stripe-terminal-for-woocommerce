@@ -89,9 +89,15 @@ jobs:
           npm install
           npm run build
 
-      - name: Extract release notes from CHANGELOG.md
+      - name: Write release notes
         if: steps.check_version.outputs.release == 'true'
         run: |
+          # Order: docs/releases/$VERSION.md, then the CHANGELOG.md section, then a placeholder.
+          if [ -f "docs/releases/$VERSION.md" ]; then
+            cp "docs/releases/$VERSION.md" "$RUNNER_TEMP/release-notes.md"
+            cat "$RUNNER_TEMP/release-notes.md"
+            exit 0
+          fi
           extract_section() {
             awk -v ver="$1" '
               /^## / { if (found) exit; if (index($0, "## " ver " ") == 1 || $0 == "## " ver) found=1; next }
