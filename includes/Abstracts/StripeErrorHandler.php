@@ -69,6 +69,10 @@ trait StripeErrorHandler {
 						$error_data['outcome_reason'] = 'The payment was blocked by Stripe.';
 					}
 				}
+			} elseif ( $e instanceof \Stripe\Exception\RateLimitException ) {
+				// Extends InvalidRequestException in stripe-php, so it is told apart first.
+				$status_code               = 429; // Too Many Requests.
+				$error_data['stripe_code'] = $e->getStripeCode();
 			} elseif ( $e instanceof \Stripe\Exception\InvalidRequestException ) {
 				$status_code               = 400; // Bad Request.
 				$error_data['stripe_code'] = $e->getStripeCode();
@@ -80,8 +84,6 @@ trait StripeErrorHandler {
 				$status_code = 502; // Bad Gateway.
 			} elseif ( $e instanceof \Stripe\Exception\PermissionException ) {
 				$status_code = 403; // Forbidden.
-			} elseif ( $e instanceof \Stripe\Exception\RateLimitException ) {
-				$status_code = 429; // Too Many Requests.
 			} elseif ( $e instanceof \Stripe\Exception\IdempotencyException ) {
 				$status_code = 409; // Conflict.
 			} elseif ( $e instanceof \Stripe\Exception\SignatureVerificationException ) {

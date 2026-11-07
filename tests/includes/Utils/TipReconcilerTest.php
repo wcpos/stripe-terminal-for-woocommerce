@@ -311,6 +311,7 @@ class TipReconcilerTest extends TestCase {
 		);
 		\Stripe\ApiRequestor::setHttpClient( $client );
 		$gateway  = ( new \ReflectionClass( \WCPOS\WooCommercePOS\StripeTerminal\Gateway::class ) )->newInstanceWithoutConstructor();
+		$gateway->options['enable_moto'] = 'yes'; // The old panel: MOTO carve-out.
 		$property = new \ReflectionProperty( \WCPOS\WooCommercePOS\StripeTerminal\Gateway::class, 'stripe_service' );
 		if ( PHP_VERSION_ID < 80100 ) {
 			$property->setAccessible( true );

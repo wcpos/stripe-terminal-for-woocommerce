@@ -19,6 +19,9 @@ wp core install \
 echo "Installing WooCommerce..."
 wp plugin install woocommerce --activate --path=/var/www/html
 
+echo "Activating WooCommerce POS Pro (the extension is Pro-only; Pro vendors the free plugin)..."
+wp plugin activate woocommerce-pos-pro --path=/var/www/html
+
 echo "Activating Stripe Terminal plugin..."
 wp plugin activate stripe-terminal-for-woocommerce --path=/var/www/html
 
@@ -31,7 +34,7 @@ wp option update woocommerce_currency "USD" --path=/var/www/html
 
 echo "Configuring Stripe Terminal gateway..."
 wp option update woocommerce_stripe_terminal_for_woocommerce_settings \
-  '{"enabled":"yes","title":"Stripe Terminal","description":"Pay in person using Stripe Terminal.","test_mode":"yes","test_secret_key":"'"${STRIPE_TEST_SECRET_KEY:-sk_test_placeholder}"'"}' \
+  '{"title":"Stripe Terminal","description":"Pay in person using Stripe Terminal.","test_mode":"yes","test_secret_key":"'"${STRIPE_TEST_SECRET_KEY:-sk_test_placeholder}"'"}' \
   --format=json --path=/var/www/html
 
 echo "Creating test product..."

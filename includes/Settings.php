@@ -11,6 +11,62 @@ namespace WCPOS\WooCommercePOS\StripeTerminal;
  * Settings.
  */
 class Settings {
+	/** Stable gateway ID used by the Pro provider registry. */
+	public const GATEWAY_ID = 'stripe_terminal_for_woocommerce';
+
+	/** Allowed connections in server/device order, retaining saved selections. */
+	public static function get_wcpos_connections(): array {
+		$settings = self::get_gateway_settings();
+		if ( array_key_exists( 'wcpos_connection_server', $settings ) || array_key_exists( 'wcpos_connection_device', $settings ) ) {
+			$connections = array();
+			foreach ( array(
+				'server' => 'wcpos_connection_server',
+				'device' => 'wcpos_connection_device',
+			) as $connection => $field ) {
+				if ( 'yes' === ( $settings[ $field ] ?? 'no' ) ) {
+					$connections[] = $connection;
+				}
+			}
+			return $connections;
+		}
+		if ( array_key_exists( 'wcpos_connection', $settings ) ) {
+			// Anything but a saved 'device' meant smart readers before the checkboxes existed.
+			return 'device' === $settings['wcpos_connection'] ? array( 'device' ) : array( 'server' );
+		}
+		if ( isset( $settings['default_reader'] ) && is_string( $settings['default_reader'] ) && '' !== $settings['default_reader'] ) {
+			return array( 'server' );
+		}
+		return array( 'server', 'device' );
+	}
+
+	/**
+	 * Location where the SDK registers Bluetooth and Tap to Pay readers.
+	 *
+	 * @param bool|null $test_mode Explicit mode, or null for the current mode.
+	 */
+	public static function get_wcpos_location( ?bool $test_mode = null ): string {
+		$settings = self::get_gateway_settings();
+		$key      = ( $test_mode ?? self::is_test_mode() ) ? 'wcpos_location_test' : 'wcpos_location_live';
+		return (string) ( $settings[ $key ] ?? '' );
+	}
+
+	/** Whether the currently selected API mode is test. */
+	public static function is_test_mode(): bool {
+		return 'yes' === ( self::get_gateway_settings()['test_mode'] ?? 'no' );
+	}
+
+	/** Retrieve only the POS route secret for the current mode. */
+	public static function get_pos_webhook_secret(): string {
+		$settings = self::get_gateway_settings();
+		return (string) ( $settings[ self::is_test_mode() ? 'test_pos_webhook_secret' : 'pos_webhook_secret' ] ?? '' );
+	}
+
+	/** Retrieve the POS endpoint identity for the current mode. */
+	public static function get_pos_webhook_endpoint_id(): string {
+		$settings = self::get_gateway_settings();
+		return (string) ( $settings[ self::is_test_mode() ? 'test_pos_webhook_endpoint_id' : 'pos_webhook_endpoint_id' ] ?? '' );
+	}
+
 	/**
 	 * Get the Gateway settings.
 	 */
@@ -29,6 +85,20 @@ class Settings {
 		}
 
 		return $settings['secret_key'] ?? '';
+	}
+
+	/**
+	 * The secret key of a named mode, whatever mode the gateway is in now: a refund made in one
+	 * mode is read or re-sent under that mode's key.
+	 *
+	 * @param string $mode test or live.
+	 * @return string The key, or '' when that mode has none (or the mode is unknown).
+	 */
+	public static function get_api_key_for_mode( string $mode ): string {
+		if ( ! in_array( $mode, array( 'test', 'live' ), true ) ) {
+			return '';
+		}
+		return (string) ( self::get_gateway_settings()[ 'test' === $mode ? 'test_secret_key' : 'secret_key' ] ?? '' );
 	}
 
 	/**

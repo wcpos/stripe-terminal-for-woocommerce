@@ -26,7 +26,8 @@ test.describe('Stripe Terminal Gateway', () => {
     );
 
     // Verify key settings fields are present.
-    await expect(page.locator('label', { hasText: 'Enable/Disable' })).toBeVisible();
+    // The web-checkout Enable/Disable field is gone; the gateway is POS-only.
+    await expect(page.locator('th', { hasText: 'Title' })).toBeVisible();
     await expect(page.locator('th', { hasText: 'Test Mode' })).toBeVisible();
     await expect(page.locator('th', { hasText: 'Test Secret Key' })).toBeVisible();
   });

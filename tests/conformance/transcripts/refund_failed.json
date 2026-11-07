@@ -1,0 +1,27 @@
+{
+    "timing": {
+        "DEFAULT_DEADLINE": 300,
+        "pollMs": 2000,
+        "backoffMs": [
+            2000,
+            4000,
+            8000,
+            15000
+        ],
+        "deadlineMs": 300000
+    },
+    "calls": [
+        {
+            "op": "create",
+            "request": "action=action_1 amount=92.95 currency=EUR reader=tmr_online mode=test"
+        },
+        {
+            "op": "fetch",
+            "request": "action=action_1 mode=test"
+        },
+        {
+            "op": "refund",
+            "request": "action=action_1 amount=5.00 currency=EUR mode=test transaction_id=action_1"
+        }
+    ]
+}

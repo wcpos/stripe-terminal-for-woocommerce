@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Stripe Terminal for WooCommerce
  * Description: Adds Stripe Terminal support to WooCommerce for in-person payments.
- * Version:     0.0.40
+ * Version:     2.0.0
  * Author:      kilbot
  * Author URI:  https://kilbot.com/
  * Update URI:  https://github.com/wcpos/stripe-terminal-for-woocommerce
@@ -23,9 +23,14 @@ if ( ! \defined( 'ABSPATH' ) ) {
 }
 
 // Define constants.
-\define( 'STWC_VERSION', '0.0.40' );
+\define( 'STWC_VERSION', '2.0.0' );
 \define( 'STWC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 \define( 'STWC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+
+// The release zip ships the Stripe SDK prefixed; see docs/dependency-scoping.md.
+if ( file_exists( STWC_PLUGIN_DIR . 'vendor_prefixed/autoload.php' ) ) {
+	require_once STWC_PLUGIN_DIR . 'vendor_prefixed/autoload.php';
+}
 
 // Include Composer's autoloader.
 if ( file_exists( STWC_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
@@ -58,22 +63,31 @@ spl_autoload_register(
  * Initialize the plugin.
  */
 function init(): void {
+	// Terminal extensions are Pro-only at 2.0: the keypad modes and the order-pay panel
+	// both rely on Pro's shared payments base.
+	if ( ! \function_exists( 'wcpos_pro_requires' ) || ! wcpos_pro_requires( Server\Registration::REQUIRED_PRO_VERSION, __FILE__ ) ) {
+		add_action(
+			'admin_notices',
+			static function (): void {
+				echo '<div class="notice notice-error"><p>' . esc_html__( 'Stripe Terminal for WooCommerce needs WooCommerce POS Pro 2.0.0 or newer.', 'stripe-terminal-for-woocommerce' ) . '</p></div>';
+			}
+		);
+		return;
+	}
+
 	// Register the gateway.
 	add_filter( 'woocommerce_payment_gateways', array( Gateway::class, 'register_gateway' ) );
 
 	// Recover duplicate paid Terminal form submissions before the POS template renders an error.
 	add_action( 'wp', array( Gateway::class, 'maybe_redirect_paid_order_submission' ), 20 );
 
-	/*
-	 * Removed the complex React application and terminal-js integration.
-	 * We're now using a simple jQuery-based frontend that communicates with the server via WordPress AJAX.
-	 * We still need the API for webhook processing from Stripe.
-	 */
+	// The keypad's server and device modes, on Pro's shared base.
+	Server\Registration::register();
 
-	// // Initialize frontend.
-	// new Frontend();
+	// Fold attempts the old order-pay panel left mid-flight into Pro's ledger.
+	add_action( 'init', array( Legacy_Adoption::class, 'upgrade' ), 20 );
 
-	// Initialize API.
+	// The REST API serves Stripe's webhooks.
 	add_action(
 		'rest_api_init',
 		function (): void {
@@ -87,31 +101,16 @@ function init(): void {
 	// Best-effort reader keep-warm (POS activity + new-order triggers).
 	( new ReaderWarmer() )->register();
 }
-add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 11 );
-
-/**
- * Declare compatibility with the WooCommerce Cart and Checkout blocks.
- */
-function declare_blocks_compatibility(): void {
-	if ( class_exists( '\Automattic\WooCommerce\Utilities\FeaturesUtil' ) ) {
-		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'cart_checkout_blocks', __FILE__, true );
-	}
-}
-add_action( 'before_woocommerce_init', __NAMESPACE__ . '\declare_blocks_compatibility' );
-
-/**
- * Register Stripe Terminal with WooCommerce Blocks checkout.
- */
-function register_blocks_payment_method(): void {
-	if ( ! class_exists( '\Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
-		return;
-	}
-
-	add_action(
-		'woocommerce_blocks_payment_method_type_registration',
-		function ( $payment_method_registry ): void {
-			$payment_method_registry->register( new Blocks\StripeTerminalBlocksSupport() );
+// Pro defines its helpers (wcpos_pro_requires and the provider registration API) from its own
+// plugins_loaded hook at priority 20, so the gate must run after that: 30, where provider
+// registration already sat. Reader-settings migration stays one step later.
+add_action( 'plugins_loaded', __NAMESPACE__ . '\init', 30 );
+add_action( 'plugins_loaded', array( Server\Pos_Reader_Settings::class, 'migrate_once' ), 31 );
+register_activation_hook(
+	__FILE__,
+	static function (): void {
+		if ( \function_exists( 'wcpos_pro_requires' ) ) {
+			wcpos_pro_requires( Server\Registration::REQUIRED_PRO_VERSION, __FILE__ );
 		}
-	);
-}
-add_action( 'woocommerce_blocks_loaded', __NAMESPACE__ . '\register_blocks_payment_method' );
+	}
+);

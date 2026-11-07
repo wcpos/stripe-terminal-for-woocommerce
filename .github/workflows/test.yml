@@ -3,7 +3,7 @@ name: Tests
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, next]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -12,7 +12,7 @@ on:
       - '.editorconfig'
       - '.gitignore'
   pull_request:
-    branches: [main]
+    branches: [main, next]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -48,6 +48,66 @@ jobs:
 
       - name: Run PHPCS
         run: composer lint -- --report=summary
+
+  scoped-release:
+    name: Scoped release build
+    runs-on: ubuntu-latest
+    needs: php-lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: json, mbstring
+          tools: composer
+
+      - name: Copy the untouched checkout for the release build
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          rsync -a --exclude=.git ./ "$RUNNER_TEMP/release/"
+
+      - name: Scope a dev tree
+        run: |
+          composer install --no-interaction --prefer-dist
+          bash scripts/scope-release.sh --keep-dev
+          php php-scoper/scope-source.php rewrite tests
+
+      # The prepend goes through an ini file because PHPUnit's separate-process
+      # children do not inherit `-d` options, but they do inherit PHP_INI_SCAN_DIR.
+      - name: Run the unit suite against the prefixed SDK
+        run: |
+          mkdir -p "$RUNNER_TEMP/ini"
+          printf 'auto_prepend_file=%s/vendor_prefixed/autoload.php\n' "$PWD" > "$RUNNER_TEMP/ini/zz-prepend.ini"
+          PHP_INI_SCAN_DIR=":$RUNNER_TEMP/ini" php vendor/bin/phpunit --configuration phpunit.xml.dist
+
+      - name: Build the release tree
+        working-directory: ${{ runner.temp }}/release
+        run: |
+          composer install --no-dev --no-interaction --prefer-dist
+          bash scripts/scope-release.sh
+
+      - name: Smoke test, bare and with a foreign SDK loaded first
+        run: |
+          php "$RUNNER_TEMP/release/php-scoper/smoke-test.php" "$RUNNER_TEMP/release"
+          mkdir -p "$RUNNER_TEMP/foreign"
+          composer require stripe/stripe-php:^17.0 --working-dir="$RUNNER_TEMP/foreign" --no-interaction
+          php "$RUNNER_TEMP/release/php-scoper/smoke-test.php" "$RUNNER_TEMP/release" --foreign="$RUNNER_TEMP/foreign/vendor/autoload.php"
+
+      - name: Set up PHP 7.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: json, mbstring
+
+      - name: Prove the shipped code on the PHP 7.4 floor
+        run: |
+          php "$RUNNER_TEMP/release/php-scoper/smoke-test.php" "$RUNNER_TEMP/release"
+          find "$RUNNER_TEMP/release/vendor_prefixed" -name '*.php' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
+          php -l "$RUNNER_TEMP/release/php-scoper/vendor-prefixed-autoload.php"
 
   php-tests:
     name: PHP ${{ matrix.php }}
@@ -86,6 +146,75 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  conformance:
+    name: Conformance PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    needs: php-lint
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.3']
+    defaults:
+      run:
+        working-directory: stripe-terminal-for-woocommerce
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: stripe-terminal-for-woocommerce
+          persist-credentials: false
+
+      # Pro's provider conformance suite runs the real adapter under wp-env with Pro (which vendors
+      # Free) as a sibling plugin; see tests/conformance/. The org-level wcpos-bot App mints a token
+      # scoped to contents:read on the private Pro repo. Fork PRs get no secrets and stop here by design.
+      - name: Read-only Pro token
+        id: pro-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.WCPOS_BOT_APP_ID }}
+          private-key: ${{ secrets.WCPOS_BOT_PRIVATE_KEY }}
+          owner: wcpos
+          repositories: woocommerce-pos-pro
+          permission-contents: read
+
+      - name: Checkout Pro main as sibling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: wcpos/woocommerce-pos-pro
+          ref: main
+          path: woocommerce-pos-pro
+          token: ${{ steps.pro-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Set up PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer
+
+      - name: Install Composer dependencies
+        run: |
+          composer install --no-interaction --prefer-dist
+          composer install --working-dir=../woocommerce-pos-pro --no-interaction --prefer-dist
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Start WordPress test environment
+        run: |
+          npm i -g @wordpress/env
+          printf '{"phpVersion":"%s"}\n' '${{ matrix.php }}' > .wp-env.override.json
+          wp-env start
+
+      # Transcripts are compared, never recorded, here: recording is an opt-in inside the PHPUnit
+      # process (`wp-env run tests-cli -- env WCPOS_RECORD_TRANSCRIPTS=1 ...`) that CI does not set.
+      - name: Provider conformance suite
+        run: wp-env run --env-cwd='wp-content/plugins/stripe-terminal-for-woocommerce' tests-cli -- vendor/bin/phpunit -c phpunit.conformance.xml.dist
 
   stripe-live-tests:
     name: Stripe Test-Mode Smoke
@@ -139,6 +268,32 @@ jobs:
 
       - name: Install Composer dependencies
         run: composer install --no-dev
+
+      # The extension is Pro-only: the site needs WooCommerce POS Pro (which vendors the free
+      # plugin) or the bootstrap registers nothing. The org-level wcpos-bot App mints a token
+      # scoped to contents:read on the private Pro repo.
+      - name: Read-only Pro token
+        id: pro-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.WCPOS_BOT_APP_ID }}
+          private-key: ${{ secrets.WCPOS_BOT_PRIVATE_KEY }}
+          owner: wcpos
+          repositories: woocommerce-pos-pro
+          permission-contents: read
+
+      - name: Checkout Pro main into the E2E site
+        uses: actions/checkout@v7
+        with:
+          repository: wcpos/woocommerce-pos-pro
+          ref: main
+          path: e2e/pro/woocommerce-pos-pro
+          token: ${{ steps.pro-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Install Pro's Composer dependencies
+        working-directory: e2e/pro/woocommerce-pos-pro
+        run: composer install --no-dev --no-interaction --prefer-dist
 
       - name: Build payment-frontend
         working-directory: packages/payment-frontend
