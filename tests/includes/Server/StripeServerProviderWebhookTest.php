@@ -223,6 +223,57 @@ class StripeServerProviderWebhookTest extends ServerTestCase {
 		$this->assertCount( 2, $this->http->requests );
 	}
 
+	public function test_device_decline_is_left_to_the_device_flow(): void {
+		$declined = $this->intent(
+			array(
+				'metadata'           => array( 'wcpos_payment_id' => self::PAYMENT_ID, 'wcpos_transport' => 'bluetooth' ),
+				'last_payment_error' => array( 'code' => 'card_declined' ),
+			)
+		);
+		$provider = $this->provider( array( $this->ok( $declined ) ) );
+		$result   = $provider->verify_webhook( $this->request( 'payment_intent.payment_failed', $declined ) );
+		$this->assertSame( array( 'event_id' => 'evt_test' ), $result['patch'] );
+		$this->assertSame( strtolower( self::PAYMENT_ID ), $result['payment_id'] );
+		$this->assertCount( 1, $this->http->requests );
+		$this->assertStringEndsWith( '/payment_intents/pi_test', $this->http->requests[0]['url'] );
+	}
+
+	public function test_device_decline_after_success_reports_the_success(): void {
+		$declined = $this->intent(
+			array(
+				'metadata'           => array( 'wcpos_payment_id' => self::PAYMENT_ID, 'wcpos_transport' => 'bluetooth' ),
+				'last_payment_error' => array( 'code' => 'card_declined' ),
+			)
+		);
+		$paid = $this->intent(
+			array(
+				'metadata'        => $declined['metadata'],
+				'status'          => 'succeeded',
+				'amount_received' => 1250,
+				'latest_charge'   => $this->charge(),
+			)
+		);
+		$provider = $this->provider( array( $this->ok( $paid ) ) );
+		$result   = $provider->verify_webhook( $this->request( 'payment_intent.payment_failed', $declined ) );
+		$this->assertSame( 'captured', $result['patch']['status'] );
+		$this->assertSame( '12.50', $result['patch']['amount'] );
+		$this->assertCount( 1, $this->http->requests );
+	}
+
+	public function test_decline_without_reader_or_transport_still_retires_the_intent(): void {
+		$declined = $this->intent(
+			array(
+				'metadata'           => array( 'wcpos_payment_id' => self::PAYMENT_ID ),
+				'last_payment_error' => array( 'code' => 'card_declined' ),
+			)
+		);
+		$provider = $this->provider( array( $this->ok( $declined ), $this->ok( $this->intent( array( 'status' => 'canceled' ) ) ) ) );
+		$result   = $provider->verify_webhook( $this->request( 'payment_intent.payment_failed', $declined ) );
+		$this->assertSame( array( 'event_id' => 'evt_test', 'status' => 'failed' ), $result['patch'] );
+		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[1]['url'] );
+		$this->assertCount( 2, $this->http->requests );
+	}
+
 	/** A stale decline delivered after the intent was paid reports the money, never the decline. */
 	public function test_stale_decline_after_success_reports_the_success(): void {
 		$declined = $this->intent( array( 'last_payment_error' => array( 'code' => 'card_declined' ) ) );
