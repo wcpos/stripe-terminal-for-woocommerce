@@ -250,7 +250,10 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 		}
 		if ( 'requires_payment_method' === $state ) {
 			$action_ref = $reader_action['process_payment_intent']['payment_intent'] ?? null;
-			if ( ! empty( $intent['last_payment_error'] ) ) {
+			// A declined intent keeps its previous last_payment_error while the reader collects a retry's card.
+			if ( $action_ref === $intent['id'] && in_array( $reader_action['status'] ?? '', array( 'in_progress', 'succeeded' ), true ) ) {
+				$result['status'] = 'in_progress';
+			} elseif ( ! empty( $intent['last_payment_error'] ) ) {
 				$result['status']         = 'failed';
 				$result['failure_reason'] = $intent['last_payment_error']['decline_code'] ?? $intent['last_payment_error']['code'] ?? 'provider_error';
 			} elseif ( $action_ref === $intent['id'] ) {
@@ -260,8 +263,6 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 					if ( 'failed' === $result['status'] ) {
 						$result['failure_reason'] = $code;
 					}
-				} elseif ( in_array( $reader_action['status'] ?? '', array( 'in_progress', 'succeeded' ), true ) ) {
-					$result['status'] = 'in_progress';
 				}
 			} elseif ( $action_ref ) {
 				$result['status']         = 'failed';

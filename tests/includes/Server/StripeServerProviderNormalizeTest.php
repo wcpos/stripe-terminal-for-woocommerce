@@ -45,6 +45,35 @@ class StripeServerProviderNormalizeTest extends ServerTestCase {
 		);
 	}
 
+	/** @dataProvider live_retry_states */
+	public function test_live_reader_retry_precedes_a_previous_decline( string $state ): void {
+		$result = Provider::normalize(
+			$this->intent( array( 'last_payment_error' => array( 'code' => 'card_declined' ) ) ),
+			array(
+				'status'                 => $state,
+				'process_payment_intent' => array( 'payment_intent' => 'pi_test' ),
+			)
+		);
+		$this->assertSame( 'in_progress', $result['status'] );
+		$this->assertArrayNotHasKey( 'failure_reason', $result );
+	}
+
+	public function live_retry_states(): array {
+		return array( array( 'in_progress' ), array( 'succeeded' ) );
+	}
+
+	public function test_previous_decline_on_another_intents_action_still_fails(): void {
+		$result = Provider::normalize(
+			$this->intent( array( 'last_payment_error' => array( 'code' => 'card_declined' ) ) ),
+			array(
+				'status'                 => 'in_progress',
+				'process_payment_intent' => array( 'payment_intent' => 'pi_other' ),
+			)
+		);
+		$this->assertSame( 'failed', $result['status'] );
+		$this->assertSame( 'card_declined', $result['failure_reason'] );
+	}
+
 	/** @dataProvider actions */
 	public function test_reader_action_mapping( string $id, string $state, string $code, string $expected, ?string $reason ): void {
 		$result = Provider::normalize(
@@ -160,6 +189,25 @@ class StripeServerProviderNormalizeTest extends ServerTestCase {
 		$this->assertSame( array( 'expand' => array( 'latest_charge' ) ), $this->http->requests[0]['params'] );
 		$this->assertStringEndsWith( '/terminal/readers/tmr_test', $this->http->requests[1]['url'] );
 		$this->assertEqualsWithDelta( time(), $this->options['stwc_payment_dispatch_at'], 1 );
+	}
+
+	public function test_fetch_does_not_cancel_a_live_retry_of_a_declined_intent(): void {
+		$provider = $this->provider(
+			array(
+				$this->ok( $this->intent( array( 'last_payment_error' => array( 'code' => 'card_declined' ) ) ) ),
+				$this->ok(
+					array(
+						'id'     => 'tmr_test',
+						'action' => array(
+							'status'                 => 'in_progress',
+							'process_payment_intent' => array( 'payment_intent' => 'pi_test' ),
+						),
+					)
+				),
+			)
+		);
+		$this->assertSame( 'in_progress', $provider->fetch( 'pi_test' )['status'] );
+		$this->assertCount( 2, $this->http->requests );
 	}
 
 	public function test_fetch_decline_cancels_even_if_cleanup_fails(): void {
