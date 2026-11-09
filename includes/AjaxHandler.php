@@ -857,6 +857,12 @@ class AjaxHandler {
 				wp_send_json_error( 'No payment intent found for this order' );
 				return;
 			}
+			if ( Legacy_Adoption::is_adopted( (string) $payment_intent_id ) ) {
+				// Pro adopted this attempt on upgrade and now owns its outcome; a stale old-panel tab
+				// must not put the same intent back on a reader.
+				wp_send_json_error( 'This payment is now handled by the POS panel. Reload the page to continue.' );
+				return;
+			}
 
 			// Use server-side MOTO state from order meta rather than trusting request input.
 			$moto = 'yes' === $order->get_meta( '_stripe_terminal_moto' ) && $this->is_moto_enabled();

@@ -74,3 +74,5 @@ if ( ! class_exists( 'WC_Order_Item_Fee' ) ) {
 		}
 	}
 }
+
+require_once __DIR__ . '/stubs/wcpos-pro-server.php';

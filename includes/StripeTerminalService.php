@@ -20,6 +20,12 @@ use WP_Error;
  * Core service for handling Stripe Terminal operations.
  */
 class StripeTerminalService {
+	/**
+	 * Transient value for a location whose name could not be fetched; retried after an hour.
+	 * An array, so a location literally named like any marker string can never collide with it.
+	 */
+	private const LOCATION_NAME_UNKNOWN = array( 'unknown' => true );
+
 	use StripeErrorHandler;
 
 	/**
@@ -28,6 +34,13 @@ class StripeTerminalService {
 	 * @var string
 	 */
 	private $api_key;
+
+	/**
+	 * Pages of 100 refunds a caller of `list_refunds()` reads for one payment. Five hundred refunds
+	 * of one POS sale is beyond any till; past that the question stays open rather than the sweep
+	 * paging on.
+	 */
+	const REFUND_PAGES_MAX = 5;
 
 	/**
 	 * Stripe client instance.
@@ -47,7 +60,12 @@ class StripeTerminalService {
 		$http_client = \Stripe\HttpClient\CurlClient::instance();
 		$http_client->setConnectTimeout( apply_filters( 'stwc_stripe_connect_timeout', 10 ) );
 		$http_client->setTimeout( apply_filters( 'stwc_stripe_request_timeout', 80 ) );
-		\Stripe\ApiRequestor::setHttpClient( $http_client );
+		// The SDK's requestor is process-wide. Its default is this same curl client, so it is
+		// installed only when nothing else is: a client installed on purpose (a host's logging
+		// client, a test's fake) is not replaced by a service built later in the same process.
+		if ( \Stripe\ApiRequestor::httpClient() instanceof \Stripe\HttpClient\CurlClient ) {
+			\Stripe\ApiRequestor::setHttpClient( $http_client );
+		}
 	}
 
 	/**
@@ -57,7 +75,10 @@ class StripeTerminalService {
 	 */
 	public function get_stripe_client(): \Stripe\StripeClient {
 		if ( ! $this->stripe_client ) {
-			$this->stripe_client = new \Stripe\StripeClient( $this->api_key );
+			// The SDK refuses an empty key at construction but accepts none, and then requires the key
+			// on each request: a read under another mode's key must not depend on the current mode
+			// having one (a merchant who ticked test mode without entering test keys).
+			$this->stripe_client = new \Stripe\StripeClient( '' === $this->api_key ? array( 'api_key' => null ) : $this->api_key );
 		}
 
 		return $this->stripe_client;
@@ -171,37 +192,9 @@ class StripeTerminalService {
 			$currency             = strtolower( $order->get_currency() );
 			$description          = \sprintf( 'Order #%s', $order_id );
 
-			// Check if currency is supported by Stripe Terminal for the account's country.
-			// When the country cannot be determined the check is skipped and Stripe
-			// validates the currency itself when the intent is created.
-			$country = $this->resolve_account_country( $currency );
-			if ( null === $country ) {
-				Logger::log( 'create_payment_intent: Stripe account country unknown; skipping local currency check for ' . strtoupper( $currency ) . ' and letting Stripe validate it.' );
-			} else {
-				$supported_currencies = $this->currencies_for_country( $country );
-				if ( ! \in_array( $currency, $supported_currencies, true ) ) {
-					Logger::log(
-						\sprintf(
-							'create_payment_intent: rejected %s for Order #%s. Stripe account country is %s (key %s), which supports: %s. If the account country is wrong, check the API key belongs to the intended Stripe account.',
-							strtoupper( $currency ),
-							$order_id,
-							$country,
-							$this->api_key_type(),
-							implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
-						)
-					);
-
-					return new WP_Error(
-						'unsupported_currency',
-						\sprintf(
-							'Currency %s is not supported by Stripe Terminal for a Stripe account registered in %s. Supported currencies: %s',
-							strtoupper( $currency ),
-							$country,
-							implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
-						),
-						array( 'status' => 400 )
-					);
-				}
+			$currency_error = $this->assert_currency_supported( $currency );
+			if ( is_wp_error( $currency_error ) ) {
+				return $currency_error;
 			}
 
 			// API 2026-09-30.endive (stripe-php 22) removed the writable `payment_method_types`;
@@ -239,6 +232,227 @@ class StripeTerminalService {
 			return $payment_intent->toArray();
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'create_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Share the legacy account-country check with POS legs.
+	 *
+	 * @param string $currency Lowercase ISO currency code.
+	 * @return WP_Error|null Unsupported currency error, or null.
+	 */
+	private function assert_currency_supported( string $currency ) {
+		// Check if currency is supported by Stripe Terminal for the account's country.
+		// When the country cannot be determined the check is skipped and Stripe
+		// validates the currency itself when the intent is created.
+		$country = $this->resolve_account_country( $currency );
+		if ( null === $country ) {
+			Logger::log( 'create_payment_intent: Stripe account country unknown; skipping local currency check for ' . strtoupper( $currency ) . ' and letting Stripe validate it.' );
+		} else {
+			$supported_currencies = $this->currencies_for_country( $country );
+			if ( ! \in_array( $currency, $supported_currencies, true ) ) {
+				Logger::log(
+					\sprintf(
+						'create_payment_intent: rejected %s. Stripe account country is %s (key %s), which supports: %s. If the account country is wrong, check the API key belongs to the intended Stripe account.',
+						strtoupper( $currency ),
+						$country,
+						$this->api_key_type(),
+						implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
+					)
+				);
+
+				return new WP_Error(
+					'unsupported_currency',
+					\sprintf(
+						'Currency %s is not supported by Stripe Terminal for a Stripe account registered in %s. Supported currencies: %s',
+						strtoupper( $currency ),
+						$country,
+						implode( ', ', array_map( 'strtoupper', $supported_currencies ) )
+					),
+					array( 'status' => 400 )
+				);
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Create an automatically captured POS leg without order mutations.
+	 *
+	 * @param int    $amount          Amount in minor units.
+	 * @param string $currency        Lowercase currency code.
+	 * @param string $description     Order display reference.
+	 * @param array  $metadata        POS payment and reader references.
+	 * @param string $idempotency_key Ledger row UUID.
+	 * @param bool   $interac         Include Interac for CAD.
+	 * @return array|WP_Error Intent or error.
+	 */
+	public function create_server_payment_intent( int $amount, string $currency, string $description, array $metadata, string $idempotency_key, bool $interac ) {
+		try {
+			$currency_error = $this->assert_currency_supported( $currency );
+			if ( is_wp_error( $currency_error ) ) {
+				return $currency_error;
+			}
+			$intent = $this->timed(
+				'create_server_payment_intent',
+				function () use ( $amount, $currency, $description, $metadata, $idempotency_key, $interac ) {
+					return $this->get_stripe_client()->paymentIntents->create(
+						array(
+							'amount'                       => $amount,
+							'currency'                     => $currency,
+							'description'                  => $description,
+							'metadata'                     => $metadata,
+							'capture_method'               => 'automatic',
+							'allowed_payment_method_types' => $interac ? array( 'card_present', 'interac_present' ) : array( 'card_present' ),
+						),
+						array( 'idempotency_key' => $idempotency_key )
+					);
+				}
+			);
+			return $intent->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'create_server_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Retrieve a POS intent without order mutations.
+	 *
+	 * @param string      $id      PaymentIntent ID.
+	 * @param null|string $api_key A key other than this service's, see `retrieve_refund()`.
+	 * @return array|WP_Error Intent or error.
+	 */
+	public function retrieve_payment_intent( string $id, ?string $api_key = null ) {
+		try {
+			$intent = $this->timed(
+				'retrieve_payment_intent',
+				function () use ( $id, $api_key ) {
+					return $this->get_stripe_client()->paymentIntents->retrieve( $id, array( 'expand' => array( 'latest_charge' ) ), null === $api_key ? null : array( 'api_key' => $api_key ) );
+				}
+			);
+			return $intent->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'retrieve_payment_intent_error' );
+		}
+	}
+
+	/**
+	 * Retrieve a charge without order mutations: a historical row may name the charge, not the intent.
+	 *
+	 * @param string      $id      Charge ID.
+	 * @param null|string $api_key A key other than this service's, see `retrieve_refund()`.
+	 * @return array|WP_Error Charge or error.
+	 */
+	public function retrieve_charge( string $id, ?string $api_key = null ) {
+		try {
+			$charge = $this->timed(
+				'retrieve_charge',
+				function () use ( $id, $api_key ) {
+					return $this->get_stripe_client()->charges->retrieve( $id, null, null === $api_key ? null : array( 'api_key' => $api_key ) );
+				}
+			);
+			return $charge->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'retrieve_charge_error' );
+		}
+	}
+
+	/**
+	 * Read one refund without order mutations: Pro's refund sweep asks about a refund this plugin
+	 * answered `pending`.
+	 *
+	 * @param string      $id      Refund ID.
+	 * @param null|string $api_key A key other than this service's, for a refund made in the other
+	 *                             mode; sent with the request only, nothing global changes.
+	 * @return array|WP_Error Refund or error.
+	 */
+	public function retrieve_refund( string $id, ?string $api_key = null ) {
+		try {
+			$refund = $this->timed(
+				'retrieve_refund',
+				function () use ( $id, $api_key ) {
+					return $this->get_stripe_client()->refunds->retrieve( $id, null, null === $api_key ? null : array( 'api_key' => $api_key ) );
+				}
+			);
+			return $refund->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'retrieve_refund_error' );
+		}
+	}
+
+	/**
+	 * One page of a payment's refunds, newest first, Stripe's largest page: the way back to a
+	 * refund whose create was answered without its id. The caller follows `has_more` with the
+	 * last id as `starting_after`, up to `REFUND_PAGES_MAX` pages.
+	 *
+	 * @param string      $charge_or_intent_id Intent or charge ID, as `refund_payment()` takes it.
+	 * @param null|string $api_key             A key other than this service's, see `retrieve_refund()`.
+	 * @param string      $starting_after      The last refund id of the page before, for the next page.
+	 * @return array|WP_Error The page (`data`, `has_more`) or error.
+	 */
+	public function list_refunds( string $charge_or_intent_id, ?string $api_key = null, string $starting_after = '' ) {
+		try {
+			$id_parameter = 0 === strpos( $charge_or_intent_id, 'pi_' ) ? 'payment_intent' : 'charge';
+			$params       = array(
+				$id_parameter => $charge_or_intent_id,
+				'limit'       => 100,
+			);
+			if ( '' !== $starting_after ) {
+				$params['starting_after'] = $starting_after;
+			}
+			$page = $this->timed(
+				'list_refunds',
+				function () use ( $params, $api_key ) {
+					return $this->get_stripe_client()->refunds->all( $params, null === $api_key ? null : array( 'api_key' => $api_key ) )->toArray();
+				}
+			);
+			return array(
+				'data'     => $page['data'] ?? array(),
+				'has_more' => ! empty( $page['has_more'] ),
+			);
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'list_refunds_error' );
+		}
+	}
+
+	/**
+	 * Cancel a POS intent without order mutations.
+	 *
+	 * @param string $id PaymentIntent ID.
+	 * @return array|WP_Error Intent or error.
+	 */
+	public function cancel_payment_intent_by_id( string $id ) {
+		try {
+			$intent = $this->timed(
+				'cancel_payment_intent_by_id',
+				function () use ( $id ) {
+					return $this->get_stripe_client()->paymentIntents->cancel( $id );
+				}
+			);
+			return $intent->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'cancel_payment_intent_by_id_error' );
+		}
+	}
+
+	/**
+	 * Capture a POS intent without order mutations.
+	 *
+	 * @param string $id PaymentIntent ID.
+	 * @return array|WP_Error Intent or error.
+	 */
+	public function capture_payment_intent( string $id ) {
+		try {
+			$intent = $this->timed(
+				'capture_payment_intent',
+				function () use ( $id ) {
+					return $this->get_stripe_client()->paymentIntents->capture( $id );
+				}
+			);
+			return $intent->toArray();
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'capture_payment_intent_error' );
 		}
 	}
 
@@ -458,6 +672,10 @@ class StripeTerminalService {
 	 * @return array|WP_Error The confirmed payment intent or error.
 	 */
 	public function confirm_payment_intent( string $payment_intent_id, WC_Order $order ) {
+		if ( Legacy_Adoption::is_adopted( $payment_intent_id ) ) {
+			// Pro adopted this attempt on upgrade: its outcome is Pro's to record.
+			return new WP_Error( 'stwc_intent_adopted', __( 'This payment is now handled by WooCommerce POS Pro; reopen the order from the POS.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 409 ) );
+		}
 		try {
 			\Stripe\Stripe::setApiKey( $this->api_key );
 
@@ -702,6 +920,74 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * List locations across all pages for the settings screen.
+	 *
+	 * @return array|WP_Error Location arrays or error.
+	 */
+	public function list_all_locations() {
+		try {
+			// The read timeout covers the first page and every lazy page the iterator fetches.
+			return $this->with_read_timeout(
+				function () {
+					$collection = $this->get_stripe_client()->terminal->locations->all( array( 'limit' => 100 ) );
+					$locations  = array();
+					foreach ( $collection->autoPagingIterator() as $location ) {
+						$locations[] = $location->toArray();
+					}
+					return $locations;
+				}
+			);
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'list_all_locations_error' );
+		}
+	}
+
+	/**
+	 * Resolve a Terminal location's display name for cashier-facing copy.
+	 *
+	 * The POS shows the name beside the reader (an id like tml_… is not something a cashier
+	 * reads). Cached for a week per location; a failed lookup returns null and never blocks a
+	 * descriptor or a bootstrap — the id still travels, the name is a courtesy.
+	 *
+	 * @param string $location_id Terminal location id (tml_…).
+	 *
+	 * @return null|string Display name, or null when unknown.
+	 */
+	public function get_location_display_name( string $location_id ): ?string {
+		if ( '' === $location_id ) {
+			return null;
+		}
+		$cache_key = 'stwc_location_name_' . substr( md5( $this->api_key . '|' . $location_id ), 0, 12 );
+		$cached    = get_transient( $cache_key );
+		if ( \is_array( $cached ) ) {
+			return null;
+		}
+		if ( \is_string( $cached ) && '' !== $cached ) {
+			return $cached;
+		}
+		try {
+			\Stripe\Stripe::setApiKey( $this->api_key );
+			$location = $this->with_read_timeout(
+				function () use ( $location_id ) {
+					return \Stripe\Terminal\Location::retrieve( $location_id );
+				}
+			);
+		} catch ( Exception $e ) {
+			Logger::log( \sprintf( 'get_location_display_name: Location::retrieve(%s) failed with %s: %s; the POS shows the reader without a location name (not retried for an hour).', $location_id, \get_class( $e ), $e->getMessage() ) );
+			// A restricted key or an outage must not cost a Stripe read on every descriptor build.
+			set_transient( $cache_key, self::LOCATION_NAME_UNKNOWN, 3600 );
+			return null;
+		}
+		$name = isset( $location->display_name ) ? trim( (string) $location->display_name ) : '';
+		if ( '' === $name ) {
+			set_transient( $cache_key, self::LOCATION_NAME_UNKNOWN, 3600 );
+			return null;
+		}
+		set_transient( $cache_key, $name, 604800 );
+		return $name;
+	}
+
+	/**
 	 * Register a Stripe Terminal reader.
 	 *
 	 * @param string $location_id       The location ID.
@@ -723,6 +1009,24 @@ class StripeTerminalService {
 			return $reader->toArray();
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'register_reader_error' );
+		}
+	}
+
+	/**
+	 * List readers across all pages for the server provider.
+	 *
+	 * @return array|WP_Error Reader arrays or error.
+	 */
+	public function list_all_readers() {
+		try {
+			$collection = $this->get_stripe_client()->terminal->readers->all( array( 'limit' => 100 ) );
+			$readers    = array();
+			foreach ( $collection->autoPagingIterator() as $reader ) {
+				$readers[] = $reader->toArray();
+			}
+			return $readers;
+		} catch ( Exception $e ) {
+			return $this->handle_stripe_exception( $e, 'list_all_readers_error' );
 		}
 	}
 
@@ -814,11 +1118,25 @@ class StripeTerminalService {
 	 * @return array|WP_Error The payment status information or error.
 	 */
 	public function check_payment_status_from_stripe( WC_Order $order ) {
+		if ( Legacy_Adoption::is_adopted( (string) $order->get_meta( '_stripe_terminal_payment_intent_id' ) ) ) {
+			return new WP_Error( 'stwc_intent_adopted', __( 'This payment is now handled by WooCommerce POS Pro; reopen the order from the POS.', 'stripe-terminal-for-woocommerce' ), array( 'status' => 409 ) );
+		}
 		return $this->with_read_timeout(
 			function () use ( $order ) {
 				return $this->check_payment_status_with_read_timeout( $order );
 			}
 		);
+	}
+
+	/**
+	 * Whether an intent belongs to WooCommerce POS Pro's ledger (a keypad leg, or an attempt Pro
+	 * adopted on upgrade): a split order's partial payment, which must never complete the order
+	 * through this panel.
+	 *
+	 * @param \Stripe\PaymentIntent $payment_intent Intent.
+	 */
+	private static function is_pro_intent( $payment_intent ): bool {
+		return ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) );
 	}
 
 	/**
@@ -834,9 +1152,24 @@ class StripeTerminalService {
 
 			$order_id = $order->get_id();
 
-				// First, try to get payment intent from order transaction ID.
-				$transaction_id = $order->get_transaction_id();
-			if ( $transaction_id ) {
+			// The panel's own recorded intent first: the order's transaction id may be a POS keypad
+			// leg Free copied there, which is a partial payment and never this panel's attempt.
+			$recorded_payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
+			if ( $recorded_payment_intent_id ) {
+				try {
+					$payment_intent = \Stripe\PaymentIntent::retrieve( $recorded_payment_intent_id );
+				} catch ( \Stripe\Exception\InvalidRequestException $e ) {
+					if ( 404 !== $e->getHttpStatus() ) {
+						return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
+					}
+
+					Logger::log( 'Stripe Terminal manual status check: recorded payment intent not found, falling back to the transaction id.' );
+				}
+			}
+
+			// Then the order transaction id, for an order completed before the intent was recorded.
+			$transaction_id = $order->get_transaction_id();
+			if ( ! isset( $payment_intent ) && $transaction_id ) {
 				try {
 					// Check if it's a payment intent ID.
 					if ( 0 === strpos( $transaction_id, 'pi_' ) ) {
@@ -851,20 +1184,9 @@ class StripeTerminalService {
 				}
 			}
 
-			// If intent metadata exists, retrieve that intent directly before scanning.
-			if ( ! isset( $payment_intent ) ) {
-				$recorded_payment_intent_id = $order->get_meta( '_stripe_terminal_payment_intent_id' );
-				if ( $recorded_payment_intent_id ) {
-					try {
-						$payment_intent = \Stripe\PaymentIntent::retrieve( $recorded_payment_intent_id );
-					} catch ( \Stripe\Exception\InvalidRequestException $e ) {
-						if ( 404 !== $e->getHttpStatus() ) {
-							return $this->handle_stripe_exception( $e, 'check_payment_status_error' );
-						}
-
-						Logger::log( 'Stripe Terminal manual status check: recorded payment intent not found, falling back to metadata search.' );
-					}
-				}
+			// The transaction id may name a POS leg Pro drove or adopted: never this panel's payment.
+			if ( isset( $payment_intent ) && self::is_pro_intent( $payment_intent ) ) {
+				unset( $payment_intent );
 			}
 
 			// If we don't have a payment intent yet, search for it by order metadata.
@@ -876,7 +1198,7 @@ class StripeTerminalService {
 				);
 
 				foreach ( $payment_intents->data as $pi ) {
-					if ( isset( $pi->metadata->order_id ) && $pi->metadata->order_id == $order_id ) {
+					if ( isset( $pi->metadata->order_id ) && $pi->metadata->order_id == $order_id && ! self::is_pro_intent( $pi ) ) {
 						$payment_intent = $pi;
 
 						break;
@@ -998,6 +1320,13 @@ class StripeTerminalService {
 	 */
 	private function handle_payment_intent_succeeded( \Stripe\PaymentIntent $payment_intent ) {
 		$order_id = $payment_intent->metadata->order_id ?? null;
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) ) ) {
+			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
+			return array(
+				'success' => true,
+				'message' => 'POS ledger intent; handled by WooCommerce POS Pro.',
+			);
+		}
 
 		if ( ! $order_id ) {
 			return new WP_Error(
@@ -1055,6 +1384,13 @@ class StripeTerminalService {
 			}
 		);
 		$order_id       = $payment_intent->metadata->order_id ?? null;
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) ) ) {
+			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
+			return array(
+				'success' => true,
+				'message' => 'POS ledger intent; handled by WooCommerce POS Pro.',
+			);
+		}
 
 		if ( ! $order_id ) {
 			return new WP_Error(
@@ -1127,6 +1463,13 @@ class StripeTerminalService {
 	 */
 	private function handle_payment_intent_failed( \Stripe\PaymentIntent $payment_intent ) {
 		$order_id = $payment_intent->metadata->order_id ?? null;
+		if ( ! empty( $payment_intent->metadata->wcpos_payment_id ) || Legacy_Adoption::is_adopted( (string) ( $payment_intent->id ?? '' ) ) ) {
+			// A WooCommerce POS 1.11 ledger leg is settled by Pro, never by the legacy handlers.
+			return array(
+				'success' => true,
+				'message' => 'POS ledger intent; handled by WooCommerce POS Pro.',
+			);
+		}
 
 		if ( ! $order_id ) {
 			return new WP_Error(

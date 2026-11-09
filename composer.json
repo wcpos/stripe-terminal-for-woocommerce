@@ -49,12 +49,7 @@
     "fix": "php-cs-fixer fix .",
     "test": "phpunit --configuration phpunit.xml.dist",
     "test:coverage": "phpunit --configuration phpunit.xml.dist --coverage-clover=coverage.xml",
-    "prefix-dependencies": [
-      "composer --working-dir=php-scoper install",
-      "cd php-scoper && vendor/bin/php-scoper add-prefix --output-dir=../vendor_prefixed --force && cd ..",
-      "composer dump-autoload -o",
-      "php generate_autoload.php"
-    ],
+    "scope-release": "bash scripts/scope-release.sh",
     "test:stripe": "phpunit --configuration phpunit.xml.dist --filter StripeLiveIntegrationTest"
   },
   "autoload": {

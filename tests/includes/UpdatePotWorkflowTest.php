@@ -35,7 +35,7 @@ class UpdatePotWorkflowTest extends TestCase {
 
 		$this->assertIsString( $workflow );
 		$this->assertStringContainsString(
-			'--exclude=includes/abstracts,includes/utils,assets/js/blocks',
+			'--exclude=includes/abstracts,includes/utils',
 			$workflow
 		);
 	}

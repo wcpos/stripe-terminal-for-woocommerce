@@ -12,6 +12,7 @@ services:
     volumes:
       - wordpress_data:/var/www/html
       - ../:/var/www/html/wp-content/plugins/stripe-terminal-for-woocommerce
+      - ./pro/woocommerce-pos-pro:/var/www/html/wp-content/plugins/woocommerce-pos-pro
     depends_on:
       db:
         condition: service_healthy
@@ -43,6 +44,7 @@ services:
     volumes:
       - wordpress_data:/var/www/html
       - ../:/var/www/html/wp-content/plugins/stripe-terminal-for-woocommerce
+      - ./pro/woocommerce-pos-pro:/var/www/html/wp-content/plugins/woocommerce-pos-pro
       - ./setup.sh:/setup.sh
     entrypoint: ["/bin/sh", "/setup.sh"]
     environment:

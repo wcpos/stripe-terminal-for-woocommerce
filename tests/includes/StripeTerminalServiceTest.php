@@ -22,7 +22,7 @@ class StripeHttpClientFake implements \Stripe\HttpClient\ClientInterface {
 	private $responses;
 
 	/**
-	 * @var array<int, array{method:string,url:string,params:array}>
+	 * @var array<int, array{method:string,url:string,params:array,headers:array}>
 	 */
 	public $requests = array();
 
@@ -32,12 +32,31 @@ class StripeHttpClientFake implements \Stripe\HttpClient\ClientInterface {
 
 	public function request( $method, $abs_url, $headers, $params, $has_file, $api_mode = 'v1', $max_network_retries = null ) {
 		$this->requests[] = array(
-			'method' => $method,
-			'url'    => $abs_url,
-			'params' => $params,
+			'method'  => $method,
+			'url'     => $abs_url,
+			'params'  => $params,
+			'headers' => $headers,
 		);
 
 		$response = array_shift( $this->responses );
+		if ( $response instanceof \Throwable ) {
+			throw $response;
+		}
+		if ( null === $response ) {
+			// Nothing queued for this request: refuse it the way Stripe refuses a key it does not
+			// know, so a test that expects a WP_Error gets one without any request leaving the
+			// process. The service catches everything into a WP_Error, so a test that queued too few
+			// answers never failed loudly; this message, inside that WP_Error, at least names the ask.
+			$response = array(
+				'body'   => array(
+					'error' => array(
+						'type'    => 'invalid_request_error',
+						'message' => 'StripeHttpClientFake: no response queued for ' . $method . ' ' . $abs_url,
+					),
+				),
+				'status' => 401,
+			);
+		}
 
 		return array( wp_json_encode( $response['body'] ), $response['status'], array() );
 	}
@@ -54,6 +73,10 @@ class StripeTerminalServiceTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
+		$GLOBALS['stwc_payment_id_for_action'] = array();
+		// No test here talks to api.stripe.com: a fake with nothing queued refuses every request
+		// locally, and a test that needs answers installs its own.
+		$this->install_fake_stripe_client( array() );
 
 		// Stub common WP functions used by the error handler.
 		Functions\stubs(
@@ -81,6 +104,7 @@ class StripeTerminalServiceTest extends TestCase {
 	 * Tear down Brain\Monkey after each test.
 	 */
 	protected function tearDown(): void {
+		\Stripe\ApiRequestor::setHttpClient( \Stripe\HttpClient\CurlClient::instance() );
 		Monkey\tearDown();
 		parent::tearDown();
 	}
@@ -92,6 +116,20 @@ class StripeTerminalServiceTest extends TestCase {
 	/**
 	 * Test constructor creates an instance without errors.
 	 */
+	/** An attempt Pro adopted on upgrade is not completed by the old panel's AJAX confirm. */
+	public function test_confirm_payment_intent_refuses_an_adopted_attempt(): void {
+		$GLOBALS['stwc_payment_id_for_action'] = array( 'pi_adopted' => 'row-1' );
+		try {
+			$service = ( new \ReflectionClass( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class ) )->newInstanceWithoutConstructor();
+			Functions\when( '__' )->returnArg();
+			$result = $service->confirm_payment_intent( 'pi_adopted', \Mockery::mock( \WC_Order::class ) );
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertSame( 'stwc_intent_adopted', $result->get_error_code() );
+		} finally {
+			$GLOBALS['stwc_payment_id_for_action'] = array();
+		}
+	}
+
 	public function test_constructor_creates_instance(): void {
 		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
 
@@ -114,6 +152,7 @@ class StripeTerminalServiceTest extends TestCase {
 		$client = \Stripe\HttpClient\CurlClient::instance();
 		$client->setConnectTimeout( 30 );
 		$client->setTimeout( 30 );
+		\Stripe\ApiRequestor::setHttpClient( $client );
 
 		Functions\when( 'apply_filters' )->alias(
 			function ( $hook, $value ) {
@@ -126,6 +165,24 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertSame( 7, $client->getConnectTimeout() );
 		$this->assertSame( 83, $client->getTimeout() );
 		$this->assertSame( $client, \Stripe\ApiRequestor::httpClient() );
+	}
+
+	/** A client installed on purpose before the service is built stays installed; over the SDK's default the plugin's curl client is installed. */
+	public function test_constructor_keeps_an_installed_custom_http_client(): void {
+		$fake = $this->install_fake_stripe_client( array() );
+
+		new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$this->assertSame( $fake, \Stripe\ApiRequestor::httpClient() );
+		$this->assertSame( 10, \Stripe\HttpClient\CurlClient::instance()->getConnectTimeout() );
+
+		$other = new \Stripe\HttpClient\CurlClient();
+		\Stripe\ApiRequestor::setHttpClient( $other );
+
+		new StripeTerminalService( 'sk_test_fake_key_123' );
+
+		$this->assertSame( \Stripe\HttpClient\CurlClient::instance(), \Stripe\ApiRequestor::httpClient() );
+		$this->assertNotSame( $other, \Stripe\ApiRequestor::httpClient() );
 	}
 
 	/**
@@ -406,8 +463,8 @@ class StripeTerminalServiceTest extends TestCase {
 	/**
 	 * Install a queue-backed Stripe HTTP client and return it.
 	 *
-	 * Must run after the service is constructed: the constructor installs
-	 * its own CurlClient with the plugin's timeouts.
+	 * The service constructor leaves an installed fake in place (it installs its own curl client
+	 * only when nothing else is), so this may run before or after the service is built.
 	 *
 	 * @param array $responses Queued fake responses.
 	 */
@@ -908,6 +965,80 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertCount( 2, $client->requests );
 		$this->assertStringEndsWith( '/v1/payment_intents/pi_recorded', $client->requests[0]['url'] );
 		$this->assertStringNotContainsString( '/v1/payment_intents?', $client->requests[0]['url'] );
+	}
+
+	/**
+	 * A split order: the order transaction id is the POS keypad leg Free copied there, the recorded
+	 * intent is this panel's own attempt. The panel's attempt is read first and decides.
+	 */
+	public function test_check_payment_status_reads_the_recorded_intent_before_the_transaction_id(): void {
+		$service = new StripeTerminalService( 'sk_test_status_key' );
+		$client  = new StripeHttpClientFake(
+			array(
+				array(
+					'body'   => array( 'id' => 'pi_panel', 'object' => 'payment_intent', 'status' => 'requires_payment_method', 'amount' => 2500, 'currency' => 'usd', 'created' => 1700000000 ),
+					'status' => 200,
+				),
+				array(
+					'body'   => array( 'object' => 'list', 'data' => array() ),
+					'status' => 200,
+				),
+			)
+		);
+		\Stripe\ApiRequestor::setHttpClient( $client );
+
+		$order = Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_transaction_id' )->andReturn( 'pi_keypad' );
+		$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( 'pi_panel' );
+		$order->shouldReceive( 'is_paid' )->andReturn( false );
+		$order->shouldReceive( 'get_status' )->andReturn( 'pending' );
+		$order->shouldReceive( 'update_meta_data' )->never();
+		$order->shouldReceive( 'save' )->never();
+
+		$result = $service->check_payment_status_from_stripe( $order );
+
+		$this->assertStringEndsWith( '/v1/payment_intents/pi_panel', $client->requests[0]['url'] );
+		foreach ( $client->requests as $request ) {
+			$this->assertStringNotContainsString( 'pi_keypad', $request['url'] );
+		}
+		$this->assertSame( 'pi_panel', $result['payment_intent']['id'] ?? ( is_wp_error( $result ) ? 'error' : 'none' ) );
+	}
+
+	/**
+	 * The old panel's "Check Payment Status" on a split order before any panel attempt: the order's
+	 * transaction id is the POS keypad leg (Pro's metadata), so it is not this panel's payment, and
+	 * the metadata scan skips Pro's intents too. Nothing is written.
+	 */
+	public function test_check_payment_status_ignores_pro_intents(): void {
+		$service = new StripeTerminalService( 'sk_test_status_key' );
+		$client  = new StripeHttpClientFake(
+			array(
+				array(
+					'body'   => array( 'id' => 'pi_keypad', 'object' => 'payment_intent', 'status' => 'succeeded', 'amount' => 1000, 'currency' => 'usd', 'created' => 1700000000, 'metadata' => array( 'order_id' => '42', 'wcpos_payment_id' => 'A1234567-1234-4123-8123-123456789ABC' ) ),
+					'status' => 200,
+				),
+				array(
+					'body'   => array( 'object' => 'list', 'data' => array( array( 'id' => 'pi_keypad', 'object' => 'payment_intent', 'status' => 'succeeded', 'amount' => 1000, 'currency' => 'usd', 'created' => 1700000000, 'metadata' => array( 'order_id' => '42', 'wcpos_payment_id' => 'A1234567-1234-4123-8123-123456789ABC' ) ) ) ),
+					'status' => 200,
+				),
+			)
+		);
+		\Stripe\ApiRequestor::setHttpClient( $client );
+
+		$order = Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		$order->shouldReceive( 'get_transaction_id' )->andReturn( 'pi_keypad' );
+		$order->shouldReceive( 'get_meta' )->with( '_stripe_terminal_payment_intent_id' )->andReturn( '' );
+		$order->shouldReceive( 'is_paid' )->andReturn( false );
+		$order->shouldReceive( 'update_meta_data' )->never();
+		$order->shouldReceive( 'save' )->never();
+
+		$result = $service->check_payment_status_from_stripe( $order );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'payment_intent_not_found', $result->get_error_code() );
+		$this->assertCount( 2, $client->requests );
 	}
 
 	// -----------------------------------------------------------------------

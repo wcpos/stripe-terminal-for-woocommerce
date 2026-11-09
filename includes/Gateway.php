@@ -41,6 +41,13 @@ class Gateway extends WC_Payment_Gateway {
 	protected $stripe_service;
 
 	/**
+	 * Reader choices, null on failure, or false before the first lookup.
+	 *
+	 * @var array|null|false
+	 */
+	private $terminal_options_cache = false;
+
+	/**
 	 * Constructor for the gateway.
 	 */
 	public function __construct() {
@@ -92,18 +99,9 @@ class Gateway extends WC_Payment_Gateway {
 	 * Initialize gateway form fields.
 	 */
 	public function init_form_fields(): void {
+		$terminal_options = $this->fetch_terminal_options();
+		$connections = Settings::get_wcpos_connections();
 		$this->form_fields = array(
-			'enabled' => array(
-				'title'       => __( 'Enable/Disable', 'stripe-terminal-for-woocommerce' ),
-				'type'        => 'checkbox',
-				'label'       => \sprintf(
-					// Translators: Placeholders %s is the link to WooCommerce POS.
-					__( 'Enable Stripe Terminal for web checkout (not necessary for %s)', 'stripe-terminal-for-woocommerce' ),
-					'<a href="https://wcpos.com" target="_blank">WooCommerce POS</a>'
-				),
-				'description' => __( 'This enables the gateway for online store checkout. The POS uses this gateway automatically when configured.', 'stripe-terminal-for-woocommerce' ),
-				'default'     => 'no',
-			),
 			'title' => array(
 				'title'       => __( 'Title', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'text',
@@ -136,6 +134,58 @@ class Gateway extends WC_Payment_Gateway {
 					'autocomplete' => 'off',
 				),
 			),
+			'default_reader' => array(
+				'title'       => __( 'Default terminal', 'stripe-terminal-for-woocommerce' ),
+				'type'        => null === $terminal_options ? 'text' : 'select',
+				'options'     => array( '' => __( '— Select a terminal —', 'stripe-terminal-for-woocommerce' ) ) + ( $terminal_options ?? array() ),
+				'default'     => '',
+				'description' => __( 'Terminal used by default at POS checkout.', 'stripe-terminal-for-woocommerce' ),
+				'desc_tip'    => true,
+			),
+			'allowed_readers' => array(
+				'title'       => __( 'Enabled terminals', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'multiselect',
+				'class'       => 'wc-enhanced-select',
+				'options'     => $terminal_options,
+				'default'     => array(),
+				'description' => __( 'Limit POS checkout to selected terminals, or leave empty to allow all terminals.', 'stripe-terminal-for-woocommerce' ),
+				'desc_tip'    => true,
+			),
+			'lock_to_default' => array(
+				'title'       => __( 'Lock terminal selection', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'label'       => __( 'Cashiers cannot change the terminal at POS checkout.', 'stripe-terminal-for-woocommerce' ),
+				'description' => __( 'Requires a default terminal.', 'stripe-terminal-for-woocommerce' ),
+				'desc_tip'    => true,
+				'default'     => 'no',
+			),
+			'wcpos_connection_server' => array(
+				'title'       => __( 'POS connections', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'label'       => __( 'Smart readers (the store drives the reader over the network)', 'stripe-terminal-for-woocommerce' ),
+				'default'     => in_array( 'server', $connections, true ) ? 'yes' : 'no',
+			),
+			'wcpos_connection_device' => array(
+				'title'       => '',
+				'type'        => 'checkbox',
+				'label'       => __( 'Bluetooth readers and Tap to Pay (the POS app drives the reader)', 'stripe-terminal-for-woocommerce' ),
+				'default'     => in_array( 'device', $connections, true ) ? 'yes' : 'no',
+				'description' => __( 'Tick every kind of reader this store allows. Each till pays with the reader it picks in the app.', 'stripe-terminal-for-woocommerce' ),
+			),
+			'wcpos_location_test' => array(
+				'title'       => __( 'Terminal location (testing)', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'select',
+				'options'     => $this->fetch_location_options( true ),
+				'default'     => '',
+				'description' => __( 'Bluetooth readers and Tap to Pay register to this location when the app connects.', 'stripe-terminal-for-woocommerce' ),
+			),
+			'wcpos_location_live' => array(
+				'title'       => __( 'Terminal location (live)', 'stripe-terminal-for-woocommerce' ),
+				'type'        => 'select',
+				'options'     => $this->fetch_location_options( false ),
+				'default'     => '',
+				'description' => __( 'Bluetooth readers and Tap to Pay register to this location when the app connects.', 'stripe-terminal-for-woocommerce' ),
+			),
 			'test_mode' => array(
 				'title'       => __( 'Test Mode', 'stripe-terminal-for-woocommerce' ),
 				'type'        => 'checkbox',
@@ -158,6 +208,96 @@ class Gateway extends WC_Payment_Gateway {
 				'description' => __( 'Sends a periodic ping to the reader so the first payment after the reader has been idle is not slow. Try this if payments regularly take a long time to appear on the reader. Not recommended when multiple registers share one reader.', 'stripe-terminal-for-woocommerce' ),
 			),
 		);
+		// Omit the field on fetch failure so WooCommerce retains its saved value.
+		if ( null === $terminal_options ) {
+			unset( $this->form_fields['allowed_readers'] );
+		}
+	}
+
+	/**
+	 * Fetch location choices only on this gateway's settings screen.
+	 *
+	 * @param bool $test_mode Whether to use test-mode credentials and selection.
+	 * @return array Location ID => display name choices.
+	 */
+	private function fetch_location_options( bool $test_mode ): array {
+		$options = array( '' => __( 'Select a location', 'stripe-terminal-for-woocommerce' ) );
+		$saved   = Settings::get_wcpos_location( $test_mode );
+		// Retain the saved choice if Stripe is unavailable during an unrelated settings save.
+		if ( '' !== $saved ) {
+			$options[ $saved ] = $saved;
+		}
+		if ( ! is_admin() || wp_doing_ajax() ) {
+			return $options;
+		}
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only settings screen detection.
+		$section = isset( $_GET['section'] ) ? sanitize_text_field( wp_unslash( $_GET['section'] ) ) : '';
+		$settings = Settings::get_gateway_settings();
+		$api_key  = $settings[ $test_mode ? 'test_secret_key' : 'secret_key' ] ?? '';
+		if ( Settings::GATEWAY_ID !== $section || ! $api_key ) {
+			return $options;
+		}
+		$locations = ( new StripeTerminalService( $api_key ) )->list_all_locations();
+		if ( ! is_wp_error( $locations ) ) {
+			foreach ( $locations as $location ) {
+				$options[ $location['id'] ] = $location['display_name'];
+			}
+		}
+		return $options;
+	}
+
+	/**
+	 * Fetch reader choices only on this gateway's settings screen.
+	 *
+	 * @return array|null Reader ID => label choices, or null when unavailable.
+	 */
+	private function fetch_terminal_options(): ?array {
+		if ( false !== $this->terminal_options_cache ) {
+			return $this->terminal_options_cache;
+		}
+		$this->terminal_options_cache = null;
+		if ( ! is_admin() || wp_doing_ajax() ) {
+			return null;
+		}
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only settings screen detection.
+		$section = isset( $_GET['section'] ) ? sanitize_text_field( wp_unslash( $_GET['section'] ) ) : '';
+		if ( Settings::GATEWAY_ID !== $section || ! Settings::get_api_key() || ! class_exists( '\WCPOS\WooCommercePOSPro\Payments\Server\Abstract_Provider_Adapter' ) ) {
+			return null;
+		}
+		$cache_key = 'stwc_terminal_choices_' . md5( Settings::get_api_key() );
+		$cached    = get_transient( $cache_key );
+		if ( is_array( $cached ) ) {
+			$this->terminal_options_cache = $cached;
+			return $cached;
+		}
+		$readers = ( new Server\Stripe_Server_Provider() )->list_readers();
+		if ( is_wp_error( $readers ) ) {
+			return null;
+		}
+		$options = array();
+		foreach ( $readers as $reader ) {
+			$options[ $reader['id'] ] = sprintf( '%s (%s)', $reader['label'], $reader['id'] );
+		}
+		set_transient( $cache_key, $options, 5 * MINUTE_IN_SECONDS );
+		$this->terminal_options_cache = $options;
+		return $options;
+	}
+
+	/**
+	 * Stripe Terminal is a POS gateway: it is offered on POS requests and on the order-pay
+	 * page a POS user opens, never on the shop checkout. The saved `enabled` option is not
+	 * consulted, so a site that once enabled web checkout does not keep it.
+	 *
+	 * @return bool
+	 */
+	public function is_available() {
+		if ( empty( $this->api_key ) ) {
+			return false;
+		}
+		if ( \function_exists( 'wcpos_request' ) && wcpos_request() ) {
+			return true;
+		}
+		return \function_exists( 'is_checkout_pay_page' ) && is_checkout_pay_page() && current_user_can( 'access_woocommerce_pos' );
 	}
 
 	/**
@@ -247,6 +387,17 @@ class Gateway extends WC_Payment_Gateway {
 							<?php } ?>
 					</td>
 			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'WooCommerce POS checkout', 'stripe-terminal-for-woocommerce' ); ?></th>
+				<td>
+					<?php if ( Server\Registration::pro_supported() ) { ?>
+						<code><?php echo esc_html( Server\Stripe_Server_Provider::webhook_url() ); ?></code>
+						<?php echo esc_html( Settings::get_pos_webhook_secret() ? __( 'Signing secret stored.', 'stripe-terminal-for-woocommerce' ) : __( 'Signing secret missing; enter a Stripe secret key for the selected mode and save settings to register.', 'stripe-terminal-for-woocommerce' ) ); ?>
+					<?php } else { ?>
+						<?php esc_html_e( 'Requires WooCommerce POS Pro 2.0.0 or newer.', 'stripe-terminal-for-woocommerce' ); ?>
+					<?php } ?>
+				</td>
+			</tr>
 		</table>
 		<?php
 	}
@@ -330,7 +481,17 @@ class Gateway extends WC_Payment_Gateway {
 			}
 		}
 
-		return parent::process_admin_options();
+		$saved = parent::process_admin_options();
+		if ( Server\Registration::pro_supported() ) {
+			Server\Pos_Reader_Settings::mirror( Settings::get_gateway_settings() );
+		}
+		if ( Server\Registration::pro_supported() && Settings::get_api_key() ) {
+			Server\Pos_Webhook::ensure( Settings::get_api_key(), Settings::is_test_mode() ? 'test' : 'live' );
+			if ( class_exists( '\WCPOS\WooCommercePOSPro\Payments\Server\Reader_Curation' ) ) {
+				\WCPOS\WooCommercePOSPro\Payments\Server\Reader_Curation::forget( Settings::GATEWAY_ID );
+			}
+		}
+		return $saved;
 	}
 
 	/**
@@ -350,6 +511,11 @@ class Gateway extends WC_Payment_Gateway {
 				'result'   => 'success',
 				'redirect' => $this->get_return_url( $order ),
 			);
+		}
+
+		if ( $this->uses_pro_panel() || Legacy_Adoption::is_adopted( (string) $order->get_meta( '_stripe_terminal_payment_intent_id' ) ) ) {
+			// Pro's panel, or an attempt Pro adopted on upgrade: Pro reads the ledger and answers.
+			return wcpos_pro_order_pay_process( $order );
 		}
 
 			// Check for Stripe Terminal payment metadata.
@@ -386,8 +552,9 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
-		// Only recover from Stripe when this order has evidence of a prior Terminal attempt.
-		if ( $this->stripe_service && ( $order->get_transaction_id() || $payment_intent_id ) ) {
+		// Only recover from Stripe when this order has evidence of a prior old-panel attempt: a
+		// transaction id Free copied from a Pro ledger leg is a partial payment, not one to complete.
+		if ( $this->stripe_service && ( $payment_intent_id || $this->has_legacy_charge( $order ) ) ) {
 			$status_result = $this->stripe_service->check_payment_status_from_stripe( $order );
 			if ( is_wp_error( $status_result ) && 'stwc_payment_busy' === $status_result->get_error_code() ) {
 				wc_add_notice( __( 'Payment is processing, please try again.', 'stripe-terminal-for-woocommerce' ), 'error' );
@@ -435,23 +602,12 @@ class Gateway extends WC_Payment_Gateway {
 			}
 		}
 
-		// No Terminal payment yet.
-		// On a direct order-pay form submission, keep the failure notice so
-		// skipping the reader does not silently redirect back to the same page.
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Matches maybe_redirect_paid_order_submission detection; form nonce is verified by WooCommerce before process_payment.
-		if ( isset( $_POST['woocommerce_pay'] ) ) {
-			wc_add_notice( __( 'Payment error: No successful payment found for this order.', 'stripe-terminal-for-woocommerce' ), 'error' );
+		// No Terminal payment yet: the order-pay form was submitted without the reader
+		// completing, so keep the failure notice rather than silently reloading the page.
+		wc_add_notice( __( 'Payment error: No successful payment found for this order.', 'stripe-terminal-for-woocommerce' ), 'error' );
 
-			return array(
-				'result' => 'failure',
-			);
-		}
-
-		// Blocks / classic main checkout: create the pending order then send
-		// the customer to classic order-pay (pay_for_order) where Terminal UI runs.
 		return array(
-			'result'   => 'success',
-			'redirect' => $order->get_checkout_payment_url(),
+			'result' => 'failure',
 		);
 	}
 
@@ -473,6 +629,16 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
+		// A leg Pro drove refunds through Pro. When the order also carries an old-panel
+		// charge and Pro cannot allocate the amount across its rows (it refuses before
+		// moving money), the old path refunds that charge; Stripe caps it at the charge.
+		if ( $this->has_counting_row( $order ) ) {
+			$result = wcpos_pro_order_pay_refund( $order, $amount, $reason );
+			if ( ! is_wp_error( $result ) || 'wcpos_refund_not_allocatable' !== $result->get_error_code() || ! $this->has_legacy_charge( $order ) ) {
+				return $result;
+			}
+		}
+
 		// Refund with the key matching the mode the order was paid in, scoped to
 		// this call so the gateway instance keeps its configured-mode service.
 		$stripe_service = $this->stripe_service;
@@ -491,7 +657,13 @@ class Gateway extends WC_Payment_Gateway {
 			);
 		}
 
+		// The transaction id names the charge this order was completed with (the terminal charge
+		// meta is overwritten by later attempts), unless Free copied it from a Pro ledger leg: on a
+		// mixed order that is the keypad payment, which only Pro can refund.
 		$charge_or_intent_id = $order->get_meta( '_transaction_id' );
+		if ( $charge_or_intent_id && $this->is_pro_leg_reference( $order, (string) $charge_or_intent_id ) ) {
+			$charge_or_intent_id = '';
+		}
 		if ( ! $charge_or_intent_id ) {
 			$charge_or_intent_id = $order->get_meta( '_stripe_terminal_charge_id' );
 		}
@@ -580,6 +752,77 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Whether the POS order-pay page runs through Pro's shared panel.
+	 *
+	 * MOTO carve-out (roadmap#95, 2026-10-08): while "Phone Order" is enabled the merchant
+	 * keeps Stripe's own panel, because keyed entry has no home in Pro's panel yet. With it
+	 * off, the shared panel takes the page and the payment becomes a ledger row.
+	 */
+	private function uses_pro_panel(): bool {
+		return 'yes' !== $this->get_option( 'enable_moto' );
+	}
+
+	/**
+	 * Whether the order carries a charge the old panel took, which only the old refund
+	 * path can return.
+	 *
+	 * @param WC_Abstract_Order $order Order being refunded.
+	 */
+	private function has_legacy_charge( WC_Abstract_Order $order ): bool {
+		if ( '' !== (string) $order->get_meta( '_stripe_terminal_charge_id' ) ) {
+			return true;
+		}
+		$transaction = (string) $order->get_transaction_id();
+		return '' !== $transaction && ! $this->is_pro_leg_reference( $order, $transaction );
+	}
+
+	/**
+	 * Whether a reference on the order is one of Pro's own legs: Free copies a ledger row's intent
+	 * into the transaction id, and that is Pro's leg, not an old-panel charge. Free's own webview
+	 * row for an old-panel sale carries that sale's charge, which IS the old-panel charge, so only
+	 * server and device legs are consulted.
+	 *
+	 * @param WC_Abstract_Order $order     Order.
+	 * @param string            $reference Intent or charge id.
+	 */
+	private function is_pro_leg_reference( WC_Abstract_Order $order, string $reference ): bool {
+		if ( '' === $reference || ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Ledger' ) ) {
+			return false;
+		}
+		foreach ( \WCPOS\WooCommercePOS\Payments\Contract\Ledger::instance()->read( $order ) as $row ) {
+			if ( ! in_array( $row['capture_mode'] ?? '', array( 'server', 'device' ), true ) ) {
+				continue;
+			}
+			$refs = $row['provider_refs'] ?? array();
+			if ( in_array( $reference, array( $refs['action'] ?? null, $refs['stripe_payment_intent'] ?? null, $refs['payment_intent'] ?? null, $refs['transaction_id'] ?? null ), true ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether Pro's ledger holds a counting (authorized or captured) server or device row
+	 * for this gateway: a leg Pro drove and can refund.
+	 *
+	 * Free also mints a `webview` row for a sale the old panel completed; Pro cannot refund
+	 * that one (it carries no intent reference), so it stays on the old path.
+	 *
+	 * @param WC_Abstract_Order $order Order being refunded.
+	 */
+	private function has_counting_row( WC_Abstract_Order $order ): bool {
+		if ( ! class_exists( '\WCPOS\WooCommercePOS\Payments\Contract\Ledger' ) ) {
+			return false;
+		}
+		foreach ( \WCPOS\WooCommercePOS\Payments\Contract\Ledger::instance()->read( $order ) as $row ) {
+			if ( Settings::GATEWAY_ID === ( $row['method_id'] ?? null ) && in_array( $row['status'] ?? '', \WCPOS\WooCommercePOS\Payments\Contract\Ledger::COUNTING_STATUSES, true ) && in_array( $row['capture_mode'] ?? '', array( 'server', 'device' ), true ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Payment fields displayed during checkout or order-pay page.
 	 */
 	public function payment_fields(): void {
@@ -589,6 +832,14 @@ class Gateway extends WC_Payment_Gateway {
 			$description = apply_filters( 'woocommerce_gateway_description', $this->get_option( 'description' ), $this->id );
 		if ( $description ) {
 			echo '<p>' . wp_kses_post( $description ) . '</p>';
+		}
+
+		if ( $this->uses_pro_panel() ) {
+			$order = wc_get_order( isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0 );
+			if ( $order instanceof \WC_Order ) {
+				wcpos_pro_order_pay_panel( $this, $order );
+			}
+			return;
 		}
 
 			// Show loading state initially - readers will be loaded via AJAX.
@@ -601,17 +852,10 @@ class Gateway extends WC_Payment_Gateway {
 		// key, rejected nonce) left the cashier with an empty panel.
 		echo '<div class="stripe-terminal-error" style="display: none;"><p></p></div>';
 
-		// Check if we're on the order-pay page.
-		if ( is_checkout_pay_page() ) {
-			// Extract the order ID from the URL.
-			$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
-			$order    = wc_get_order( $order_id );
-				$amount   = $order ? $order->get_total() * 100 : 0; // Convert to cents.
-		} else {
-			// Default behavior for the main checkout page.
-			$order_id = null;
-			$amount   = WC()->cart ? WC()->cart->get_total( 'raw' ) * 100 : 0; // Convert to cents.
-		}
+		// The panel only renders on the order-pay page.
+		$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
+		$order    = wc_get_order( $order_id );
+		$amount   = $order ? $order->get_total() * 100 : 0; // Convert to cents.
 
 			// Payment interface with reader management (hidden initially, shown after AJAX load).
 			echo '<div class="stripe-terminal-payment-section" style="display: none;">';
@@ -695,9 +939,8 @@ class Gateway extends WC_Payment_Gateway {
 	 * Enqueue payment scripts on checkout pages.
 	 */
 	public function enqueue_payment_scripts(): void {
-		// Only load on classic checkout / order-pay. Blocks checkout uses the
-		// Blocks payment method registration and has no payment_fields() markup.
-		if ( ! $this->should_enqueue_classic_payment_scripts() ) {
+		// The panel lives on the order-pay page only; Pro's panel enqueues its own script.
+		if ( ! is_checkout_pay_page() || $this->uses_pro_panel() ) {
 			return;
 		}
 
@@ -722,18 +965,10 @@ class Gateway extends WC_Payment_Gateway {
 			true
 		);
 
-			// Check if we're on the order-pay page to get order ID and key.
-		$order_id  = null;
-		$order_key = null;
-		$order     = null;
-		if ( is_checkout_pay_page() ) {
-			$order_id = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
-			if ( $order_id ) {
-				$order     = wc_get_order( $order_id );
-				$order     = $order instanceof WC_Abstract_Order ? $order : null;
-				$order_key = $order ? $order->get_order_key() : null;
-			}
-		}
+		$order_id  = isset( $wp->query_vars['order-pay'] ) ? absint( $wp->query_vars['order-pay'] ) : 0;
+		$order     = $order_id ? wc_get_order( $order_id ) : null;
+		$order     = $order instanceof WC_Abstract_Order ? $order : null;
+		$order_key = $order ? $order->get_order_key() : null;
 
 		$payment_request_token = $this->create_payment_request_token( $order );
 
@@ -829,33 +1064,6 @@ class Gateway extends WC_Payment_Gateway {
 		} finally {
 			wp_set_current_user( $original_user_id );
 		}
-	}
-
-	/**
-	 * Whether the classic jQuery Terminal UI scripts should load.
-	 *
-	 * Order-pay always uses classic templates (even on Blocks stores). Main
-	 * Blocks checkout has no payment_fields() markup — skip classic assets there
-	 * to avoid pointless validate/list-reader AJAX on page load.
-	 *
-	 * @return bool
-	 */
-	private function should_enqueue_classic_payment_scripts(): bool {
-		if ( is_checkout_pay_page() ) {
-			return true;
-		}
-
-		if ( ! is_checkout() ) {
-			return false;
-		}
-
-		if ( class_exists( '\Automattic\WooCommerce\Blocks\Utils\CartCheckoutUtils' ) ) {
-			return ! \Automattic\WooCommerce\Blocks\Utils\CartCheckoutUtils::is_checkout_block_default();
-		}
-
-		$checkout_page_id = wc_get_page_id( 'checkout' );
-
-		return ! ( $checkout_page_id > 0 && function_exists( 'has_block' ) && has_block( 'woocommerce/checkout', $checkout_page_id ) );
 	}
 
 	/**

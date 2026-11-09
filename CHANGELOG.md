@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.0.0
+
+### Changed
+
+- The release zip ships its own prefixed copy of the Stripe PHP SDK, so another plugin that bundles a different `stripe/stripe-php` no longer causes a fatal error or mixed Stripe classes. (#65)
+- A store can now run smart readers and the app's Bluetooth readers and Tap to Pay at once, with the matching WooCommerce POS and Pro 2.0 release. The POS connection select on the gateway page is now two checkboxes, and each till pays with the reader it selects in the app. Saved settings keep their meaning. (wcpos/roadmap#523)
+- A Bluetooth or Tap to Pay payment taken offline that Stripe's webhook captured before the till's own capture now has its PaymentIntent and its test/live mode on the ledger row: the webhook writes them, and the free plugin 2.0 merges them into the row instead of replacing the till's own references. Such a payment can be refunded from the POS where before it reported "No Stripe payment found for refund". (wcpos/roadmap#426)
+- A POS payment whose create Stripe did not answer (a dropped connection or timeout) now stays pending and resumes on the same PaymentIntent when the till retries or the sweeper runs; before, the leg was dropped while the intent could already be on the reader.
+- A decline Stripe reports by webhook fails the POS leg the way polling does, after a fresh read of the intent: a retry already on the reader is left to polling, a paid intent reports its money, and a confirmed decline is retired so nothing can charge it again. A stale decline arriving after the payment was captured reports the capture; a provider record that contradicts captured money is refused and logged instead of ignored.
+- A replayed POS payment whose reader has moved on, or whose retry picked another reader, is no longer failed while the intent may be live or paid: the intent is read first, and an idempotency conflict keeps the leg pending.
+- A refund from the POS of an order paid on the previous order-pay panel finds the Stripe payment by the order's transaction id, charge ids included (Canadian orders check the charge for Interac).
+- The previous panel's Retry no longer puts an intent back on a reader once the POS has adopted it.
+- With Phone Order on, submitting the order-pay form no longer marks a partly paid order as paid from a POS keypad payment, and a refund on such a mixed order no longer targets the keypad payment on the old path.
+- A refund of a Stripe payment the plugin has no test/live mode on record for (one a Stripe webhook captured before the till's own capture, or an order paid on the previous order-pay panel) now records on the refund the mode it was made in, so switching the gateway between test and live while that refund is pending no longer leaves it unconfirmed for thirty days: the sweep reads it under the key it was made with.
+- A smart-reader or keypad refund whose request Stripe did not answer (the connection dropped, or Stripe returned a server error) no longer fails with an error that deletes the refund record and lets a retry refund the customer twice. The refund stays pending, the same request is sent again under the same idempotency key and the key of the mode the sale was made in, after one, five and thirty minutes and only within the time Stripe keeps the key, and Pro's refund sweep then records the one refund Stripe made. If Stripe refuses the re-sent request itself (not the key, and not for load), the refund is recorded as failed with Stripe's reason on the order, and the money is returned another way. Bluetooth and Tap to Pay refunds take the same path, now that Pro's refund sweep reads those rows too (Pro 2.0). A Bluetooth or Tap to Pay payment that a Stripe webhook captured before the till's own capture can be refunded: the refund finds the payment under the reference Pro kept for it, where before it reported "No Stripe payment found for refund". Such a payment records no test/live mode of its own; the refund records the mode it was made in (see above).
+- Pro's refund sweep is driven end to end against the real Stripe adapter in CI over a scripted Stripe: a refund Stripe leaves pending is confirmed or rejected on the order by the sweep, found by its metadata when Stripe's answer to the create carried no id, and read under the key of the mode it was made in after a test/live switch.
+- A Stripe rate-limit answer is now reported with its own status (429) instead of as an invalid request (400), so a throttled call is retried where an invalid one is refused.
+- The Stripe service installs its curl client on the Stripe SDK only while the SDK's client is still a curl client, so a host's own non-curl client survives (the plugin's timeout filters then govern no traffic), and the plugin's unit tests make no request to api.stripe.com.
+- A refund of a smart-reader or keypad payment that Stripe answered `pending` is read back by Pro's refund sweep until Stripe settles it, so the order's refund shows confirmed or rejected without a visit to the Stripe dashboard. The read uses the key of the mode the payment was made in, so switching the gateway between test and live does not strand it. A refund Stripe took but answered without its id is kept as pending and found again by the metadata the refund carried, instead of erroring and losing the refund record.
+- Pro's provider conformance suite runs in CI against the real adapter over a scripted Stripe; the transcripts in `tests/conformance/transcripts` are the certified record.
+- Terminal and phone-order PaymentIntents, including the keypad's, are created with `allowed_payment_method_types`, which the current Stripe API version accepts and which replaces the `payment_method_types` parameter removed in API 2026-09-30.endive, so a later stripe-php 22 upgrade cannot break payment creation.
+- Requires WooCommerce POS Pro 2.0.0 or newer; the plugin registers nothing and shows an admin notice on older or missing Pro.
+- Web checkout removed: Stripe Terminal is no longer offered on the shop's classic or Blocks checkout, and the "Enable Stripe Terminal for web checkout" setting is gone. The POS keypad and the POS order-pay page are the only surfaces.
+- If you had web checkout enabled, nothing changes on the POS; the shop checkout simply no longer lists Stripe Terminal.
+- The POS Legacy tab (order-pay page) runs through WooCommerce POS Pro's shared order-pay panel, so a Legacy-tab payment is a ledger row like a keypad payment. With Phone Order (MOTO) enabled, Stripe's own panel stays.
+- Attempts the old panel left mid-flight are folded into Pro's ledger once on upgrade, 25 orders per request.
+- Add a Stripe Terminal smart-reader checkout tile for WooCommerce POS 2.0 (Pro 2.0.0).
+- Automatically register the separate POS webhook endpoint when gateway settings are saved with a Stripe key and supported Pro installed.
+- Key POS PaymentIntent creation idempotently by payment attempt to prevent duplicate intents on retries.
+- Report Dashboard-configured on-reader tips to POS, which records them as a Tip order fee.
+- Bluetooth readers (Stripe Reader M2, WisePad 3) and Tap to Pay on iPhone and Android take payments in the WooCommerce POS 2.0 mobile app. They register to the Terminal location chosen for the test or live mode on the gateway page. (#120)
+- New gateway settings for smart readers: **Default terminal**, **Enabled terminals** and **Lock terminal selection** choose the reader POS checkout uses by default, which readers a till may pick, and whether cashiers can change it. (#119)
+
 ## 0.0.40 - 2026-10-17
 
 ### Fixed
