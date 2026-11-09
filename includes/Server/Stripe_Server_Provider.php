@@ -727,6 +727,7 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	 * may since have been retried on the reader (in progress, or paid). What fetch() would observe
 	 * decides; a confirmed decline is retired as fetch() retires it, a paid intent reports its money,
 	 * and anything in between is left to polling.
+	 * A retryable device decline is left to the device flow, as Stripe_Device_Provider::fetch() does.
 	 *
 	 * @param array  $intent   The event's intent.
 	 * @param string $event_id Stripe event ID.
@@ -735,6 +736,10 @@ class Stripe_Server_Provider extends \WCPOS\WooCommercePOSPro\Payments\Server\Ab
 	private function decline_patch( array $intent, string $event_id ): array {
 		$fresh = $this->service->retrieve_payment_intent( (string) $intent['id'] );
 		if ( is_wp_error( $fresh ) ) {
+			return array( 'event_id' => $event_id );
+		}
+		if ( 'requires_payment_method' === $fresh['status'] && empty( $fresh['metadata']['wcpos_reader'] ) && ! empty( $fresh['metadata']['wcpos_transport'] ) ) {
+			// The SDK retries the same declined device intent; the device flow settles it, as Stripe_Device_Provider::fetch() does.
 			return array( 'event_id' => $event_id );
 		}
 		if ( 'requires_payment_method' === $fresh['status'] && ! empty( $fresh['metadata']['wcpos_reader'] ) ) {
