@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Upgrading the plugin in place with "upload and replace" no longer stops with a fatal error (`Call to undefined method ... Settings::get_wcpos_connections()`). In the upload request the old version's classes are still loaded while the new files are on disk, so the gateway now stays unregistered for that one request and logs why; it registers normally from the next request. (wcpos/roadmap#586)
+
 ## 2.0.0
 
 ### Changed

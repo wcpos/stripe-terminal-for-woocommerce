@@ -226,8 +226,42 @@ namespace WCPOS\WooCommercePOS\StripeTerminal\Tests {
 			unset( $GLOBALS['wp'] );
 			$_POST = array();
 			$_GET  = array();
+			$this->set_mixed_version_cache( null );
 			Monkey\tearDown();
 			parent::tearDown();
+		}
+
+		/**
+		 * Set the per-request mixed-version cache.
+		 *
+		 * @param bool|null $value Cached value.
+		 */
+		private function set_mixed_version_cache( ?bool $value ): void {
+			$property = new \ReflectionProperty( Gateway::class, 'mixed_version_request' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+			$property->setValue( null, $value );
+		}
+
+		/** Only two non-empty, different versions are a mismatch. */
+		public function test_version_mismatch(): void {
+			$this->assertTrue( Gateway::version_mismatch( '2.0.0-beta1', '2.0.0' ) );
+			$this->assertFalse( Gateway::version_mismatch( '2.0.0', '2.0.0' ) );
+			$this->assertFalse( Gateway::version_mismatch( '', '2.0.0' ) );
+			$this->assertFalse( Gateway::version_mismatch( '2.0.0', '' ) );
+		}
+
+		/** A request whose plugin files were replaced does not register the gateway. */
+		public function test_register_gateway_skips_mixed_version_request(): void {
+			$this->set_mixed_version_cache( true );
+			$this->assertSame( array( 'X' ), Gateway::register_gateway( array( 'X' ) ) );
+		}
+
+		/** A single-version request registers the gateway. */
+		public function test_register_gateway_registers_in_single_version_request(): void {
+			$this->set_mixed_version_cache( false );
+			$this->assertSame( array( 'X', Gateway::class ), Gateway::register_gateway( array( 'X' ) ) );
 		}
 
 		/** Saved web-checkout enablement cannot expose the gateway outside POS. */
