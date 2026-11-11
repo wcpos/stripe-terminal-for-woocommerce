@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A POS payment in a currency or amount the Stripe account cannot take in person is now refused when it is created, with a message naming the currency and amount, and its unpaid PaymentIntent is cancelled. Since Stripe API 2026-09-30.endive, Stripe creates such a payment without in-person card payments instead of refusing it, and the till then retried a reader that could not take it ("PaymentIntent must accept an in-person payment method").
+
 ## 2.0.0
 
 ### Changed

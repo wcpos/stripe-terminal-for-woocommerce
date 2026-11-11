@@ -310,10 +310,70 @@ class StripeTerminalService {
 					);
 				}
 			);
-			return $intent->toArray();
+			$intent = $intent->toArray();
+			return $this->refuse_without_card_present( $intent, $amount, $currency ) ?? $intent;
 		} catch ( Exception $e ) {
 			return $this->handle_stripe_exception( $e, 'create_server_payment_intent_error' );
 		}
+	}
+
+	/**
+	 * Refuse an unpaid POS intent Stripe created without `card_present`.
+	 *
+	 * From API 2026-09-30.endive `allowed_payment_method_types` is a filter: a currency or amount
+	 * the account cannot take in person drops `card_present` instead of failing the create, and
+	 * the reader dispatch is refused later. An intent with no `payment_method_types`, or one whose
+	 * status may hold money or a reader, passes through for the existing flows to decide.
+	 *
+	 * @param array  $intent   The created or replayed intent.
+	 * @param int    $amount   Amount in minor units.
+	 * @param string $currency Lowercase currency code.
+	 * @return WP_Error|null The refusal, or null to pass the intent through.
+	 */
+	private function refuse_without_card_present( array $intent, int $amount, string $currency ): ?WP_Error {
+		if ( ! isset( $intent['payment_method_types'] ) || ! \is_array( $intent['payment_method_types'] ) ) {
+			return null;
+		}
+		if ( \in_array( 'card_present', $intent['payment_method_types'], true ) ) {
+			return null;
+		}
+		$status = $intent['status'] ?? '';
+		if ( 'requires_payment_method' !== $status && 'canceled' !== $status ) {
+			return null;
+		}
+		// A replay of an intent already cancelled here is refused again without a second cancel.
+		if ( 'requires_payment_method' === $status ) {
+			try {
+				$this->cancel_payment_intent_by_id( $intent['id'] );
+			} catch ( \Throwable $e ) { // Best effort: the refusal stands either way.
+				unset( $e );
+			}
+		}
+		Logger::log(
+			\sprintf(
+				'create_server_payment_intent: refused %s; Stripe created it without card_present for %s %d (minor units), payment_method_types: %s.',
+				$intent['id'],
+				strtoupper( $currency ),
+				$amount,
+				implode( ', ', $intent['payment_method_types'] )
+			)
+		);
+		$major = number_format( CurrencyConverter::convert_from_stripe_amount( $amount, $currency ), CurrencyConverter::get_decimal_places( $currency ), '.', '' );
+
+		return new WP_Error(
+			'card_present_unavailable',
+			\sprintf(
+				/* translators: 1: currency code, 2: amount in major units */
+				__( 'Stripe created this payment without in-person card payments, so a reader cannot take it. Stripe leaves them out when the currency (%1$s) or amount (%2$s) cannot be taken in person on this Stripe account. Check that the store currency is the currency your Stripe account takes in-person payments in.', 'stripe-terminal-for-woocommerce' ),
+				strtoupper( $currency ),
+				$major
+			),
+			array(
+				'status'         => 400,
+				'stripe_code'    => 'card_present_unavailable',
+				'payment_intent' => $intent['id'],
+			)
+		);
 	}
 
 	/**
