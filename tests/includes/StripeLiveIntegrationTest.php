@@ -337,6 +337,137 @@ class StripeLiveIntegrationTest extends TestCase {
 		);
 	}
 
+	/** POS-31F diagnostic D5: does Stripe drop card_present at create on an account without card_present_payments? */
+	public function test_pos31f_diag_account_without_card_present_capability(): void {
+		$this->require_stripe_test_key();
+		$this->diag_run(
+			'D5',
+			function ( StripeTerminalService $service, array &$run ): void {
+				$platform = $service->get_stripe_client();
+				$country  = \Stripe\Account::retrieve()->country;
+				if ( 'US' !== $country ) {
+					$this->diag( $service, 'D5', array( 'skipped' => 'platform country ' . $country ) );
+					$this->markTestSkipped( 'D5 needs a US platform account.' );
+				}
+				$run['step'] = 'account';
+				try {
+					$acct_id = $platform->accounts->create( $this->diag_account_params() )->id;
+				} catch ( \Throwable $e ) {
+					$this->diag( $service, 'D5', array( 'account' => $this->diag_thrown( $e ) ) );
+					$this->markTestSkipped( 'Could not create a Custom connected account; see the POS31F-DIAG line.' );
+				}
+				try {
+					$account = $platform->accounts->retrieve( $acct_id )->toArray();
+					$fields  = array(
+						'id'                    => $acct_id,
+						'card_payments'         => $account['capabilities']['card_payments'] ?? null,
+						'card_present_payments' => $account['capabilities']['card_present_payments'] ?? null,
+						'charges_enabled'       => $account['charges_enabled'] ?? null,
+					);
+					$this->diag( $service, 'D5 account', $fields );
+					if ( 'active' !== $fields['card_payments'] ) {
+						$this->markTestIncomplete( 'The connected account cannot charge (card_payments is not active); see the POS31F-DIAG line.' );
+					}
+					// The server path on the connected account: every intent call below goes through this client.
+					$service->set_stripe_client(
+						new \Stripe\StripeClient(
+							array(
+								'api_key'        => $this->secret_key,
+								'stripe_account' => $acct_id,
+							)
+						)
+					);
+					$run['step'] = 'service';
+					$result      = $service->create_server_payment_intent( 1234, 'usd', 'STWC diag POS-31F D5', array( 'stwc_test' => 'pos31f_diag' ), $this->diag_key(), false );
+					$service_id  = is_wp_error( $result ) ? ( ( (array) $result->get_error_data() )['payment_intent'] ?? null ) : ( $result['id'] ?? null );
+					if ( null !== $service_id ) {
+						$run['ids'][] = $service_id;
+					}
+
+					$run['step'] = 'raw';
+					try {
+						$params       = array(
+							'amount'                       => 1234,
+							'currency'                     => 'usd',
+							'description'                  => 'STWC diag POS-31F D5',
+							'metadata'                     => array( 'stwc_test' => 'pos31f_diag' ),
+							'capture_method'               => 'automatic',
+							'allowed_payment_method_types' => array( 'card_present' ),
+						);
+						$raw          = $service->get_stripe_client()->paymentIntents->create( $params, array( 'idempotency_key' => $this->diag_key() ) )->toArray();
+						$run['ids'][] = $raw['id'];
+						$raw_fields   = array_intersect_key( $raw, array_flip( array( 'payment_method_types', 'status' ) ) );
+					} catch ( \Throwable $e ) {
+						$raw_fields = $this->diag_thrown( $e );
+					}
+					$this->diag( $service, 'D5 raw', $raw_fields );
+					$this->diag( $service, 'D5 service', is_wp_error( $result ) ? $this->diag_error( $result ) : $this->diag_intent( $result ) );
+
+					if ( ! isset( $raw['payment_method_types'] ) || \in_array( 'card_present', $raw['payment_method_types'], true ) ) {
+						$this->markTestIncomplete( 'Stripe did not drop card_present on an account without card_present_payments' );
+					}
+					$this->assertInstanceOf( \WP_Error::class, $result, 'the guard must refuse an intent created without card_present' );
+					$this->assertSame( 'card_present_unavailable', $result->get_error_code(), $result->get_error_message() );
+					$this->assertSame( 'canceled', $service->get_stripe_client()->paymentIntents->retrieve( $service_id )->status );
+				} finally {
+					foreach ( array_unique( $run['ids'] ) as $intent_id ) {
+						try {
+							$service->get_stripe_client()->paymentIntents->cancel( $intent_id );
+						} catch ( \Throwable $e ) {
+							unset( $e );
+						}
+					}
+					try {
+						$platform->accounts->delete( $acct_id );
+					} catch ( \Throwable $e ) {
+						unset( $e );
+					}
+				}
+			}
+		);
+	}
+
+	/** A test-mode US Custom account with card_payments and transfers requested, and no card_present_payments. */
+	private function diag_account_params(): array {
+		return array(
+			'type'             => 'custom',
+			'country'          => 'US',
+			'email'            => 'stwc-diag-31f@example.com',
+			'business_type'    => 'individual',
+			'capabilities'     => array(
+				'card_payments' => array( 'requested' => true ),
+				'transfers'     => array( 'requested' => true ),
+			),
+			'business_profile' => array(
+				'mcc' => '5734',
+				'url' => 'https://example.com',
+			),
+			'individual'       => array(
+				'first_name' => 'Jenny',
+				'last_name'  => 'Rosen',
+				'dob'        => array(
+					'day'   => 1,
+					'month' => 1,
+					'year'  => 1901,
+				),
+				'ssn_last_4' => '0000',
+				'phone'      => '0000000000',
+				'email'      => 'stwc-diag-31f@example.com',
+				'address'    => array(
+					'line1'       => 'address_full_match',
+					'city'        => 'San Francisco',
+					'state'       => 'CA',
+					'postal_code' => '94103',
+				),
+			),
+			'tos_acceptance'   => array(
+				'date' => time(),
+				'ip'   => '8.8.8.8',
+			),
+			'external_account' => 'btok_us_verified',
+		);
+	}
+
 	/**
 	 * Run a POS-31F diagnostic body: print what a step threw, clean up, then assert the first create ran.
 	 *
