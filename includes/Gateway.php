@@ -198,7 +198,7 @@ class Gateway extends WC_Payment_Gateway {
 				'type'        => 'checkbox',
 				'label'       => __( 'Enable phone order payments via Stripe Terminal', 'stripe-terminal-for-woocommerce' ),
 				'default'     => 'no',
-				'description' => __( 'Allows merchants to key in card details on the reader for phone orders. Requires MOTO permissions enabled on your Stripe account — contact Stripe support to request access. Only works with S700, S710, and WisePOS E readers.', 'stripe-terminal-for-woocommerce' ),
+				'description' => __( 'Lets you key in card details on the reader for phone and mail orders. In WooCommerce POS 2.0 the Phone Order checkbox is on the checkout\'s Legacy tab: choose Stripe Terminal there and connect an S700, S710 or WisePOS E reader. Requires MOTO to be enabled on your Stripe account; contact Stripe support to request access.', 'stripe-terminal-for-woocommerce' ),
 			),
 			'enable_reader_keep_warm' => array(
 				'title'       => __( 'Reader Keep-Warm (Experimental)', 'stripe-terminal-for-woocommerce' ),
