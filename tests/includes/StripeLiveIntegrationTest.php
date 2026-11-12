@@ -248,6 +248,236 @@ class StripeLiveIntegrationTest extends TestCase {
 		}
 	}
 
+	/** POS-31F diagnostic D1: does a fresh server-provider intent carry card_present, and does it dispatch? */
+	public function test_pos31f_diag_server_intent_create_and_dispatch(): void {
+		$this->require_stripe_test_key();
+		$this->diag_run(
+			'D1',
+			function ( StripeTerminalService $service, array &$run ): void {
+				$intent = $service->create_server_payment_intent( 1234, $this->currency_the_account_takes_in_person(), 'STWC diag POS-31F D1', array( 'stwc_test' => 'pos31f_diag' ), $this->diag_key(), false );
+				if ( is_wp_error( $intent ) ) {
+					$this->diag( $service, 'D1', array( 'create' => $this->diag_error( $intent ) ) );
+					$this->markTestIncomplete( 'create_server_payment_intent returned a WP_Error; see the POS31F-DIAG line.' );
+				}
+				$this->assertArrayHasKey( 'id', $intent );
+				$run['ids'][] = $intent['id'];
+				try {
+					$headers        = $service->get_stripe_client()->paymentIntents->retrieve( $intent['id'] )->getLastResponse()->headers;
+					$stripe_version = $headers['Stripe-Version'] ?? $headers['stripe-version'] ?? null;
+				} catch ( \Throwable $e ) {
+					$stripe_version = $this->diag_thrown( $e );
+				}
+				$sdk_api_version = \Stripe\Util\ApiVersion::CURRENT;
+				$this->diag( $service, 'D1', $this->diag_intent( $intent ) + compact( 'stripe_version', 'sdk_api_version' ) );
+				$run['step'] = 'dispatch';
+				$this->diag( $service, 'D1', array( 'dispatch' => $this->diag_dispatch( $service, $run, $intent['id'] ) ) );
+			}
+		);
+	}
+
+	/** POS-31F diagnostic D2: what does a replay return when the key was first used with other parameters? */
+	public function test_pos31f_diag_replay_with_other_params(): void {
+		$this->require_stripe_test_key();
+		$this->diag_run(
+			'D2',
+			function ( StripeTerminalService $service, array &$run ): void {
+				$key          = $this->diag_key();
+				$first        = $this->diag_card_intent( $service, array( 'idempotency_key' => $key ) );
+				$run['ids'][] = $first['id'];
+				$this->diag( $service, 'D2', array( 'first' => $this->diag_intent( $first ) ) );
+				$run['step'] = 'replay';
+				$replay      = $service->create_server_payment_intent( 1234, $this->currency_the_account_takes_in_person(), 'STWC diag POS-31F D2', array( 'stwc_test' => 'pos31f_diag' ), $key, false );
+				$this->diag( $service, 'D2', array( 'replay' => $this->diag_replay( $replay, $first['id'], $run ) ) );
+			}
+		);
+	}
+
+	/** POS-31F diagnostic D3: what does a replay return after the intent was cancelled, and does it dispatch? */
+	public function test_pos31f_diag_replay_after_cancel(): void {
+		$this->require_stripe_test_key();
+		$this->diag_run(
+			'D3',
+			function ( StripeTerminalService $service, array &$run ): void {
+				$args  = array( 1234, $this->currency_the_account_takes_in_person(), 'STWC diag POS-31F D3', array( 'stwc_test' => 'pos31f_diag' ), $this->diag_key(), false );
+				$first = $service->create_server_payment_intent( ...$args );
+				if ( is_wp_error( $first ) ) {
+					$this->diag( $service, 'D3', array( 'first' => $this->diag_error( $first ) ) );
+					$this->fail( 'The first create returned a WP_Error; see the POS31F-DIAG line.' );
+				}
+				$run['ids'][] = $first['id'];
+				$first_id     = $first['id'];
+				$run['step']  = 'cancel';
+				$cancel       = $this->diag_error( $service->cancel_payment_intent_by_id( $first_id ) );
+				$run['step']  = 'replay';
+				$replay       = $this->diag_replay( $service->create_server_payment_intent( ...$args ), $first_id, $run );
+				$this->diag( $service, 'D3', compact( 'first_id', 'cancel', 'replay' ) );
+				if ( isset( $replay['id'] ) ) {
+					$run['step'] = 'dispatch';
+					$this->diag( $service, 'D3', array( 'dispatch' => $this->diag_dispatch( $service, $run, $replay['id'] ) ) );
+				}
+			}
+		);
+	}
+
+	/** POS-31F diagnostic D4: Stripe's exact dispatch refusal for an intent without card_present. */
+	public function test_pos31f_diag_card_only_dispatch_message(): void {
+		$this->require_stripe_test_key();
+		$this->diag_run(
+			'D4',
+			function ( StripeTerminalService $service, array &$run ): void {
+				$intent               = $this->diag_card_intent( $service, array() );
+				$run['ids'][]         = $intent['id'];
+				$payment_method_types = $intent['payment_method_types'] ?? null;
+				$run['step']          = 'dispatch';
+				$plain                = $this->diag_dispatch( $service, $run, $intent['id'] );
+				$moto                 = $this->diag_dispatch( $service, $run, $intent['id'], array( 'moto' => true ) );
+				$matches_sentry       = 'PaymentIntent must accept an in-person payment method.' === ( $plain['message'] ?? null );
+				$this->diag( $service, 'D4', compact( 'payment_method_types', 'plain', 'moto', 'matches_sentry' ) );
+			}
+		);
+	}
+
+	/**
+	 * Run a POS-31F diagnostic body: print what a step threw, clean up, then assert the first create ran.
+	 *
+	 * @param string   $id   Diagnostic id.
+	 * @param callable $body Receives the service and the run state (step, ids, reader, created) by reference.
+	 * @throws \PHPUnit\Framework\AssertionFailedError A failure, skip or incomplete from the body.
+	 */
+	private function diag_run( string $id, callable $body ): void {
+		Monkey\setUp();
+		$service = null;
+		$run     = array(
+			'step'    => 'create',
+			'ids'     => array(),
+			'reader'  => null,
+			'created' => array(),
+		);
+		try {
+			$this->stub_service_functions();
+			$service = new StripeTerminalService( $this->secret_key );
+			$body( $service, $run );
+		} catch ( \PHPUnit\Framework\AssertionFailedError $e ) {
+			throw $e;
+		} catch ( \Throwable $e ) {
+			$this->diag( $service, $id, array( $run['step'] => $this->diag_thrown( $e ) ) );
+		} finally {
+			if ( null !== $run['reader'] ) {
+				$service->cancel_reader_action( $run['reader'] ); // Catches Stripe errors itself; the result is ignored.
+			}
+			foreach ( array_unique( $run['ids'] ) as $intent_id ) {
+				$this->cancel_quietly( $intent_id );
+			}
+			$this->delete_created( $run['created'] );
+			Monkey\tearDown();
+		}
+		$this->assertNotEmpty( $run['ids'], 'the first create ran and returned an id' );
+	}
+
+	/**
+	 * Print one POS31F-DIAG finding line to STDERR, with the SDK client class.
+	 *
+	 * @param StripeTerminalService|null $service The service.
+	 * @param string                     $id      Diagnostic id.
+	 * @param array                      $fields  Findings.
+	 */
+	private function diag( ?StripeTerminalService $service, string $id, array $fields ): void {
+		$fields['sdk'] = $service ? get_class( $service->get_stripe_client() ) : null;
+		fwrite( STDERR, 'POS31F-DIAG ' . $id . ' ' . json_encode( $fields, JSON_UNESCAPED_SLASHES ) . "\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode, WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- CI diagnostic; wp_json_encode is not loaded.
+	}
+
+	/** A fresh diagnostic idempotency key. */
+	private function diag_key(): string {
+		return 'stwc-diag-31f-' . bin2hex( random_bytes( 6 ) );
+	}
+
+	/**
+	 * A raw client create that allows only `card`, as an array.
+	 *
+	 * @param StripeTerminalService $service The service.
+	 * @param array                 $opts    Request options.
+	 */
+	private function diag_card_intent( StripeTerminalService $service, array $opts ): array {
+		$params = array(
+			'amount'                       => 1234,
+			'currency'                     => $this->currency_the_account_takes_in_person(),
+			'allowed_payment_method_types' => array( 'card' ),
+		);
+		return $service->get_stripe_client()->paymentIntents->create( $params, $opts )->toArray();
+	}
+
+	/**
+	 * The fields printed for an intent.
+	 *
+	 * @param array $intent PaymentIntent.
+	 */
+	private function diag_intent( array $intent ): array {
+		return array_intersect_key( $intent, array_flip( array( 'id', 'status', 'payment_method_types' ) ) );
+	}
+
+	/**
+	 * The code, message and Stripe code of an error, or `ok` for a result that is not one.
+	 *
+	 * @param mixed $result Service result.
+	 * @return array|string
+	 */
+	private function diag_error( $result ) {
+		if ( ! is_wp_error( $result ) ) {
+			return 'ok';
+		}
+		return array(
+			'code'        => $result->get_error_code(),
+			'message'     => $result->get_error_message(),
+			'stripe_code' => ( (array) $result->get_error_data() )['stripe_code'] ?? null,
+		);
+	}
+
+	/**
+	 * A thrown step, by class and message.
+	 *
+	 * @param \Throwable $e What the step threw.
+	 */
+	private function diag_thrown( \Throwable $e ): array {
+		return array(
+			'error'   => get_class( $e ),
+			'message' => $e->getMessage(),
+		);
+	}
+
+	/**
+	 * Dispatch an intent to a simulated reader: `ok`, the error fields, or what it threw.
+	 *
+	 * @param StripeTerminalService $service   The service.
+	 * @param array                 $run       Run state; the reader is found once and kept for cleanup.
+	 * @param string                $intent_id PaymentIntent ID.
+	 * @param array                 $config    Process config.
+	 * @return array|string
+	 */
+	private function diag_dispatch( StripeTerminalService $service, array &$run, string $intent_id, array $config = array() ) {
+		$run['reader'] = $run['reader'] ?? $this->simulated_reader( $run['created'] );
+		try {
+			return $this->diag_error( $service->process_payment_intent( $run['reader'], $intent_id, $config ) );
+		} catch ( \Throwable $e ) {
+			return $this->diag_thrown( $e );
+		}
+	}
+
+	/**
+	 * A replayed create: the error fields, or the intent compared with the first.
+	 *
+	 * @param mixed  $replay   Service result.
+	 * @param string $first_id The first intent's ID.
+	 * @param array  $run      Run state; a returned intent is added for cleanup.
+	 * @return array|string
+	 */
+	private function diag_replay( $replay, string $first_id, array &$run ) {
+		if ( is_wp_error( $replay ) || ! isset( $replay['id'] ) ) {
+			return $this->diag_error( $replay );
+		}
+		$run['ids'][] = $replay['id'];
+		return array( 'same_id' => $first_id === $replay['id'] ) + $this->diag_intent( $replay );
+	}
+
 	/** WordPress functions the service calls, with the account country never cached. */
 	private function stub_service_functions(): void {
 		Functions\stubTranslationFunctions();
@@ -272,6 +502,16 @@ class StripeLiveIntegrationTest extends TestCase {
 			}
 		}
 		$this->fail( 'No candidate currency is outside the in-person currencies of ' . $country );
+	}
+
+	/** The first currency the service's own country map gives the account country. */
+	private function currency_the_account_takes_in_person(): string {
+		$country = (string) \Stripe\Account::retrieve()->country;
+		$method  = new \ReflectionMethod( StripeTerminalService::class, 'currencies_for_country' );
+		$method->setAccessible( true );
+		$supported = $method->invoke( new StripeTerminalService( $this->secret_key ), $country );
+		$this->assertNotEmpty( $supported, 'The service gives no in-person currency for ' . $country );
+		return (string) reset( $supported );
 	}
 
 	/**

@@ -245,6 +245,43 @@ jobs:
         env:
           STWC_STRIPE_TEST_SECRET_KEY: ${{ secrets.STWC_STRIPE_TEST_SECRET_KEY }}
 
+      # POS-31F diagnostics print facts as POS31F-DIAG lines; the run's summary collects them.
+      - name: POS-31F diagnostic (dev SDK)
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          if [ -z "${STWC_STRIPE_TEST_SECRET_KEY}" ]; then
+            echo "STWC_STRIPE_TEST_SECRET_KEY is not set; skipping the POS-31F diagnostic."
+            exit 0
+          fi
+          vendor/bin/phpunit --configuration phpunit.xml.dist --filter 'StripeLiveIntegrationTest::test_pos31f_diag_' 2>&1 | tee "$RUNNER_TEMP/diag-dev.log" || status=$?
+          status=${status:-0}
+          { echo '### POS-31F diagnostic (dev SDK)'; echo '```'; grep -h '^POS31F-DIAG' "$RUNNER_TEMP/diag-dev.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+        env:
+          STWC_STRIPE_TEST_SECRET_KEY: ${{ secrets.STWC_STRIPE_TEST_SECRET_KEY }}
+
+      # Runs after the dev-SDK step: it rewrites the tree as the Scoped release build job does.
+      - name: POS-31F diagnostic (scoped SDK)
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          if [ -z "${STWC_STRIPE_TEST_SECRET_KEY}" ]; then
+            echo "STWC_STRIPE_TEST_SECRET_KEY is not set; skipping the POS-31F diagnostic."
+            exit 0
+          fi
+          composer install --no-interaction --prefer-dist
+          bash scripts/scope-release.sh --keep-dev
+          php php-scoper/scope-source.php rewrite tests
+          mkdir -p "$RUNNER_TEMP/ini"
+          printf 'auto_prepend_file=%s/vendor_prefixed/autoload.php\n' "$PWD" > "$RUNNER_TEMP/ini/zz-prepend.ini"
+          PHP_INI_SCAN_DIR=":$RUNNER_TEMP/ini" php vendor/bin/phpunit --configuration phpunit.xml.dist --filter 'StripeLiveIntegrationTest::test_pos31f_diag_' 2>&1 | tee "$RUNNER_TEMP/diag-scoped.log" || status=$?
+          status=${status:-0}
+          { echo '### POS-31F diagnostic (scoped SDK)'; echo '```'; grep -h '^POS31F-DIAG' "$RUNNER_TEMP/diag-scoped.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+        env:
+          STWC_STRIPE_TEST_SECRET_KEY: ${{ secrets.STWC_STRIPE_TEST_SECRET_KEY }}
+
   e2e-tests:
     name: E2E Tests
     # Pinned: ubuntu-latest became 26.04 on 2026-10-29 and Playwright has no
