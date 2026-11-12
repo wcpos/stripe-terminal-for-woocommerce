@@ -207,4 +207,100 @@ class StripeServerProviderCreateActionTest extends ServerTestCase {
 		$this->assertStringEndsWith( '/terminal/readers/tmr_test', end( $this->http->requests )['url'] );
 		$this->assertCount( 5, $this->http->requests );
 	}
+
+	/** POS-31F: on endive Stripe drops an incompatible `card_present` instead of refusing the create. */
+	public function test_intent_without_card_present_is_cancelled_and_refused_before_dispatch(): void {
+		$this->order();
+		$provider = $this->provider( array( $this->ok( $this->intent( array( 'payment_method_types' => array( 'card' ) ) ) ), $this->ok( $this->intent( array( 'status' => 'canceled' ) ) ) ) );
+		$error    = $provider->create_reader_action( $this->row(), 'tmr_test' );
+		$this->assert_provider_error( $error, 'card_present_unavailable' );
+		$this->assertStringContainsString( 'USD', $error->get_error_message() );
+		$this->assertStringContainsString( '12.50', $error->get_error_message() );
+		$this->assertCount( 2, $this->http->requests, 'the create and the cancel; no reader dispatch' );
+		$this->assertSame( 'post', $this->http->requests[1]['method'] );
+		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[1]['url'] );
+	}
+
+	/**
+	 * A cancel Stripe refuses or does not answer still leaves the intent off the reader.
+	 *
+	 * @dataProvider failed_cancels
+	 * @param array|\Throwable $cancel The cancel's answer.
+	 */
+	public function test_failed_cancel_still_refuses_without_dispatch( $cancel ): void {
+		$this->order();
+		$provider = $this->provider( array( $this->ok( $this->intent( array( 'payment_method_types' => array( 'card' ) ) ) ), $cancel ) );
+		$this->assert_provider_error( $provider->create_reader_action( $this->row(), 'tmr_test' ), 'card_present_unavailable' );
+		$this->assertCount( 2, $this->http->requests );
+		$this->assertStringEndsWith( '/payment_intents/pi_test/cancel', $this->http->requests[1]['url'] );
+	}
+
+	/** Cancel answers that fail. */
+	public function failed_cancels(): array {
+		return array( array( $this->error( 'payment_intent_unexpected_state' ) ), array( \Stripe\Exception\ApiConnectionException::factory( 'Connection lost' ) ) );
+	}
+
+	/** A replay under the row's key returns the intent already cancelled here: same refusal, no second cancel. */
+	public function test_replayed_cancelled_intent_without_card_present_is_refused_without_a_request(): void {
+		$this->order();
+		$provider = $this->provider(
+			array(
+				$this->ok(
+					$this->intent(
+						array(
+							'status'               => 'canceled',
+							'payment_method_types' => array(),
+						)
+					)
+				),
+			)
+		);
+		$this->assert_provider_error( $provider->create_reader_action( $this->row(), 'tmr_test' ), 'card_present_unavailable' );
+		$this->assertCount( 1, $this->http->requests );
+	}
+
+	/** An intent that may hold money is never refused here: the existing dispatch flow decides. */
+	public function test_paid_intent_without_card_present_passes_through_to_dispatch(): void {
+		$this->order();
+		$provider = $this->provider(
+			array(
+				$this->ok(
+					$this->intent(
+						array(
+							'status'               => 'succeeded',
+							'amount_received'      => 1250,
+							'payment_method_types' => array( 'card' ),
+						)
+					)
+				),
+				$this->ok( array( 'id' => 'tmr_test' ) ),
+			)
+		);
+		$this->assertSame( 'pi_test', $provider->create_reader_action( $this->row(), 'tmr_test' )['ref'] );
+		$this->assertCount( 2, $this->http->requests );
+		$this->assertStringEndsWith( '/terminal/readers/tmr_test/process_payment_intent', $this->http->requests[1]['url'] );
+	}
+
+	/** Losing only Interac leaves a CAD intent a reader can take. */
+	public function test_cad_intent_without_interac_dispatches(): void {
+		$this->order();
+		Functions\when( 'get_transient' )->justReturn( 'CA' );
+		$provider = $this->provider(
+			array(
+				$this->ok(
+					$this->intent(
+						array(
+							'currency'             => 'cad',
+							'payment_method_types' => array( 'card_present' ),
+						)
+					)
+				),
+				$this->ok( array( 'id' => 'tmr_test' ) ),
+			)
+		);
+		$this->assertSame( 'pi_test', $provider->create_reader_action( $this->row( 'CAD' ), 'tmr_test' )['ref'] );
+		$this->assertSame( array( 'card_present', 'interac_present' ), $this->http->requests[0]['params']['allowed_payment_method_types'] );
+		$this->assertCount( 2, $this->http->requests );
+		$this->assertStringEndsWith( '/terminal/readers/tmr_test/process_payment_intent', $this->http->requests[1]['url'] );
+	}
 }
