@@ -344,20 +344,21 @@ class StripeLiveIntegrationTest extends TestCase {
 			'D5',
 			function ( StripeTerminalService $service, array &$run ): void {
 				$platform = $service->get_stripe_client();
-				$country  = \Stripe\Account::retrieve()->country;
+				$country  = $this->diag_ignoring_stripe_notices( fn() => \Stripe\Account::retrieve()->country );
 				if ( 'US' !== $country ) {
 					$this->diag( $service, 'D5', array( 'skipped' => 'platform country ' . $country ) );
 					$this->markTestSkipped( 'D5 needs a US platform account.' );
 				}
 				$run['step'] = 'account';
+				$this->diag( $service, 'D5 sweep', $this->diag_sweep_accounts( $platform ) );
 				try {
-					$acct_id = $platform->accounts->create( $this->diag_account_params() )->id;
+					$acct_id = $this->diag_ignoring_stripe_notices( fn() => $platform->accounts->create( $this->diag_account_params() )->id );
 				} catch ( \Throwable $e ) {
 					$this->diag( $service, 'D5', array( 'account' => $this->diag_thrown( $e ) ) );
 					$this->markTestSkipped( 'Could not create a Custom connected account; see the POS31F-DIAG line.' );
 				}
 				try {
-					$account = $platform->accounts->retrieve( $acct_id )->toArray();
+					$account = $this->diag_ignoring_stripe_notices( fn() => $platform->accounts->retrieve( $acct_id )->toArray() );
 					$fields  = array(
 						'id'                    => $acct_id,
 						'card_payments'         => $account['capabilities']['card_payments'] ?? null,
@@ -418,13 +419,53 @@ class StripeLiveIntegrationTest extends TestCase {
 						}
 					}
 					try {
-						$platform->accounts->delete( $acct_id );
+						$this->diag_ignoring_stripe_notices( fn() => $platform->accounts->delete( $acct_id ) );
 					} catch ( \Throwable $e ) {
 						unset( $e );
 					}
 				}
 			}
 		);
+	}
+
+	/**
+	 * Run a Connect account call with stripe-php's Stripe-Notice E_USER_WARNING swallowed; other levels return false.
+	 *
+	 * @param callable $call The account call.
+	 * @return mixed What the call returned.
+	 */
+	private function diag_ignoring_stripe_notices( callable $call ) {
+		set_error_handler( fn( int $errno ): bool => E_USER_WARNING === $errno ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- the Accounts v2 notice must not fail D5.
+		try {
+			return $call();
+		} finally {
+			restore_error_handler();
+		}
+	}
+
+	/**
+	 * Delete diag accounts left by earlier D5 runs: `deleted` count, or what the list threw.
+	 *
+	 * @param \Stripe\StripeClient $platform The platform client.
+	 */
+	private function diag_sweep_accounts( $platform ): array {
+		try {
+			$accounts = $this->diag_ignoring_stripe_notices( fn() => $platform->accounts->all( array( 'limit' => 20 ) )->data );
+		} catch ( \Throwable $e ) {
+			return $this->diag_thrown( $e );
+		}
+		$deleted = 0;
+		foreach ( $accounts as $account ) {
+			try {
+				if ( 'stwc-diag-31f@example.com' === $account->email ) {
+					$this->diag_ignoring_stripe_notices( fn() => $platform->accounts->delete( $account->id ) );
+					++$deleted;
+				}
+			} catch ( \Throwable $e ) {
+				unset( $e );
+			}
+		}
+		return array( 'deleted' => $deleted );
 	}
 
 	/** A test-mode US Custom account with card_payments and transfers requested, and no card_present_payments. */
