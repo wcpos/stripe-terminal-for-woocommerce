@@ -2,6 +2,10 @@
 
 ## 2.0.1
 
+### Changed
+
+- The **Phone Orders (MOTO)** setting now says where the Phone Order checkbox is in WooCommerce POS 2.0: on the checkout's Legacy tab, with Stripe Terminal chosen and an S700, S710 or WisePOS E reader connected. The checkout opens on the Payments tab, whose Stripe Terminal tile has no keyed entry.
+
 ### Fixed
 
 - Upgrading the plugin in place with "upload and replace" no longer stops with a fatal error (`Call to undefined method ... Settings::get_wcpos_connections()`). In the upload request the old version's classes are still loaded while the new files are on disk, so the gateway now stays unregistered for that one request and logs why; it registers normally from the next request. (wcpos/roadmap#586)
