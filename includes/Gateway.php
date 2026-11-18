@@ -198,7 +198,7 @@ class Gateway extends WC_Payment_Gateway {
 				'type'        => 'checkbox',
 				'label'       => __( 'Enable phone order payments via Stripe Terminal', 'stripe-terminal-for-woocommerce' ),
 				'default'     => 'no',
-				'description' => __( 'Allows merchants to key in card details on the reader for phone orders. Requires MOTO permissions enabled on your Stripe account — contact Stripe support to request access. Only works with S700, S710, and WisePOS E readers.', 'stripe-terminal-for-woocommerce' ),
+				'description' => __( 'Lets you key in card details on the reader for phone and mail orders. In WooCommerce POS 2.0 the Phone Order checkbox is on the checkout\'s Legacy tab: choose Stripe Terminal there and connect an S700, S710 or WisePOS E reader. Requires MOTO to be enabled on your Stripe account; contact Stripe support to request access.', 'stripe-terminal-for-woocommerce' ),
 			),
 			'enable_reader_keep_warm' => array(
 				'title'       => __( 'Reader Keep-Warm (Experimental)', 'stripe-terminal-for-woocommerce' ),
@@ -301,13 +301,56 @@ class Gateway extends WC_Payment_Gateway {
 	}
 
 	/**
-	 * Register the gateway with WooCommerce.
+	 * Per-request cache of is_mixed_version_request().
+	 *
+	 * @var bool|null
+	 */
+	private static $mixed_version_request = null;
+
+	/**
+	 * Whether the version the bootstrap loaded differs from the one on disk.
+	 *
+	 * @param string $loaded  STWC_VERSION as defined by the running bootstrap.
+	 * @param string $on_disk Version header of the main plugin file now on disk.
+	 */
+	public static function version_mismatch( string $loaded, string $on_disk ): bool {
+		return '' !== $loaded && '' !== $on_disk && $loaded !== $on_disk;
+	}
+
+	/**
+	 * An in-place upgrade ("upload and replace") overwrites the plugin files while
+	 * the old bootstrap and classes are already loaded, so this request would mix
+	 * old classes with the new Gateway. Detected once and cached for the request.
+	 */
+	private static function is_mixed_version_request(): bool {
+		if ( null === self::$mixed_version_request ) {
+			self::$mixed_version_request = false;
+			if ( defined( 'STWC_VERSION' ) && defined( 'STWC_PLUGIN_DIR' ) && \function_exists( 'get_file_data' ) ) {
+				$on_disk = get_file_data( STWC_PLUGIN_DIR . 'stripe-terminal-for-woocommerce.php', array( 'Version' => 'Version' ) )['Version'] ?? '';
+
+				self::$mixed_version_request = self::version_mismatch( (string) STWC_VERSION, (string) $on_disk );
+				if ( self::$mixed_version_request ) {
+					Logger::log( sprintf( 'Stripe Terminal Gateway - plugin files were replaced during this request (loaded %s, on disk %s); the gateway is not registered until the next request.', STWC_VERSION, $on_disk ) );
+				}
+			}
+		}
+
+		return self::$mixed_version_request;
+	}
+
+	/**
+	 * Register the gateway with WooCommerce, except in a request whose plugin
+	 * files were replaced mid-request (see is_mixed_version_request()).
 	 *
 	 * @param array $methods Existing payment methods.
 	 *
 	 * @return array Updated payment methods.
 	 */
 	public static function register_gateway( $methods ) {
+		if ( self::is_mixed_version_request() ) {
+			return $methods;
+		}
+
 		$methods[] = __CLASS__;
 
 		return $methods;

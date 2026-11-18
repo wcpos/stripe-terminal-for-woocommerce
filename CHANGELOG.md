@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 2.0.1
+
+### Changed
+
+- The **Phone Orders (MOTO)** setting now says where the Phone Order checkbox is in WooCommerce POS 2.0: on the checkout's Legacy tab, with Stripe Terminal chosen and an S700, S710 or WisePOS E reader connected. The checkout opens on the Payments tab, whose Stripe Terminal tile has no keyed entry.
+
+### Fixed
+
+- Upgrading the plugin in place with "upload and replace" no longer stops with a fatal error (`Call to undefined method ... Settings::get_wcpos_connections()`). In the upload request the old version's classes are still loaded while the new files are on disk, so the gateway now stays unregistered for that one request and logs why; it registers normally from the next request. (wcpos/roadmap#586)
+
+## 2.0.0
 
 ### Changed
 
@@ -30,6 +40,8 @@
 - Automatically register the separate POS webhook endpoint when gateway settings are saved with a Stripe key and supported Pro installed.
 - Key POS PaymentIntent creation idempotently by payment attempt to prevent duplicate intents on retries.
 - Report Dashboard-configured on-reader tips to POS, which records them as a Tip order fee.
+- Bluetooth readers (Stripe Reader M2, WisePad 3) and Tap to Pay on iPhone and Android take payments in the WooCommerce POS 2.0 mobile app. They register to the Terminal location chosen for the test or live mode on the gateway page. (#120)
+- New gateway settings for smart readers: **Default terminal**, **Enabled terminals** and **Lock terminal selection** choose the reader POS checkout uses by default, which readers a till may pick, and whether cashiers can change it. (#119)
 
 ## 0.0.40 - 2026-10-17
 
