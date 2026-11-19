@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up PHP 8.2
         uses: shivammathur/setup-php@v2
@@ -56,7 +56,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up PHP 8.2
         uses: shivammathur/setup-php@v2
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up PHP ${{ matrix.php }}
         uses: shivammathur/setup-php@v2
@@ -161,7 +161,7 @@ jobs:
 
     steps:
       - name: Checkout extension
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: stripe-terminal-for-woocommerce
           persist-credentials: false
@@ -171,7 +171,7 @@ jobs:
       # scoped to contents:read on the private Pro repo. Fork PRs get no secrets and stop here by design.
       - name: Read-only Pro token
         id: pro-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.WCPOS_BOT_APP_ID }}
           private-key: ${{ secrets.WCPOS_BOT_PRIVATE_KEY }}
@@ -180,7 +180,7 @@ jobs:
           permission-contents: read
 
       - name: Checkout Pro main as sibling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: wcpos/woocommerce-pos-pro
           ref: main
@@ -224,7 +224,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up PHP 8.2
         uses: shivammathur/setup-php@v2
@@ -254,7 +254,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -274,7 +274,7 @@ jobs:
       # scoped to contents:read on the private Pro repo.
       - name: Read-only Pro token
         id: pro-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.WCPOS_BOT_APP_ID }}
           private-key: ${{ secrets.WCPOS_BOT_PRIVATE_KEY }}
@@ -283,7 +283,7 @@ jobs:
           permission-contents: read
 
       - name: Checkout Pro main into the E2E site
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           repository: wcpos/woocommerce-pos-pro
           ref: main
