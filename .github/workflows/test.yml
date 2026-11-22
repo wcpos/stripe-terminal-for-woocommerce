@@ -150,6 +150,8 @@ jobs:
   conformance:
     name: Conformance PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
+    # Dependabot runs get no secrets, so the Pro token step cannot run; see pro-checks-skipped.
+    if: github.actor != 'dependabot[bot]'
     needs: php-lint
     strategy:
       fail-fast: false
@@ -250,6 +252,8 @@ jobs:
     # Pinned: ubuntu-latest became 26.04 on 2026-10-29 and Playwright has no
     # chromium build for it ("does not support chromium on ubuntu26.04-x64").
     runs-on: ubuntu-24.04
+    # Dependabot runs get no secrets, so the Pro token step cannot run; see pro-checks-skipped.
+    if: github.actor != 'dependabot[bot]'
     needs: php-tests
 
     steps:
@@ -350,3 +354,12 @@ jobs:
         if: always()
         working-directory: e2e
         run: docker compose down -v
+
+  pro-checks-skipped:
+    name: Pro checks skipped (Dependabot)
+    # Runs only when the Pro-token jobs above skip, so a Dependabot PR shows why.
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain the skip
+        run: echo "::notice title=Pro checks skipped::Conformance and E2E need the read-only WooCommerce POS Pro token, which Dependabot runs do not receive. They run on the next push to main by a person or the machine; Dependabot's auto-merge does not start them."
