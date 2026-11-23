@@ -466,6 +466,7 @@ class AjaxHandlerTest extends TestCase {
 			'nonce'     => 'test_nonce',
 			'reader_id' => 'tmr_test_123',
 		);
+		Functions\when( 'current_user_can' )->justReturn( true );
 
 		$mock_service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
 		$mock_service->shouldReceive( 'get_reader_status' )
@@ -755,6 +756,178 @@ class AjaxHandlerTest extends TestCase {
 
 		$this->assertIsArray( $error );
 		$this->assertSame( 'reader_action_changed', $error['code'] );
+	}
+
+	// -------------------------------------------------------------------
+	// Order binding of posted payment intents and reader state
+	// -------------------------------------------------------------------
+
+	/**
+	 * Order 42, unpaid, whose key is posted with every request below.
+	 */
+	private function order_key_request( array $fields ): void {
+		$_POST = array_merge(
+			array(
+				'order_id'  => '42',
+				'order_key' => 'wc_order_current',
+			),
+			$fields
+		);
+		$order = \Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_order_key' )->andReturn( 'wc_order_current' );
+		$order->shouldReceive( 'needs_payment' )->andReturn( true );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+		Functions\when( 'wc_get_order' )->justReturn( $order );
+		Functions\when( 'wp_send_json_success' )->alias(
+			function ( $data = null ) {
+				throw new JsonSuccessSentinel( $data );
+			}
+		);
+	}
+
+	/**
+	 * Run a handler method and return [ 'success'|'error', data ].
+	 */
+	private function run_handler( AjaxHandler $handler, string $method ): array {
+		try {
+			$handler->$method();
+		} catch ( JsonSuccessSentinel $e ) {
+			return array( 'success', $e->data );
+		} catch ( JsonErrorSentinel $e ) {
+			return array( 'error', $e->data );
+		}
+		$this->fail( 'Expected a JSON response' );
+	}
+
+	private function reader_processing( string $payment_intent_id ): array {
+		return array(
+			'id'     => 'tmr_abc123',
+			'label'  => 'Front counter',
+			'status' => 'online',
+			'action' => array(
+				'status'                 => 'in_progress',
+				'type'                   => 'process_payment_intent',
+				'process_payment_intent' => array( 'payment_intent' => $payment_intent_id ),
+			),
+		);
+	}
+
+	public function test_cancel_payment_refuses_an_intent_that_belongs_to_another_order(): void {
+		$this->order_key_request(
+			array(
+				'payment_intent_id' => 'pi_other_order',
+				'reader_id'         => 'tmr_abc123',
+			)
+		);
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldReceive( 'payment_intent_belongs_to_order' )->andReturn( false );
+		$service->shouldReceive( 'get_reader' )->andReturn( $this->reader_processing( 'pi_other_order' ) );
+		$service->shouldReceive( 'cancel_reader_action' )->never();
+		$service->shouldReceive( 'cancel_payment_intent' )->never();
+
+		list( $outcome ) = $this->run_handler( new AjaxHandler( $service ), 'cancel_payment' );
+
+		$this->assertSame( 'error', $outcome );
+	}
+
+	public function test_cancel_payment_leaves_a_reader_that_is_processing_another_intent(): void {
+		$this->order_key_request(
+			array(
+				'payment_intent_id' => 'pi_this_order',
+				'reader_id'         => 'tmr_abc123',
+			)
+		);
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldReceive( 'payment_intent_belongs_to_order' )->andReturn( true );
+		$service->shouldReceive( 'get_reader' )->with( 'tmr_abc123' )->andReturn( $this->reader_processing( 'pi_other_order' ) );
+		$service->shouldReceive( 'cancel_reader_action' )->never();
+		$service->shouldReceive( 'cancel_payment_intent' )
+			->once()
+			->with( 'pi_this_order', \Mockery::any() )
+			->andReturn( array( 'id' => 'pi_this_order', 'status' => 'canceled' ) );
+
+		list( $outcome ) = $this->run_handler( new AjaxHandler( $service ), 'cancel_payment' );
+
+		$this->assertSame( 'success', $outcome );
+	}
+
+	public function test_cancel_payment_clears_the_reader_that_is_processing_this_intent(): void {
+		$this->order_key_request(
+			array(
+				'payment_intent_id' => 'pi_this_order',
+				'reader_id'         => 'tmr_abc123',
+			)
+		);
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldReceive( 'payment_intent_belongs_to_order' )->andReturn( true );
+		$service->shouldReceive( 'get_reader' )->with( 'tmr_abc123' )->andReturn( $this->reader_processing( 'pi_this_order' ) );
+		$service->shouldReceive( 'cancel_reader_action' )->once()->with( 'tmr_abc123' )->andReturn( array( 'id' => 'tmr_abc123' ) );
+		$service->shouldReceive( 'cancel_payment_intent' )
+			->once()
+			->with( 'pi_this_order', \Mockery::any() )
+			->andReturn( array( 'id' => 'pi_this_order', 'status' => 'canceled' ) );
+
+		list( $outcome ) = $this->run_handler( new AjaxHandler( $service ), 'cancel_payment' );
+
+		$this->assertSame( 'success', $outcome );
+	}
+
+	public function test_confirm_payment_refuses_an_intent_that_belongs_to_another_order(): void {
+		$this->order_key_request( array( 'payment_intent_id' => 'pi_other_order' ) );
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldReceive( 'payment_intent_belongs_to_order' )->andReturn( false );
+		$service->shouldReceive( 'confirm_payment_intent' )->never();
+
+		list( $outcome ) = $this->run_handler( new AjaxHandler( $service ), 'confirm_payment' );
+
+		$this->assertSame( 'error', $outcome );
+	}
+
+	public function test_get_readers_omits_reader_actions(): void {
+		$this->order_key_request( array() );
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldReceive( 'get_reader_status' )
+			->once()
+			->withNoArgs()
+			->andReturn( array( 'data' => array( $this->reader_processing( 'pi_other_order' ) ) ) );
+
+		list( $outcome, $data ) = $this->run_handler( new AjaxHandler( $service ), 'get_readers' );
+
+		$this->assertSame( 'success', $outcome );
+		$this->assertSame( 1, $data['count'] );
+		$this->assertSame( 'tmr_abc123', $data['readers'][0]['id'] );
+		$this->assertSame( 'Front counter', $data['readers'][0]['label'] );
+		$this->assertSame( 'online', $data['readers'][0]['status'] );
+		$this->assertArrayNotHasKey( 'action', $data['readers'][0] );
+	}
+
+	public function test_get_reader_status_for_an_order_omits_the_reader_action(): void {
+		$this->order_key_request( array( 'reader_id' => 'tmr_abc123' ) );
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldReceive( 'get_reader_status' )
+			->once()
+			->with( 'tmr_abc123' )
+			->andReturn( $this->reader_processing( 'pi_other_order' ) + array( 'last_seen_at' => 1700000000 ) );
+
+		list( $outcome, $data ) = $this->run_handler( new AjaxHandler( $service ), 'get_reader_status' );
+
+		$this->assertSame( 'success', $outcome );
+		$this->assertSame( 1700000000, $data['last_seen_at'] );
+		$this->assertArrayNotHasKey( 'action', $data );
+	}
+
+	public function test_get_reader_status_without_an_order_requires_the_management_capability(): void {
+		$_POST = array(
+			'nonce'     => 'test_nonce',
+			'reader_id' => 'tmr_abc123',
+		);
+		Functions\when( 'current_user_can' )->justReturn( false );
+		$service = \Mockery::mock( \WCPOS\WooCommercePOS\StripeTerminal\StripeTerminalService::class );
+		$service->shouldReceive( 'get_reader_status' )->never();
+
+		list( $outcome ) = $this->run_handler( new AjaxHandler( $service ), 'get_reader_status' );
+
+		$this->assertSame( 'error', $outcome );
 	}
 
 }

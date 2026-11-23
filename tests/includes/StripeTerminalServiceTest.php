@@ -1793,4 +1793,41 @@ class StripeTerminalServiceTest extends TestCase {
 		$this->assertCount( 1, $client->requests );
 		$this->assertStringEndsWith( '/v1/account', $client->requests[0]['url'] );
 	}
+
+	/**
+	 * A posted intent belongs to an order only when Stripe says it was created for that order.
+	 *
+	 * @dataProvider intent_order_metadata_provider
+	 */
+	public function test_payment_intent_belongs_to_order_reads_the_intent_metadata( array $responses, bool $expected ): void {
+		$service = new StripeTerminalService( 'sk_test_fake_key_123' );
+		$client  = $this->install_fake_stripe_client( $responses );
+		$order   = Mockery::mock( 'WC_Order' );
+		$order->shouldReceive( 'get_id' )->andReturn( 42 );
+
+		$this->assertSame( $expected, $service->payment_intent_belongs_to_order( 'pi_posted', $order ) );
+		$this->assertStringContainsString( '/v1/payment_intents/pi_posted', $client->requests[0]['url'] );
+	}
+
+	public function intent_order_metadata_provider(): array {
+		$intent = function ( array $metadata ) {
+			return array(
+				'body'   => array(
+					'id'       => 'pi_posted',
+					'object'   => 'payment_intent',
+					'status'   => 'requires_payment_method',
+					'metadata' => $metadata,
+				),
+				'status' => 200,
+			);
+		};
+
+		return array(
+			'this order'       => array( array( $intent( array( 'order_id' => '42' ) ) ), true ),
+			'another order'    => array( array( $intent( array( 'order_id' => '43' ) ) ), false ),
+			'prefixed number'  => array( array( $intent( array( 'order_id' => '420' ) ) ), false ),
+			'no order id'      => array( array( $intent( array() ) ), false ),
+			'stripe refuses'   => array( array(), false ),
+		);
+	}
 }
