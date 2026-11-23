@@ -338,6 +338,17 @@ class StripeTerminalService {
 	}
 
 	/**
+	 * Whether Stripe says the intent was created for this order, so a posted ID cannot act on another order's payment.
+	 *
+	 * @param string   $payment_intent_id PaymentIntent ID.
+	 * @param WC_Order $order             The WooCommerce order.
+	 */
+	public function payment_intent_belongs_to_order( string $payment_intent_id, WC_Order $order ): bool {
+		$intent = $this->retrieve_payment_intent( $payment_intent_id );
+		return ! is_wp_error( $intent ) && (string) ( $intent['metadata']['order_id'] ?? '' ) === (string) $order->get_id();
+	}
+
+	/**
 	 * Retrieve a charge without order mutations: a historical row may name the charge, not the intent.
 	 *
 	 * @param string      $id      Charge ID.

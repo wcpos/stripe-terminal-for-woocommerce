@@ -259,6 +259,11 @@ class AjaxHandler {
 				return;
 			}
 
+			if ( ! $this->stripe_service->payment_intent_belongs_to_order( $payment_intent_id, $order ) ) {
+				wp_send_json_error( 'Payment intent does not belong to this order' );
+				return;
+			}
+
 			// Confirm payment using the service.
 			$result = $this->stripe_service->confirm_payment_intent( $payment_intent_id, $order );
 
@@ -321,12 +326,25 @@ class AjaxHandler {
 				return;
 			}
 
-			// Cancel the reader action first (clear hardware state).
-			$cancel_result = $this->stripe_service->cancel_reader_action( $reader_id );
-			if ( is_wp_error( $cancel_result ) ) {
-				Logger::log( 'Stripe Terminal AJAX - Failed to clear reader action: ' . $cancel_result->get_error_message() );
-				wp_send_json_error( 'Failed to clear reader action: ' . $cancel_result->get_error_message() );
+			if ( ! $this->stripe_service->payment_intent_belongs_to_order( $payment_intent_id, $order ) ) {
+				wp_send_json_error( 'Payment intent does not belong to this order' );
 				return;
+			}
+
+			// Clear the reader first (hardware state), but only when it is processing this intent.
+			$reader = $this->stripe_service->get_reader( $reader_id );
+			if ( is_wp_error( $reader ) ) {
+				wp_send_json_error( 'Failed to clear reader action: ' . $reader->get_error_message() );
+				return;
+			}
+
+			if ( ( $reader['action']['process_payment_intent']['payment_intent'] ?? '' ) === $payment_intent_id ) {
+				$cancel_result = $this->stripe_service->cancel_reader_action( $reader_id );
+				if ( is_wp_error( $cancel_result ) ) {
+					Logger::log( 'Stripe Terminal AJAX - Failed to clear reader action: ' . $cancel_result->get_error_message() );
+					wp_send_json_error( 'Failed to clear reader action: ' . $cancel_result->get_error_message() );
+					return;
+				}
 			}
 
 			// Then cancel the payment intent.
@@ -383,6 +401,9 @@ class AjaxHandler {
 				}
 			} elseif ( ! $this->verify_ajax_nonce() ) {
 				return;
+			} elseif ( ! current_user_can( 'manage_woocommerce' ) ) {
+				wp_send_json_error( 'Access denied' );
+				return;
 			}
 
 			$result = $this->stripe_service->get_reader_status( $reader_id );
@@ -394,7 +415,7 @@ class AjaxHandler {
 				return;
 			}
 
-			wp_send_json_success( $result );
+			wp_send_json_success( $this->without_reader_actions( $result ) );
 		} catch ( Exception $e ) {
 			Logger::log( 'Stripe Terminal AJAX - Exception in get_reader_status: ' . $e->getMessage() );
 			wp_send_json_error( 'An error occurred while getting reader status: ' . $e->getMessage() );
@@ -487,6 +508,7 @@ class AjaxHandler {
 				return;
 			}
 
+			$result  = $this->without_reader_actions( $result );
 			$readers = $result['data'] ?? array();
 
 			wp_send_json_success(
@@ -1001,6 +1023,21 @@ class AjaxHandler {
 	}
 
 
+
+	/**
+	 * Drop readers' current `action`, which names other registers' payment intents.
+	 *
+	 * @param array $result Reader or reader list result.
+	 */
+	private function without_reader_actions( array $result ): array {
+		unset( $result['action'] );
+		foreach ( \is_array( $result['data'] ?? null ) ? $result['data'] : array() as $key => $reader ) {
+			if ( \is_array( $reader ) ) {
+				unset( $result['data'][ $key ]['action'] );
+			}
+		}
+		return $result;
+	}
 
 	/**
 	 * Send reader processing errors, preserving structured recovery metadata.
